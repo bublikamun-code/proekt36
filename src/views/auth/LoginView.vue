@@ -52,6 +52,108 @@ const continueLocally = async () => {
 </template>
 
 <style scoped>
-.auth-page { min-height: calc(100vh - 66px); display: grid; place-items: center; padding: 48px 16px 80px; background: linear-gradient(90deg, transparent 49.9%, var(--line-soft) 50%, transparent 50.1%), var(--canvas); background-size: 80px 80px; }.auth-card { width: min(100%, 460px); padding: 34px; background: var(--surface-raised); border: 1px solid var(--service); box-shadow: 9px 9px 0 var(--accent-soft); }.auth-heading h1 { margin-top: 9px; font-size: var(--text-2xl); letter-spacing: -.04em; }.auth-heading p { margin-top: 12px; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.55; }.auth-form { display: grid; gap: 15px; margin-top: 28px; }.auth-form label { gap: 7px; }.auth-form input { min-height: 44px; font-size: var(--text-sm); }.auth-submit, .auth-guest { width: 100%; min-height: 46px; font-size: var(--text-xs); font-weight: 800; }.auth-submit { background: var(--service); color: var(--on-service); border-color: var(--service); }.auth-submit:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }.auth-guest { background: transparent; }.auth-error { padding: 9px 11px; background: var(--error-soft); color: var(--error); font-size: var(--text-xs); }.auth-divider { display: flex; align-items: center; gap: 10px; margin: 22px 0 14px; color: var(--text-faint); font:var(--text-micro) var(--mono); }.auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }.auth-note { margin-top: 18px; color: var(--text-faint); font:var(--text-micro)/1.55 var(--mono); }.auth-switch { margin-top: 24px; color: var(--text-muted); font-size: var(--text-xs); text-align: center; }.auth-switch a { color: var(--accent); font-weight: 800; }
-@media (max-width: 620px) { .auth-page { min-height: calc(100vh - 58px); padding: 32px 14px 56px; background-size: 48px 48px; }.auth-card { padding: 24px 20px; box-shadow: 6px 6px 0 var(--accent-soft); } }
+.auth-page {
+  min-height: calc(100vh - 66px);
+  display: grid;
+  place-items: center;
+  padding: 48px 16px 80px;
+  background: linear-gradient(90deg, transparent 49.9%, var(--line-soft) 50%, transparent 50.1%), var(--canvas);
+  background-size: 80px 80px;
+}
+.auth-card {
+  width: min(100%, 460px);
+  padding: 34px;
+  background: var(--surface-raised);
+  border: 1px solid var(--service);
+  box-shadow: 9px 9px 0 var(--accent-soft);
+}
+.auth-heading h1 {
+  margin-top: 9px;
+  font-size: var(--text-2xl);
+  letter-spacing: -.04em;
+}
+.auth-heading p {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.auth-form {
+  display: grid;
+  gap: 15px;
+  margin-top: 28px;
+}
+.auth-form label {
+  gap: 7px;
+}
+.auth-form input {
+  min-height: 44px;
+  font-size: var(--text-sm);
+}
+.auth-submit,
+.auth-guest {
+  width: 100%;
+  min-height: 46px;
+  font-size: var(--text-xs);
+  font-weight: 800;
+}
+.auth-submit {
+  background: var(--service);
+  color: var(--on-service);
+  border-color: var(--service);
+}
+.auth-submit:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.auth-guest {
+  background: transparent;
+}
+.auth-error {
+  padding: 9px 11px;
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: var(--text-xs);
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 14px;
+  color: var(--text-faint);
+  font:var(--text-micro) var(--mono);
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.auth-note {
+  margin-top: 18px;
+  color: var(--text-faint);
+  font:var(--text-micro)/1.55 var(--mono);
+}
+.auth-switch {
+  margin-top: 24px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.auth-switch a {
+  color: var(--accent);
+  font-weight: 800;
+}
+@media (max-width: 620px) {
+  .auth-page {
+    min-height: calc(100vh - 58px);
+    padding: 32px 14px 56px;
+    background-size: 48px 48px;
+  }
+  .auth-card {
+    padding: 24px 20px;
+    box-shadow: 6px 6px 0 var(--accent-soft);
+  }
+}
 </style>

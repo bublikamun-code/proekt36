@@ -217,9 +217,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.app-select { position: relative; display: inline-flex; min-width: 0; }
-.app-select.is-block { display: flex; width: 100%; }
-
+.app-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.app-select.is-block {
+  display: flex;
+  width: 100%;
+}
 .app-select-trigger {
   display: flex;
   align-items: center;
@@ -237,13 +243,32 @@ onBeforeUnmount(() => {
   text-align: left;
   cursor: pointer;
 }
-.app-select.is-empty .app-select-value { color: var(--text-faint); }
-.app-select-trigger:hover:not(:disabled) { border-color: var(--text-faint); }
-.app-select-trigger:disabled { color: var(--text-muted); background: var(--canvas); cursor: not-allowed; }
-.app-select-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-select-caret { width: 9px; height: 6px; flex: 0 0 auto; color: var(--text-muted); transition: transform .14s ease; }
-.app-select.is-open .app-select-caret { transform: rotate(180deg); }
-
+.app-select.is-empty .app-select-value {
+  color: var(--text-faint);
+}
+.app-select-trigger:hover:not(:disabled) {
+  border-color: var(--text-faint);
+}
+.app-select-trigger:disabled {
+  color: var(--text-muted);
+  background: var(--canvas);
+  cursor: not-allowed;
+}
+.app-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-select-caret {
+  width: 9px;
+  height: 6px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: transform .14s ease;
+}
+.app-select.is-open .app-select-caret {
+  transform: rotate(180deg);
+}
 .app-select-listbox {
   position: absolute;
   z-index: 60;
@@ -257,8 +282,9 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 30px -12px rgba(20, 30, 25, .45), 0 2px 6px -2px rgba(20, 30, 25, .22);
   scrollbar-width: thin;
 }
-.app-select-listbox:focus { outline: none; }
-
+.app-select-listbox:focus {
+  outline: none;
+}
 .app-select-option {
   display: block;
   padding: 6px 8px;
@@ -268,9 +294,25 @@ onBeforeUnmount(() => {
   line-height: 1.35;
   cursor: pointer;
 }
-.app-select-option.is-active { background: var(--line-soft); }
-.app-select-option.is-selected { color: var(--accent); font-weight: 700; }
-.app-select-option.is-selected::after { content: ' ✓'; color: var(--accent); }
-.app-select-option.is-disabled { color: var(--text-faint); cursor: not-allowed; }
-.app-select-empty { margin: 0; padding: 8px; color: var(--text-faint); font-size: var(--text-xs); }
+.app-select-option.is-active {
+  background: var(--line-soft);
+}
+.app-select-option.is-selected {
+  color: var(--accent);
+  font-weight: 700;
+}
+.app-select-option.is-selected::after {
+  content: ' ✓';
+  color: var(--accent);
+}
+.app-select-option.is-disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.app-select-empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
 </style>

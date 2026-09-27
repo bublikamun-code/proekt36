@@ -103,46 +103,221 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.public-shell { min-height: 100vh; display: flex; flex-direction: column; background: var(--canvas); }
-.public-header { position: sticky; top: 0; z-index: 40; min-height: 66px; display: flex; align-items: center; gap: 28px; padding: 0 clamp(16px, 4vw, 64px); background: color-mix(in srgb, var(--surface) 94%, transparent); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); }
-.public-brand { display: inline-flex; min-height: 44px; align-items: center; color: inherit; text-decoration: none; }
-.public-nav { display: flex; align-items: center; gap: 22px; }
-.public-nav a, .public-login { min-height: 44px; display: inline-flex; align-items: center; color: var(--text-muted); font-size: var(--text-xs); font-weight: 700; text-decoration: none; }
-.public-nav a:hover, .public-login:hover, .public-nav a.router-link-active { color: var(--heading); }
-.public-nav a.router-link-active { box-shadow: inset 0 -2px var(--accent); }
-.public-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.public-theme, .public-menu-button { width: 44px; min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; background: transparent; font-size: var(--text-lg); }
-.public-cta, .public-login { border: 1px solid var(--service); text-decoration: none; justify-content: center; padding: 0 15px; }
-.public-cta { min-height: 44px; display: inline-flex; align-items: center; background: var(--service); color: var(--on-service); font-size: var(--text-xs); font-weight: 800; }
-.public-cta:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
-.public-login { border-color: transparent; }
-.public-main { flex: 1; }
-.public-footer { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 26px 60px; align-items: start; padding: 34px clamp(16px, 4vw, 64px); background: var(--service); color: var(--on-service); }
-.public-footer-brand p { max-width: 360px; margin-top: 12px; color: color-mix(in srgb, var(--on-service) 68%, transparent); font-size: var(--text-xs); line-height: 1.55; }
-.public-footer nav { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 8px 28px; }
-.public-footer nav a { min-height: 34px; display: flex; align-items: center; color: color-mix(in srgb, var(--on-service) 76%, transparent); font-size: var(--text-xs); text-decoration: none; }
-.public-footer nav a:hover { color: var(--accent); }
-.public-demo-note { grid-column: 1 / -1; padding-top: 18px; border-top: 1px solid color-mix(in srgb, var(--on-service) 18%, transparent); color: color-mix(in srgb, var(--on-service) 52%, transparent); font:var(--text-micro) var(--mono); }
-.public-mobile-menu { position: absolute; top: 100%; left: 0; right: 0; display: none; padding: 10px 16px 16px; background: var(--surface); border-bottom: 1px solid var(--service); box-shadow: var(--shadow); }
-.public-menu-button { display: none; }
-
-@media (max-width: 900px) {
-  .public-header { gap: 12px; }
-  .public-nav { display: none; }
-  .public-actions { margin-left: auto; }
-  .public-menu-button { display: inline-grid; }
-  .public-mobile-menu { position: absolute; z-index: 39; top: 100%; left: 0; right: 0; display: grid; padding: 10px 16px 16px; background: var(--surface); border-bottom: 1px solid var(--service); box-shadow: var(--shadow); }
-  .public-mobile-menu a { min-height: 46px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--line-soft); color: var(--text); font-size: var(--text-sm); font-weight: 700; text-decoration: none; }
-  .public-mobile-menu .public-cta { margin-top: 8px; justify-content: center; border: 1px solid var(--service); color: var(--on-service); background: var(--service); }
+.public-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
 }
-
+.public-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 clamp(16px, 4vw, 64px);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+.public-brand {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+.public-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.public-nav a,
+.public-login {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-decoration: none;
+}
+.public-nav a:hover,
+.public-login:hover,
+.public-nav a.router-link-active {
+  color: var(--heading);
+}
+.public-nav a.router-link-active {
+  box-shadow: inset 0 -2px var(--accent);
+}
+.public-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.public-theme,
+.public-menu-button {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  font-size: var(--text-lg);
+}
+.public-cta,
+.public-login {
+  border: 1px solid var(--service);
+  text-decoration: none;
+  justify-content: center;
+  padding: 0 15px;
+}
+.public-cta {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--service);
+  color: var(--on-service);
+  font-size: var(--text-xs);
+  font-weight: 800;
+}
+.public-cta:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.public-login {
+  border-color: transparent;
+}
+.public-main {
+  flex: 1;
+}
+.public-footer {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 26px 60px;
+  align-items: start;
+  padding: 34px clamp(16px, 4vw, 64px);
+  background: var(--service);
+  color: var(--on-service);
+}
+.public-footer-brand p {
+  max-width: 360px;
+  margin-top: 12px;
+  color: color-mix(in srgb, var(--on-service) 68%, transparent);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.public-footer nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 8px 28px;
+}
+.public-footer nav a {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  color: color-mix(in srgb, var(--on-service) 76%, transparent);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+.public-footer nav a:hover {
+  color: var(--accent);
+}
+.public-demo-note {
+  grid-column: 1 / -1;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--on-service) 18%, transparent);
+  color: color-mix(in srgb, var(--on-service) 52%, transparent);
+  font:var(--text-micro) var(--mono);
+}
+.public-mobile-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: none;
+  padding: 10px 16px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--service);
+  box-shadow: var(--shadow);
+}
+.public-menu-button {
+  display: none;
+}
+@media (max-width: 900px) {
+  .public-header {
+    gap: 12px;
+  }
+  .public-nav {
+    display: none;
+  }
+  .public-actions {
+    margin-left: auto;
+  }
+  .public-menu-button {
+    display: inline-grid;
+  }
+  .public-mobile-menu {
+    position: absolute;
+    z-index: 39;
+    top: 100%;
+    left: 0;
+    right: 0;
+    display: grid;
+    padding: 10px 16px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--service);
+    box-shadow: var(--shadow);
+  }
+  .public-mobile-menu a {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--text);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .public-mobile-menu .public-cta {
+    margin-top: 8px;
+    justify-content: center;
+    border: 1px solid var(--service);
+    color: var(--on-service);
+    background: var(--service);
+  }
+}
 @media (max-width: 620px) {
-  .public-header { min-height: 58px; padding: 0 8px 0 14px; }
-  .public-mobile-menu { top: 100%; }
-  .public-actions .public-login, .public-actions .public-cta { display: none; }
-  .public-theme { width: 40px; min-width: 40px; }
-  .public-menu-button { width: 40px; min-width: 40px; }
-  .public-footer { grid-template-columns: 1fr; padding: 30px 18px; }
-  .public-footer nav { grid-template-columns: 1fr 1fr; }
+  .public-header {
+    min-height: 58px;
+    padding: 0 8px 0 14px;
+  }
+  .public-mobile-menu {
+    top: 100%;
+  }
+  .public-actions .public-login,
+  .public-actions .public-cta {
+    display: none;
+  }
+  .public-theme {
+    width: 40px;
+    min-width: 40px;
+  }
+  .public-menu-button {
+    width: 40px;
+    min-width: 40px;
+  }
+  .public-footer {
+    grid-template-columns: 1fr;
+    padding: 30px 18px;
+  }
+  .public-footer nav {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>

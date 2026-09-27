@@ -217,15 +217,21 @@ onBeforeUnmount(dispose)
   box-shadow: inset 0 1px rgba(255, 255, 255, .8);
   vertical-align: middle;
 }
-.model-preview canvas { display: block; width: 100%; height: 100%; }
+.model-preview canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .model-preview-status {
   position: absolute;
   inset: auto 2px 2px;
   color: rgba(40, 54, 47, .68);
-  font: 5px/1.2 var(--font-mono, monospace);
+  font: 5px/1.2 var(--mono);
   text-align: center;
   text-transform: uppercase;
   letter-spacing: .04em;
 }
-.model-preview-status.error { color: #a04432; }
+.model-preview-status.error {
+  color: #a04432;
+}
 </style>
