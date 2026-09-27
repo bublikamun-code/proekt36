@@ -104,9 +104,28 @@ export const loadModelObject = (asset: ModelAsset): Promise<Object3D> => {
 /** Bounding-box size in metres, before the asset transform is applied. */
 export const measureModel = async (asset: ModelAsset): Promise<{ width: number; height: number; depth: number }> => {
   const model = await loadModelObject(asset)
+  return measureObject(model)
+}
+
+const measureObject = (model: Object3D) => {
   const box = new Box3().setFromObject(model)
   const size = box.getSize(new Vector3())
   return { width: size.x, height: size.y, depth: size.z }
+}
+
+/** Same measurement for raw bytes, before the asset exists — the import normalizer needs it. */
+export const measureModelBytes = async (data: ArrayBuffer): Promise<{ width: number; height: number; depth: number }> => {
+  const gltf = await parseLocalModel(data)
+  return measureObject(gltf.scene)
+}
+
+/**
+ * Drops cached geometry and thumbnail for a re-imported asset: the bytes on disk changed, so
+ * anything derived from the previous version is stale.
+ */
+export const invalidateModelCaches = (assetId: string) => {
+  modelCache.delete(`asset:${assetId}`)
+  thumbnailCache.delete(assetId)
 }
 
 let thumbnailRenderer: WebGLRenderer | undefined

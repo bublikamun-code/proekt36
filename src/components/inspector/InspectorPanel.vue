@@ -92,6 +92,31 @@ const selectedFrontView = computed(() => {
 })
 const selectedModel = computed(() => (selectedProduct.value ? store.resolveProductModel(selectedProduct.value) : undefined))
 const ModelPreview = defineAsyncComponent(() => import('../catalog/ModelPreview.vue'))
+
+const { modelLibrary } = storeToRefs(store)
+const modelOptions = computed<AppSelectOption[]>(() => [
+  { value: '', label: 'Нет · процедурная морда' },
+  ...[...store.modelAssetsById.values()].map((asset) => ({ value: asset.id, label: `${asset.name}${asset.missing ? ' · файл потерян' : ''}` })),
+])
+const boundModelId = computed(() => {
+  const product = selectedProduct.value
+  if (!product || product.imported) return ''
+  return modelLibrary.value.bindings[product.id] ?? ''
+})
+const onBindModel = (value: string) => {
+  const product = selectedProduct.value
+  if (product) store.bindProductModel(product.id, value || null)
+}
+
+/** A device whose product left the catalogue gets a replacement picker instead of a dead card. */
+const replaceOptions = computed<AppSelectOption[]>(() =>
+  [...definitions.value.values()]
+    .filter((product) => !product.imported)
+    .sort((a, b) => a.brand.localeCompare(b.brand, 'ru') || a.name.localeCompare(b.name, 'ru'))
+    .map((product) => ({ value: product.id, label: `${product.brand} · ${product.name} · ${product.moduleWidth} мод.` })))
+const onReplaceProduct = (value: string) => {
+  if (selectedDevice.value && value) store.replaceDeviceProduct(selectedDevice.value.instanceId, value)
+}
 const errorCount = computed(() => issues.value.filter((item) => item.level === 'error').length)
 const warningCount = computed(() => issues.value.filter((item) => item.level === 'warning').length)
 const statusLabel = computed(() => errorCount.value
@@ -201,6 +226,7 @@ const migrationIssueLabel = (code: string) => ({
           <label v-if="selectedPhysical">Габариты<input :value="`${selectedPhysical.widthMm} × ${selectedPhysical.heightMm} × ${selectedPhysical.depthMm} мм`" disabled /></label>
           <label>Фаза<AppSelect label="Фаза" :model-value="String(selectedDevice.phase)" :options="PHASE_OPTIONS" @update:model-value="store.updateSelected({ phase: Number($event) as 1 | 2 | 3 })" /></label>
           <label class="wide">Примечание<input :value="selectedDevice.note" placeholder="Нагрузка, помещение, кабель" @change="store.updateSelected({ note: ($event.target as HTMLInputElement).value })" /></label>
+          <label v-if="!selectedProduct.imported" class="wide">CAD-модель<AppSelect label="CAD-модель" :model-value="boundModelId" :options="modelOptions" @update:model-value="onBindModel" /></label>
         </div>
         <div class="button-row">
           <button @click="store.moveSelected(selectedDevice.row, selectedDevice.slot + getFootprintModules(selectedDevice, definitions))">Сдвинуть →</button>
@@ -209,6 +235,10 @@ const migrationIssueLabel = (code: string) => ({
           <button class="danger" aria-label="Удалить устройство" @click="removeSelected">Удалить</button>
         </div>
       </template>
+      <div v-else-if="selectedDevice" class="missing-product-card" role="alert">
+        <p><b>Товар «{{ selectedDevice.productId }}» больше нет в каталоге.</b> Устройство двигается как один модуль; выберите замену, чтобы вернуть настоящий footprint.</p>
+        <AppSelect label="Заменить товар" model-value="" :options="replaceOptions" @update:model-value="onReplaceProduct" />
+      </div>
       <div v-else class="inspector-empty"><span>↖</span><p>Выберите аппарат на DIN-рейке, чтобы изменить его параметры.</p></div>
     </section>
 

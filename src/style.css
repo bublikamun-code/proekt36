@@ -871,6 +871,39 @@ kbd {
   color: var(--text-muted);
   font-size: var(--text-micro);
 }
+.model-row.is-missing b,
+.model-row.is-missing small {
+  color: var(--error);
+}
+.import-note {
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--accent);
+  background: var(--line-soft);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.import-note.warn {
+  border-left-color: var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+}
+.import-note.mono {
+  font-family: var(--mono);
+  letter-spacing: .02em;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.checkbox-row input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
 .import-dialog {
   position: fixed;
   z-index: 100;
@@ -1982,6 +2015,21 @@ kbd {
   margin-bottom: 9px;
   background: var(--canvas);
   border-left: 2px solid var(--accent);
+}
+.missing-product-card {
+  padding: 8px 9px;
+  margin-bottom: 9px;
+  background: var(--error-soft);
+  border-left: 2px solid var(--error);
+}
+.missing-product-card p {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.missing-product-card b {
+  color: var(--error);
 }
 .product-monogram {
   width: 34px;

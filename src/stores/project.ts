@@ -16,8 +16,9 @@ import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, StoredModelAsset, StoredModelLibrary } from '../domain/types'
-import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
+import { clearModelAssets, deleteModelAsset, listModelAssetIds, putModelAsset } from '../storage/modelDb'
 import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
+import { invalidateModelCaches } from '../services/modelRender'
 import { usePreferencesStore } from './preferences'
 
 const HISTORY_LIMIT = 50
@@ -423,11 +424,12 @@ export const useProjectStore = defineStore('project', () => {
 
   const moveDeviceById = (instanceId: string, row: number, slot: number, options?: { coalesce?: string }) => {
     const device = currentProject.value.devices.find((item) => item.instanceId === instanceId)
-    const product = device ? definitions.value.get(device.productId) : undefined
-    if (!device || !product) return notify('Устройство не найдено', 'error')
+    if (!device) return notify('Устройство не найдено', 'error')
     if (device.mount === 'busbar' && (!Number.isInteger(row) || row < 0 || row >= currentProject.value.settings.rows)) {
       return rejectCommand('Позиция за пределами ряда')
     }
+    // A device whose product left the catalogue still moves on a one-module footprint from
+    // getFootprintModules; freezing it in place only made the placeholder impossible to tidy up.
     const result = resolveDeviceMove(currentProject.value.devices, instanceId, row, slot, getRowCapacity(currentProject.value), definitions.value)
     if (result.error) return notify(result.error, 'error')
     selectedDeviceId.value = instanceId
@@ -652,20 +654,24 @@ export const useProjectStore = defineStore('project', () => {
   /**
    * Adds a CAD asset plus its product stub to the library. The stub keeps the asset id, so
    * re-importing the same file in another browser revives placed devices instead of leaving
-   * them pointing at a product that no longer exists.
+   * them pointing at a product that no longer exists. A null product stores the asset alone,
+   * ready to be bound to an existing catalogue entry.
    */
-  const addImportedModel = async (product: DeviceDefinition, asset: StoredModelAsset, data: ArrayBuffer) => {
-    if (product.id !== asset.id) return notify('Товар импорта должен наследовать id модели', 'error')
-    if (!isImportedProduct(product)) return notify('Некорректные параметры товара импорта', 'error')
+  const addImportedModel = async (product: DeviceDefinition | null, asset: StoredModelAsset, data: ArrayBuffer) => {
+    if (product && product.id !== asset.id) return notify('Товар импорта должен наследовать id модели', 'error')
+    if (product && !isImportedProduct(product)) return notify('Некорректные параметры товара импорта', 'error')
     try {
       await putModelAsset(asset.id, { data })
+      invalidateModelCaches(asset.id)
       modelLibrary.value = {
         assets: [...modelLibrary.value.assets.filter((item) => item.id !== asset.id), asset],
-        products: [...modelLibrary.value.products.filter((item) => item.id !== product.id), product],
+        products: product
+          ? [...modelLibrary.value.products.filter((item) => item.id !== product.id), product]
+          : modelLibrary.value.products,
         bindings: modelLibrary.value.bindings,
       }
       if (repository.available) await persistNow()
-      notify('Модель добавлена в библиотеку')
+      notify(product ? 'Модель добавлена в библиотеку' : 'Модель добавлена в библиотеку без товара')
     } catch (error) {
       persistenceError = actionableStorageError(error, 'модель в IndexedDB')
       storageError.value = persistenceError
@@ -706,6 +712,52 @@ export const useProjectStore = defineStore('project', () => {
     notify(modelId ? 'CAD-модель привязана к товару' : 'Привязка CAD-модели снята')
     return true
   }
+
+  /**
+   * Swaps the product behind a placed device, e.g. a placeholder whose original product left
+   * the catalogue. The move resolver re-packs the row with the new footprint, so a wider
+   * replacement still cannot swallow its neighbours.
+   */
+  const replaceDeviceProduct = (instanceId: string, productId: string): boolean => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === instanceId)
+    if (!device) return rejectCommand('Устройство не найдено.')
+    const product = definitions.value.get(productId)
+    if (!product) return rejectCommand('Товар не найден.')
+    if (device.productId === productId) return true
+    const staged = currentProject.value.devices.map((item) => (item.instanceId === instanceId ? { ...item, productId } : item))
+    const result = resolveDeviceMove(staged, instanceId, device.row, device.slot, getRowCapacity(currentProject.value), definitions.value)
+    if (result.error) return rejectCommand(result.error)
+    commit((project) => {
+      project.devices = autoNumber(result.devices, definitions.value)
+    }, 'Товар заменён')
+    return true
+  }
+
+  /**
+   * Cross-checks stored asset metadata against IndexedDB: orphan binaries are removed, and
+   * assets whose file disappeared are marked missing so the UI can ask for a re-import instead
+   * of silently rendering a procedural face.
+   */
+  const reconcileModelAssets = async () => {
+    if (typeof indexedDB === 'undefined') return
+    try {
+      const stored = new Set(await listModelAssetIds())
+      const assets = modelLibrary.value.assets
+      let changed = false
+      for (const asset of assets) {
+        const hasFile = stored.has(asset.id)
+        if (hasFile === !asset.missing) continue
+        asset.missing = !hasFile
+        changed = true
+      }
+      const orphans = [...stored].filter((id) => !assets.some((asset) => asset.id === id))
+      for (const id of orphans) await deleteModelAsset(id)
+      if (changed || orphans.length) modelLibrary.value = { ...modelLibrary.value, assets: [...assets] }
+    } catch {
+      // IndexedDB being unavailable only costs the missing-file hint; the library still works.
+    }
+  }
+  void reconcileModelAssets()
 
   const clearLocalData = async () => {
     let assetError: unknown
@@ -797,6 +849,6 @@ export const useProjectStore = defineStore('project', () => {
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
     addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
-    retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
+    retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, replaceDeviceProduct, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })
