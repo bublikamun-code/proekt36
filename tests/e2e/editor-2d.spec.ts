@@ -63,15 +63,20 @@ test('2D DIN slots and the position pad use one-based labels', async ({ page }) 
 
   const firstRow = page.locator('.din-row').first()
   const slots = firstRow.locator('.slot-cell')
-  await expect(slots).toHaveCount(29)
-  await expect(slots.first()).toHaveAttribute('aria-label', 'Ряд 1, модуль 1. Свободен. Добавить устройство')
-  await expect(slots.last()).toHaveAttribute('aria-label', 'Ряд 1, модуль 29. Свободен. Добавить устройство')
+  // The apartment seed sits on the NX8-24 cabinet with a 12-slot rail-12, and its three
+  // 4-module apparatus fill row one completely; row two starts free.
+  await expect(slots).toHaveCount(12)
+  await expect(slots.first()).toHaveAttribute('aria-label', 'Ряд 1, модуль 1. Занят. Вставить и сдвинуть соседние')
+  await expect(slots.last()).toHaveAttribute('aria-label', 'Ряд 1, модуль 12. Занят. Вставить и сдвинуть соседние')
+  const secondRowSlots = page.locator('.din-row').nth(1).locator('.slot-cell')
+  await expect(secondRowSlots.first()).toHaveAttribute('aria-label', 'Ряд 2, модуль 1. Занят. Вставить и сдвинуть соседние')
+  await expect(secondRowSlots.last()).toHaveAttribute('aria-label', 'Ряд 2, модуль 12. Свободен. Добавить устройство')
 
   await page.locator('.placed-device').first().click()
   const positionPad = page.getByLabel('Позиционирование устройства')
   const padSlots = positionPad.locator('.pad-slot')
   await expect(padSlots.first()).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 1')
-  await expect(padSlots.nth(28)).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 29')
+  await expect(padSlots.nth(11)).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 12')
 })
 
 test('City9 2P sample renders the bundled CAD preview in the 2D editor', async ({ page }) => {

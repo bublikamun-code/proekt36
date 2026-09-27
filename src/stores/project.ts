@@ -425,7 +425,15 @@ export const useProjectStore = defineStore('project', () => {
   const addDevice = (productId: string, row = 0, slot = 0) => {
     const product = definitions.value.get(productId)
     if (!product) return notify('Товар не найден', 'error')
-    const result = placeProduct(currentProject.value.devices, product, row, slot, getRowCapacity(currentProject.value), uid, definitions.value)
+    const capacity = getRowCapacity(currentProject.value)
+    let result = placeProduct(currentProject.value.devices, product, row, slot, capacity, uid, definitions.value)
+    // A catalogue click means "put it anywhere sensible". With the requested rail packed,
+    // the device used to be refused even when the next row was completely empty.
+    if (result.error && row === 0 && slot === 0) {
+      for (let candidateRow = 1; candidateRow < currentProject.value.settings.rows && result.error; candidateRow += 1) {
+        result = placeProduct(currentProject.value.devices, product, candidateRow, 0, capacity, uid, definitions.value)
+      }
+    }
     if (result.error) return notify(result.error, 'error')
     const previousIds = new Set(currentProject.value.devices.map((item) => item.instanceId))
     let linked = 0
