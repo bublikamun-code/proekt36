@@ -4,6 +4,7 @@ import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDe
 import { buildBom } from '../../domain/pricing'
 import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
+import { verificationLabel } from '../../domain/verification'
 import type { DeviceDefinition, PanelProject } from '../../domain/types'
 
 const props = defineProps<{
@@ -23,7 +24,6 @@ const modules = computed(() => props.project.devices.filter(isDinDevice).reduce(
 const capacity = computed(() => getRowCapacity(props.project) * props.project.settings.rows)
 const rows = computed(() => Array.from({ length: props.project.settings.rows }, (_, index) => index))
 const productFor = (productId: string) => props.definitions.get(productId)
-const verificationLabel = (status: DeviceDefinition['verificationStatus']) => status === 'verified' ? 'подтверждено' : status === 'template' ? 'шаблон' : 'старые данные'
 </script>
 
 <template>
@@ -75,7 +75,7 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
             <td>{{ productFor(device.productId)?.name || 'Неизвестное изделие' }}</td>
             <td>{{ productFor(device.productId)?.series || productFor(device.productId)?.sku || '—' }}</td>
             <td>{{ device.marking || device.address }}</td>
-            <td>{{ verificationLabel(productFor(device.productId)?.verificationStatus) }}<template v-if="productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
+            <td>{{ verificationLabel(productFor(device.productId)) }}<template v-if="productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
           </tr>
         </tbody>
       </table>
@@ -104,7 +104,7 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
             <td>{{ line.quantity }}</td>
             <td>{{ line.priceKnown ? `${line.unitPrice.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
             <td>{{ line.priceKnown ? `${line.total.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
-            <td>{{ verificationLabel(productFor(line.productId)?.verificationStatus) }}<template v-if="productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
+            <td>{{ verificationLabel(productFor(line.productId)) }}<template v-if="productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
           </tr>
         </tbody>
       </table>

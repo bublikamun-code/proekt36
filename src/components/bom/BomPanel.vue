@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { bomToCsv, buildBom } from '../../domain/pricing'
+import { verificationLabel as sharedVerificationLabel } from '../../domain/verification'
 import { useProjectStore } from '../../stores/project'
 
 const store = useProjectStore()
@@ -16,16 +17,7 @@ const knownTotal = computed(() => lines.value.reduce((sum, line) => sum + (line.
 const hasUnknownPrices = computed(() => lines.value.some((line) => !line.priceKnown))
 const weight = computed(() => currentProject.value.devices.reduce((sum, item) => sum + (definitions.value.get(item.productId)?.weight ?? 0) * item.quantity, 0))
 const productFor = (productId: string) => definitions.value.get(productId)
-const verificationLabel = (productId: string) => {
-  const product = productFor(productId)
-  // A missing status is not a historical one: the built-in catalogue carries no status field at
-  // all, and reporting real products as historical would be untrue.
-  return product?.verificationStatus === 'verified' ? 'Подтверждено'
-    : product?.verificationStatus === 'template' ? 'Шаблон'
-      : product?.imported ? 'Импорт, не проверено'
-        : product?.verificationStatus === 'legacy' ? 'Исторические данные'
-          : 'Статус не указан'
-}
+const verificationLabel = (productId: string) => sharedVerificationLabel(productFor(productId))
 
 const exportCsv = () => {
   const csv = '\ufeff' + bomToCsv(currentProject.value.devices, definitions.value, ';')

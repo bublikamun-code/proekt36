@@ -8,6 +8,7 @@ import type { BusType, Category, DeviceDefinition, ModelAsset, StoredModelAsset 
 import { detectImportKind, validateGltfZip, validateModelFile, type PreparedImport } from '../../storage/modelImportFlow'
 import { getModelAsset } from '../../storage/modelDb'
 import { getThumbnail, measureModelBytes } from '../../services/modelRender'
+import { verificationLabel as verificationLabelBase } from '../../domain/verification'
 import { useProjectStore } from '../../stores/project'
 import AppDialog from '../ui/AppDialog.vue'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
@@ -79,15 +80,9 @@ const products = computed(() => {
   })
 })
 
-const verificationLabel = (product: DeviceDefinition) => {
-  if (product.verificationStatus === 'verified') return ''
-  if (product.imported) return 'Импорт, не проверено'
-  if (product.verificationStatus === 'template') return 'Шаблон'
-  if (product.verificationStatus === 'legacy') return 'Исторические данные'
-  // A missing status is not the same as a historical one: the built-in catalogue carries no
-  // status field at all, and calling those real products historical would be simply untrue.
-  return 'Статус не указан'
-}
+// The shared provenance ladder; the catalogue hides the flag on verified entries.
+const verificationLabel = (product: DeviceDefinition) =>
+  product.verificationStatus === 'verified' ? '' : verificationLabelBase(product)
 
 const browse = () => fileInput.value?.click()
 /**
