@@ -36,6 +36,18 @@ describe('project validation', () => {
     expect(issues.some((issue) => issue.id === 'spd')).toBe(true)
   })
 
+  it('flags an RCCB or RCBO rated above the input current, but not an SPD', () => {
+    // A 4P RCCB at 40 A on a 16 A input is a real selectivity question, while an SPD's
+    // rating is discharge capacity and is legitimately allowed to exceed the input.
+    const rccbProject = createProject('УЗО выше вводного', 'demo', { inputCurrent: 16 })
+    rccbProject.devices = [createDevice(definitions.get('ekf-rccb-4p-40')!, 0, 0)]
+    expect(validateProject(rccbProject, definitions).some((issue) => issue.id.startsWith('current-'))).toBe(true)
+
+    const spdProject = createProject('УЗИП выше вводного', 'demo', { inputCurrent: 16 })
+    spdProject.devices = [createDevice(definitions.get('ekf-spd-t1-3p-n-pe')!, 0, 0)]
+    expect(validateProject(spdProject, definitions).some((issue) => issue.id.startsWith('current-'))).toBe(false)
+  })
+
   it('reports row overflow on a selected 12-module rail', () => {
     const project = createProject('Короткий ряд', 'apartment', { cabinetId: 'enmas-nx8-24-embedded', railId: 'rail-12' })
     const device = createDevice(definitions.get('ekf-mcb-4p-b32')!, 0, 10)
