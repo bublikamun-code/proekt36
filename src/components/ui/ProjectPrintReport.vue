@@ -98,7 +98,7 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
         <thead><tr><th>Категория / наименование</th><th>Бренд</th><th>Артикул</th><th>Кол-во</th><th>Цена</th><th>Сумма</th><th>Проверка / источник</th></tr></thead>
         <tbody>
           <tr v-for="line in lines" :key="line.productId">
-            <td><strong>{{ line.name }}</strong><small>{{ line.category }}</small></td>
+            <td><strong>{{ line.name }}</strong><small>{{ line.category ?? 'нет в каталоге' }}</small></td>
             <td>{{ line.brand }}</td>
             <td>{{ line.sku }}</td>
             <td>{{ line.quantity }}</td>

@@ -76,7 +76,7 @@ const verificationLabel = (productId: string) => {
   const status = definitions.get(productId)?.verificationStatus
   return status === 'verified' ? 'подтверждено' : status === 'template' ? 'шаблон' : 'данные не проверены'
 }
-const formatCategory = (category: string) => category === 'terminals' ? 'Клеммы' : category === 'RCBO' ? 'Дифавтоматы' : category === 'MCB' ? 'Автоматы' : category === 'SPD' ? 'УЗИП' : category
+const formatCategory = (category?: string) => category === 'terminals' ? 'Клеммы' : category === 'RCBO' ? 'Дифавтоматы' : category === 'MCB' ? 'Автоматы' : category === 'SPD' ? 'УЗИП' : category
 </script>
 
 <template>

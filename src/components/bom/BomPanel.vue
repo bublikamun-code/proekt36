@@ -8,7 +8,7 @@ const store = useProjectStore()
 const { currentProject, definitions } = storeToRefs(store)
 const lines = computed(() => buildBom(currentProject.value.devices, definitions.value))
 const grouped = computed(() => {
-  const map = new Map<string, typeof lines.value>()
+  const map = new Map<string | undefined, typeof lines.value>()
   for (const line of lines.value) map.set(line.category, [...(map.get(line.category) ?? []), line])
   return [...map.entries()]
 })
@@ -52,7 +52,7 @@ const exportCsv = () => {
       <table>
         <thead><tr><th>Категория / наименование</th><th>Артикул</th><th class="num">Кол-во</th><th class="num">Цена, ₽</th><th class="num">Сумма, ₽</th><th>Проверка / источник</th></tr></thead>
         <tbody v-for="[category, group] in grouped" :key="category" class="bom-group">
-          <tr class="group-row"><td :colspan="6">{{ category }} <span>{{ group.reduce((sum, line) => sum + line.quantity, 0) }} шт.</span></td></tr>
+          <tr class="group-row"><td :colspan="6">{{ category ?? 'Нет в каталоге' }} <span>{{ group.reduce((sum, line) => sum + line.quantity, 0) }} шт.</span></td></tr>
           <tr v-for="line in group" :key="line.productId">
             <td><strong>{{ line.name }}</strong><small>{{ line.brand }}</small></td><td class="mono">{{ line.sku }}</td><td class="num">{{ line.quantity }}</td>
             <td class="num">{{ line.priceKnown ? line.unitPrice.toLocaleString('ru-RU') : '«уточняется»' }}</td>

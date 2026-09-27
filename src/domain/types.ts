@@ -203,7 +203,8 @@ export interface BomLine {
   name: string
   brand: string
   sku: string
-  category: Category
+  /** Unknown for a device whose product left the catalogue; the line still shows. */
+  category?: Category
   /** Purchase quantity; it is deliberately not a physical footprint. */
   quantity: number
   /** Kept numeric for existing UI callers. Use priceKnown/priceStatus for semantics. */
