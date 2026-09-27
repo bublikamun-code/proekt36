@@ -27,8 +27,7 @@ export interface ProjectFileEnvelope {
   validationRevision: number
   validation: { revision: number }
   exportedAt: string
-  catalogSnapshot: unknown[]
-  catalogManifest: { revision: string; count: number; productIds: string[]; hash: string }
+  /** The single copy of the catalogue snapshot; legacy files also carry flat fields. */
   catalog: { revision: string; snapshot: unknown[]; manifest: { revision: string; count: number; productIds: string[]; hash: string } }
   cadModelManifest: { revision: string; count: number; modelIds: string[] }
   cad: { revision: string; binaryIncluded: false; modelManifest: { revision: string; count: number; modelIds: string[] } }
@@ -49,13 +48,6 @@ export const createProjectFileEnvelope = (project: PanelProject, exportedAt = ne
     validationRevision: VALIDATION_REVISION,
     validation: { revision: VALIDATION_REVISION },
     exportedAt,
-    catalogSnapshot,
-    catalogManifest: {
-      revision: DOMAIN_CATALOG_REVISION,
-      count: catalogSnapshot.length,
-      productIds: catalogSnapshot.map((item) => (isRecord(item) ? text(item.id) : '')).filter(Boolean),
-      hash: stableHash(catalogSnapshot),
-    },
     catalog: {
       revision: DOMAIN_CATALOG_REVISION,
       snapshot: catalogSnapshot,
@@ -94,20 +86,26 @@ const validateEnvelope = (value: unknown): string[] => {
   if (!isRecord(value.validation)) errors.push('отсутствует вложенная ревизия валидации')
   else if (isFutureRevision(value.validation.revision, VALIDATION_REVISION)) errors.push(`вложенная ревизия валидации новее установленной (${String(value.validation.revision)} > ${VALIDATION_REVISION})`)
   if (typeof value.exportedAt !== 'string' || Number.isNaN(Date.parse(value.exportedAt))) errors.push('ожидается корректная дата exportedAt')
-  if (!isRecord(value.catalog)) errors.push('отсутствует вложенная ревизия каталога')
-  else if (isFutureRevision(value.catalog.revision, DOMAIN_CATALOG_REVISION)) errors.push(`вложенная ревизия каталога новее установленной (${String(value.catalog.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-  else if (!isKnownRevision(value.catalog.revision)) errors.push('неверна вложенная ревизия каталога')
-  if (isRecord(value.catalog) && JSON.stringify(value.catalog.snapshot) !== JSON.stringify(value.catalogSnapshot)) errors.push('вложенный snapshot каталога не совпадает с catalogSnapshot')
-  if (isRecord(value.catalog) && JSON.stringify(value.catalog.manifest) !== JSON.stringify(value.catalogManifest)) errors.push('вложенный manifest каталога не совпадает с catalogManifest')
-  if (!Array.isArray(value.catalogSnapshot)) errors.push('отсутствует catalogSnapshot')
-  if (!isRecord(value.catalogManifest)) errors.push('отсутствует catalogManifest')
-  if (Array.isArray(value.catalogSnapshot) && isRecord(value.catalogManifest)) {
-    const ids = value.catalogSnapshot.map((item) => isRecord(item) ? text(item.id) : '').filter(Boolean)
-    if (isFutureRevision(value.catalogManifest.revision, DOMAIN_CATALOG_REVISION)) errors.push(`ревизия manifest каталога новее установленной (${String(value.catalogManifest.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-    else if (!isKnownRevision(value.catalogManifest.revision)) errors.push('неверна ревизия manifest каталога')
-    if (value.catalogManifest.count !== value.catalogSnapshot.length) errors.push('count каталога не совпадает со snapshot')
-    if (JSON.stringify(value.catalogManifest.productIds) !== JSON.stringify(ids)) errors.push('productIds manifest не совпадают со snapshot')
-    if (value.catalogManifest.hash !== stableHash(value.catalogSnapshot)) errors.push('hash каталога не совпадает со snapshot')
+  // New files carry the snapshot only inside `catalog`; older ones also had flat top-level
+  // copies. Either shape reads, and when both are present they have to agree.
+  const nested = isRecord(value.catalog) ? value.catalog : undefined
+  const snapshot = nested && Array.isArray(nested.snapshot) ? nested.snapshot : value.catalogSnapshot
+  const manifest = nested && isRecord(nested.manifest) ? nested.manifest : value.catalogManifest
+  if (nested) {
+    if (isFutureRevision(nested.revision, DOMAIN_CATALOG_REVISION)) errors.push(`вложенная ревизия каталога новее установленной (${String(nested.revision)} > ${DOMAIN_CATALOG_REVISION})`)
+    else if (!isKnownRevision(nested.revision)) errors.push('неверна вложенная ревизия каталога')
+    if (Array.isArray(value.catalogSnapshot) && JSON.stringify(nested.snapshot) !== JSON.stringify(value.catalogSnapshot)) errors.push('вложенный snapshot каталога не совпадает с catalogSnapshot')
+    if (isRecord(value.catalogManifest) && JSON.stringify(nested.manifest) !== JSON.stringify(value.catalogManifest)) errors.push('вложенный manifest каталога не совпадает с catalogManifest')
+  }
+  if (!Array.isArray(snapshot)) errors.push('отсутствует catalogSnapshot')
+  else if (!isRecord(manifest)) errors.push('отсутствует catalogManifest')
+  else {
+    const ids = snapshot.map((item) => isRecord(item) ? text(item.id) : '').filter(Boolean)
+    if (isFutureRevision(manifest.revision, DOMAIN_CATALOG_REVISION)) errors.push(`ревизия manifest каталога новее установленной (${String(manifest.revision)} > ${DOMAIN_CATALOG_REVISION})`)
+    else if (!isKnownRevision(manifest.revision)) errors.push('неверна ревизия manifest каталога')
+    if (manifest.count !== snapshot.length) errors.push('count каталога не совпадает со snapshot')
+    if (JSON.stringify(manifest.productIds) !== JSON.stringify(ids)) errors.push('productIds manifest не совпадают со snapshot')
+    if (manifest.hash !== stableHash(snapshot)) errors.push('hash каталога не совпадает со snapshot')
   }
   if (!isRecord(value.cadModelManifest) || text(value.cadModelManifest.revision) !== CAD_MODEL_REVISION) errors.push('отсутствует или неверна manifest CAD-моделей')
   if (isRecord(value.cadModelManifest) && (!Number.isInteger(value.cadModelManifest.count) || (value.cadModelManifest.count as number) < 0 || !Array.isArray(value.cadModelManifest.modelIds))) errors.push('некорректна manifest CAD-моделей')

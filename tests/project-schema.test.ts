@@ -61,8 +61,10 @@ describe('project file envelope and domain diagnostics', () => {
     const envelope = createProjectFileEnvelope(project, '2026-01-01T00:00:00.000Z')
     expect(envelope.application.revision).toBeTruthy()
     expect(envelope.schemaRevision).toBe(2)
-    expect(envelope.catalogSnapshot.length).toBeGreaterThan(0)
-    expect(envelope.catalogManifest.hash).toBeTruthy()
+    expect(envelope.catalog.snapshot.length).toBeGreaterThan(0)
+    expect(envelope.catalog.manifest.hash).toBeTruthy()
+    // The snapshot ships once; the flat top-level copy is legacy-only.
+    expect('catalogSnapshot' in envelope).toBe(false)
     expect(envelope.cadModelManifest.modelIds).toEqual([])
     await expect(readProjectFile(jsonFile(envelope))).resolves.toMatchObject({ id: project.id })
   })

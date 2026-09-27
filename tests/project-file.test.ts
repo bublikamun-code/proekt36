@@ -54,7 +54,6 @@ describe('project file import', () => {
       ...envelope,
       catalogRevision: olderRevision,
       catalog: { ...envelope.catalog, revision: olderRevision, manifest: { ...envelope.catalog.manifest, revision: olderRevision } },
-      catalogManifest: { ...envelope.catalogManifest, revision: olderRevision },
     }
     const imported = await readProjectFile(jsonFile(older))
     expect(imported.id).toBe(source.id)
