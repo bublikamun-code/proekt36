@@ -29,6 +29,13 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 const seedProject = () => {
   const project = createProject('Освещение квартиры', 'apartment', presetProducts('apartment').settings)
+  // A fixed identity, not a fresh one on every load. This project is not written to storage until
+  // the user changes something, so with a random id a refresh would build a different one and the
+  // editor's deep link would point at a project that no longer exists — the user would land on the
+  // project list instead of the board they were on. Saving the seed on first load would fix the
+  // same thing by writing to storage before there is anything to save, which is the opposite of
+  // what the app promises.
+  project.id = 'sample-apartment'
   project.schemaVersion = PROJECT_SCHEMA_VERSION
   project.settings = { inputCurrent: 40, phase: 1, enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9, reserveModules: 8 }
   const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))

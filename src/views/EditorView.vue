@@ -12,6 +12,7 @@ import AppDialog from '../components/ui/AppDialog.vue'
 import ProjectPrintReport from '../components/ui/ProjectPrintReport.vue'
 import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
+import { usePreferencesStore } from '../stores/preferences'
 import { downloadProject, readProjectFile } from '../domain/projectFile'
 import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { useConfirm } from '../composables/useConfirm'
@@ -20,9 +21,19 @@ import type { Category, PanelProject } from '../domain/types'
 const route = useRoute()
 const router = useRouter()
 const store = useProjectStore()
+const preferences = usePreferencesStore()
 const { confirm } = useConfirm()
 const { currentProject, projects, currentProjectId, selectedDevice, undoStack, redoStack, theme, definitions, importedModels, storageStatus, storageError, storageAlert, hasStorageBackup, hasStorageRecovery, lastSavedAt } = storeToRefs(store)
-const canvasFocus = ref(true)
+const { panelsOpen } = storeToRefs(preferences)
+/**
+ * Whether the editor shows the board alone. It is kept rather than reset on every visit: a
+ * refresh in the middle of a layout should not also close the panels the user was working with.
+ * Writable, so the existing assignments and the scrim keep working unchanged.
+ */
+const canvasFocus = computed({
+  get: () => !panelsOpen.value,
+  set: (value: boolean) => { preferences.setPanelsOpen(!value) },
+})
 const wizardOpen = ref(false)
 const catalogFocus = ref<Category | null>(null)
 const mobilePanel = ref<'catalog' | 'inspector' | null>(null)
