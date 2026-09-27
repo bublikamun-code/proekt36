@@ -19,7 +19,6 @@ interface Session {
 
 const session = ref<Session>({ phase: 'idle', source: null, pointerId: -1, x: 0, y: 0 })
 let origin = { x: 0, y: 0 }
-let swallowClick = false
 
 export const isDragging = computed(() => session.value.phase === 'dragging')
 export const dragPointer = computed(() => ({ x: session.value.x, y: session.value.y }))
@@ -42,12 +41,19 @@ const finish = (commit: boolean) => {
   if (wasDragging && commit) onCommit?.()
   session.value = { phase: 'idle', source: null, pointerId: -1, x: 0, y: 0 }
   // The browser still fires a click on the common ancestor of the press and the
-  // release, which would both place a catalogue item and select a device. One
-  // swallowed click keeps a finished drag from having that side effect.
+  // release, which would both place a catalogue item and select a device. The
+  // capture listener is installed for exactly that one click and removed again,
+  // so an unrelated later click (say, a button outside the board) stays alive.
   if (wasDragging) {
-    swallowClick = true
-    window.setTimeout(() => { swallowClick = false }, 0)
+    window.addEventListener('click', swallowClickOnce, true)
+    window.setTimeout(() => window.removeEventListener('click', swallowClickOnce, true), 0)
   }
+}
+
+function swallowClickOnce(event: MouseEvent) {
+  event.stopPropagation()
+  event.preventDefault()
+  window.removeEventListener('click', swallowClickOnce, true)
 }
 
 function onMove(event: PointerEvent) {
@@ -89,11 +95,3 @@ export const beginBoardDrag = (source: BoardDragSource, event: PointerEvent) => 
 
 /** Aborts a drag in progress without dropping anything. */
 export const cancelBoardDrag = () => { if (session.value.phase !== 'idle') finish(false) }
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('click', (event) => {
-    if (!swallowClick) return
-    event.stopPropagation()
-    event.preventDefault()
-  }, true)
-}
