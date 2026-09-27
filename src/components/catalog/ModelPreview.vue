@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { unzipSync } from 'fflate'
 import {
   Box3,
   DirectionalLight,
@@ -13,70 +12,15 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { ModelAsset } from '../../domain/types'
-import { getModelAsset } from '../../storage/modelDb'
+import { loadModelObject } from '../../services/modelRender'
 
 type PreviewObject = Object3D
-type GltfDocument = {
-  buffers?: Array<{ uri?: string }>
-  images?: Array<{ uri?: string }>
-  [key: string]: unknown
-}
 
-const GLB_MAGIC = 0x46546c67
-const ZIP_MAGIC = 0x04034b50
-
-const isGlb = (data: ArrayBuffer) => data.byteLength >= 4 && new DataView(data).getUint32(0, true) === GLB_MAGIC
-const isZip = (data: ArrayBuffer) => data.byteLength >= 4 && new DataView(data).getUint32(0, true) === ZIP_MAGIC
-
-const resourceMimeType = (name: string) => {
-  const extension = name.toLowerCase().split('.').pop()
-  if (extension === 'png') return 'image/png'
-  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
-  if (extension === 'webp') return 'image/webp'
-  if (extension === 'ktx2') return 'image/ktx2'
-  return 'application/octet-stream'
-}
-
-const parseZippedGltf = async (data: ArrayBuffer, loader: GLTFLoader) => {
-  const entries = unzipSync(new Uint8Array(data))
-  const gltfName = Object.keys(entries).find((name) => name.toLowerCase().endsWith('.gltf'))
-  if (!gltfName) throw new Error('В локальном CAD-архиве нет glTF-сцены')
-
-  const document = JSON.parse(new TextDecoder().decode(entries[gltfName]!)) as GltfDocument
-  const basePath = gltfName.includes('/') ? gltfName.slice(0, gltfName.lastIndexOf('/') + 1) : ''
-  const objectUrls: string[] = []
-  const resolveResource = (uri: string | undefined) => {
-    if (!uri || uri.startsWith('data:')) return uri
-    const decoded = decodeURIComponent(uri.split(/[?#]/)[0]!)
-    const resourceName = `${basePath}${decoded}`
-    const bytes = entries[resourceName]
-    if (!bytes) throw new Error(`Не найден ресурс локальной CAD-модели: ${decoded}`)
-    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: resourceMimeType(resourceName) }))
-    objectUrls.push(objectUrl)
-    return objectUrl
-  }
-
-  const rewritten: GltfDocument = {
-    ...document,
-    buffers: document.buffers?.map((resource) => ({ ...resource, uri: resolveResource(resource.uri) })),
-    images: document.images?.map((resource) => ({ ...resource, uri: resolveResource(resource.uri) })),
-  }
-  try {
-    return await loader.parseAsync(JSON.stringify(rewritten), '')
-  } finally {
-    objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl))
-  }
-}
-
-const parseLocalModel = async (data: ArrayBuffer) => {
-  const loader = new GLTFLoader()
-  if (isGlb(data)) return loader.parseAsync(data, '')
-  if (isZip(data)) return parseZippedGltf(data, loader)
-  return loader.parseAsync(new TextDecoder().decode(data), '')
-}
-
+/**
+ * The live rotating-canvas preview for the inspector. Lists and boards show raster thumbnails
+ * from the modelRender service; this is the one place that keeps a WebGL context of its own.
+ */
 const props = withDefaults(defineProps<{
   model: ModelAsset
   width?: number
@@ -87,7 +31,6 @@ const props = withDefaults(defineProps<{
 const canvas = ref<HTMLCanvasElement | null>(null)
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const errorMessage = ref('')
-const loadCache = new Map<string, Promise<PreviewObject>>()
 let renderer: WebGLRenderer | undefined
 let scene: Scene | undefined
 let camera: PerspectiveCamera | undefined
@@ -95,23 +38,6 @@ let root: Group | undefined
 let resizeObserver: ResizeObserver | undefined
 let disposed = false
 let renderToken = 0
-
-const loadModel = () => {
-  const { model } = props
-  const sourceKey = model.source === 'local' ? `asset:${model.id}` : `url:${model.url ?? ''}`
-  const existing = loadCache.get(sourceKey)
-  if (existing) return existing
-  const promise = model.source === 'local'
-    ? getModelAsset(model.id).then((record) => {
-      if (!record) throw new Error('Локальный CAD-файл не найден в IndexedDB')
-      return parseLocalModel(record.data)
-    })
-    : new GLTFLoader().loadAsync(model.url!)
-  const modelPromise = promise.then((gltf) => gltf.scene)
-  loadCache.set(sourceKey, modelPromise)
-  modelPromise.catch(() => loadCache.delete(sourceKey))
-  return modelPromise
-}
 
 const renderModel = (model: PreviewObject) => {
   if (!renderer || !scene || !camera) return
@@ -144,7 +70,7 @@ const render = async () => {
   if (scene && root) scene.remove(root)
   root = undefined
   try {
-    const model = await loadModel()
+    const model = await loadModelObject(props.model)
     if (disposed || token !== renderToken) return
     if (!renderer) {
       renderer = new WebGLRenderer({ canvas: element, antialias: true, alpha: true, powerPreference: 'low-power' })
@@ -163,7 +89,7 @@ const render = async () => {
     resize()
     state.value = 'ready'
   } catch (error) {
-    if (!disposed && token === renderToken) {
+    if (!disposed && token !== renderToken) {
       errorMessage.value = error instanceof Error ? error.message : 'CAD-модель недоступна'
       state.value = 'error'
     }

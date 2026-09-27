@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { DeviceDefinition, ModelAsset } from '../../domain/types'
+import { getThumbnail } from '../../services/modelRender'
 import DeviceChassis from './deviceFace/DeviceChassis.vue'
 import DeviceFace from './deviceFace/DeviceFace.vue'
 import { getDeviceFaceMetrics, faceShellFamily } from './deviceFace/metrics'
-
-const ModelPreview = defineAsyncComponent(() => import('./ModelPreview.vue'))
 
 const props = defineProps<{ product: DeviceDefinition; model?: ModelAsset | null; width?: number; height?: number }>()
 
@@ -15,16 +14,25 @@ const busbarLabel = computed(() => (props.product.series === 'FORK' ? 'FORK' : '
 const busbarTicks = computed(() => Array.from({ length: Math.max(1, face.value.moduleWidth) }, (_, index) => face.value.body.x + 1.2 + (index * (face.value.body.width - 2.4)) / face.value.moduleWidth))
 const pxWidth = computed(() => Math.max(14, props.width ?? face.value.widthMm))
 const pxHeight = computed(() => Math.max(20, props.height ?? face.value.heightMm))
+
+// The raster preview arrives asynchronously; until it does (or forever, when the CAD file
+// is gone) the procedural face stays on screen, so a list never shows error placeholders.
+const thumbUrl = ref<string | null>(null)
+watch(() => props.model, (asset) => {
+  thumbUrl.value = null
+  if (asset) void getThumbnail(asset).then((url) => { thumbUrl.value = url })
+}, { immediate: true })
 </script>
 
 <template>
-  <ModelPreview
-    v-if="model"
-    :model="model"
-    :width="pxWidth"
-    :height="pxHeight"
-    :label="`Реальная модель: ${product.name}`"
-  />
+  <span
+    v-if="model && thumbUrl"
+    class="model-thumb"
+    :data-model-preview="model.source === 'local' ? `asset:${model.id}` : model.url"
+    :style="{ width: `${pxWidth}px`, height: `${pxHeight}px` }"
+    role="img"
+    :aria-label="`Реальная модель: ${product.name}`"
+  ><img :src="thumbUrl" alt="" draggable="false" /></span>
   <svg
     v-else
     class="device-visual"
@@ -47,3 +55,22 @@ const pxHeight = computed(() => Math.max(20, props.height ?? face.value.heightMm
     </template>
   </svg>
 </template>
+
+<style scoped>
+.model-thumb {
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(70, 83, 76, .22);
+  border-radius: 3px;
+  background: linear-gradient(145deg, #eef0e9, #d9ded7);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .8);
+}
+
+.model-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+</style>

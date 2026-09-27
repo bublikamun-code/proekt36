@@ -167,7 +167,7 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
 
   for (const item of importCases) await importModel(page, item)
   expect(await countIndexedDbAssets(page)).toBe(3)
-  await expect(page.locator('.model-preview.state-ready[data-model-preview^="asset:"]')).toHaveCount(3)
+  await expect(page.locator('.model-thumb[data-model-preview^="asset:"]')).toHaveCount(3)
 
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
     const request = indexedDB.open('panel36-models', 1)
@@ -184,8 +184,15 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
     }
   }))
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await expect(page.locator('.model-preview.state-error[data-model-preview^="asset:"]')).toHaveCount(3)
-  await expect(page.locator('.model-preview.state-error').first()).toContainText('Локальный CAD-файл не найден')
+  // With the binaries gone the raster preview cannot be produced, so every imported device
+  // falls back to its procedural face instead of an error placeholder — the products and
+  // their placements survive the loss.
+  await expect(page.locator('.model-thumb[data-model-preview^="asset:"]')).toHaveCount(0)
+  for (const item of importCases) {
+    const card = page.locator('.catalog-item').filter({ hasText: item.name })
+    await expect(card.locator('svg.device-visual')).toHaveCount(1)
+    await expect(card.locator('.model-thumb')).toHaveCount(0)
+  }
 
   // The reload closes the side panels again, and a catalogue item that is not on
   // screen cannot be grabbed with a pointer.
