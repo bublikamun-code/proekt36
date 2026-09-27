@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
   border-radius: 1px;
   background: var(--surface-raised);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.35;
   text-align: left;
   cursor: pointer;
@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
   border-radius: 1px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.35;
   cursor: pointer;
 }
@@ -272,5 +272,5 @@ onBeforeUnmount(() => {
 .app-select-option.is-selected { color: var(--accent); font-weight: 700; }
 .app-select-option.is-selected::after { content: ' ✓'; color: var(--accent); }
 .app-select-option.is-disabled { color: var(--text-faint); cursor: not-allowed; }
-.app-select-empty { margin: 0; padding: 8px; color: var(--text-faint); font-size: 11px; }
+.app-select-empty { margin: 0; padding: 8px; color: var(--text-faint); font-size: var(--text-xs); }
 </style>

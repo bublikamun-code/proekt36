@@ -27,6 +27,6 @@ const isPrivacy = computed(() => route.name === 'privacy')
 </template>
 
 <style scoped>
-.legal-page { width: min(100% - 32px, 900px); margin: 0 auto; padding: clamp(60px, 10vw, 120px) 0 120px; }.legal-header { padding-bottom: 42px; border-bottom: 1px solid var(--service); }.legal-header h1 { margin-top: 12px; font-size: clamp(38px, 6vw, 66px); letter-spacing: -.05em; }.legal-header p { margin-top: 16px; color: var(--text-faint); font: 10px var(--mono); }.legal-content { max-width: 760px; padding-top: 28px; }.legal-content section { padding: 27px 0; border-bottom: 1px solid var(--line); }.legal-content h2 { font-size: 18px; }.legal-content p { margin-top: 12px; color: var(--text-muted); font-size: 13px; line-height: 1.75; }
-@media (max-width: 620px) { .legal-page { width: min(100% - 28px, 900px); padding: 55px 0 80px; }.legal-content p { font-size: 12px; } }
+.legal-page { width: min(100% - 32px, 900px); margin: 0 auto; padding: clamp(60px, 10vw, 120px) 0 120px; }.legal-header { padding-bottom: 42px; border-bottom: 1px solid var(--service); }.legal-header h1 { margin-top: 12px; font-size: clamp(38px, 6vw, 66px); letter-spacing: -.05em; }.legal-header p { margin-top: 16px; color: var(--text-faint); font:var(--text-xs) var(--mono); }.legal-content { max-width: 760px; padding-top: 28px; }.legal-content section { padding: 27px 0; border-bottom: 1px solid var(--line); }.legal-content h2 { font-size: var(--text-lg); }.legal-content p { margin-top: 12px; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.75; }
+@media (max-width: 620px) { .legal-page { width: min(100% - 28px, 900px); padding: 55px 0 80px; }.legal-content p { font-size: var(--text-xs); } }
 </style>

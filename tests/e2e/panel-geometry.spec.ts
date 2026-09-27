@@ -247,6 +247,9 @@ test('a 48-module TEHNOPLAST cabinet keeps its published vertical proportions', 
 
 test('the demo cabinet is not stretched by a minimum width', async ({ page }) => {
   await page.goto('/demo/project')
+  // The inline width is set from a computed, so the element must be mounted before it can be
+  // measured. Reading the DOM straight after goto raced the mount and returned null.
+  await expect(page.locator('.demo-project-cabinet')).toBeVisible()
   const cabinet = await page.evaluate(() => {
     const element = document.querySelector('.demo-project-cabinet')
     const caption = document.querySelector('.demo-project-plate .cabinet-caption b')

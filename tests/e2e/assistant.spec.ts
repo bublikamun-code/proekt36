@@ -92,6 +92,13 @@ test.describe('ИИ-помощник', () => {
       expect(bodies[0]).not.toContain(secret)
     }
     expect(bodies[0]).toContain('panel36.assistant-context.v1')
+    // The proxy forwards `context` only when it is a string and used to drop an object in
+    // silence, so the model answered without ever seeing the panel. Assert the type rather
+    // than the bytes: a nested object still contains the revision and would pass a substring
+    // check, which is why the bug survived this test.
+    const sent = JSON.parse(bodies[0]) as { context?: unknown }
+    expect(typeof sent.context, 'сводка должна уходить строкой, иначе прокси её отбросит').toBe('string')
+    expect(JSON.parse(sent.context as string)).toMatchObject({ revision: 'panel36.assistant-context.v1' })
 
     await expect(assistant.getByText(/Отклонено:.*неизвестный код/)).toBeVisible()
 

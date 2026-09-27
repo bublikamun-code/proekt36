@@ -79,11 +79,16 @@ const loadConfig = async () => {
   const providerId = (pick('AI_PROVIDER') || 'anthropic').toLowerCase()
   const provider = PROVIDERS[providerId]
   const apiKey = pick('AI_API_KEY')
+  // The provider's own endpoint is the fallback, not an optional extra: without it an unset
+  // AI_BASE_URL produced a relative URL and every request failed with "Failed to parse URL".
+  const defaultBaseUrl = provider?.defaultBaseUrl ?? ''
+  const baseUrl = pick('AI_BASE_URL') || defaultBaseUrl
   return {
     providerId,
     provider,
     apiKey,
-    model: { id: pick('AI_MODEL') || (providerId === 'anthropic' ? 'claude-sonnet-5' : 'gpt-4o-mini'), baseUrl: pick('AI_BASE_URL') },
+    customBaseUrl: Boolean(baseUrl && baseUrl !== defaultBaseUrl),
+    model: { id: pick('AI_MODEL') || (providerId === 'anthropic' ? 'claude-sonnet-5' : 'gpt-4o-mini'), baseUrl },
   }
 }
 
@@ -204,6 +209,8 @@ const main = async () => {
   server.listen(port, HOST, () => {
     console.log(`[ai] Прокси слушает http://${HOST}:${port} (провайдер: ${config.providerId}, модель: ${config.model.id})`)
     if (!config.apiKey) console.log('[ai] ВНИМАНИЕ: ключ не найден. Скопируйте tools/ai-proxy.env.example в tools/ai-proxy.env и заполните AI_API_KEY.')
+    // The key travels to whatever host the base URL names, so a custom endpoint is worth saying out loud.
+    if (config.customBaseUrl) console.warn(`[ai] ВНИМАНИЕ: AI_BASE_URL = ${config.model.baseUrl} — ключ будет отправлен туда, а не на официальный адрес провайдера. Убедитесь, что это доверенный адрес.`)
     console.log('[ai] Содержимое запросов не выводится в журнал.')
   })
 }

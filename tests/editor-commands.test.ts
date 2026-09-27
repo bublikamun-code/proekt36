@@ -146,6 +146,11 @@ describe('transactional editor validation', () => {
     expect(store.updateSelected({ phase: 4 as 1 })).toBe(false)
     expect(store.updateSelected({ address: 'x'.repeat(65) })).toBe(false)
     expect(store.updateSelected({ marking: 'x'.repeat(65) })).toBe(false)
+    // The project schema treats `required: true` as also meaning non-blank, so an emptied
+    // address has to be refused here too. It used to be accepted, and the save that followed
+    // then threw inside the repository, which silently stopped autosave for the whole project.
+    expect(store.updateSelected({ address: '' })).toBe(false)
+    expect(store.updateSelected({ address: '   ' })).toBe(false)
 
     expect(JSON.stringify(store.currentProject)).toBe(before)
     expect(store.undoStack).toHaveLength(historyLength)

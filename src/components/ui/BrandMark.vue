@@ -14,7 +14,7 @@ defineProps<{ compact?: boolean }>()
 </template>
 
 <style scoped>
-.brand { display: flex; align-items: center; gap: 9px; color: var(--service); font-weight: 800; font-size: 15px; white-space: nowrap; letter-spacing: 0; }
+.brand { display: flex; align-items: center; gap: 9px; color: var(--service); font-weight: 800; font-size: var(--text-base); white-space: nowrap; letter-spacing: 0; }
 .brand b { color: var(--accent); }
 .brand-mark { width: 27px; height: 27px; flex: none; }
 .compact .brand-mark { width: 25px; height: 25px; }

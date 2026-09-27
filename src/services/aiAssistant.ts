@@ -201,7 +201,9 @@ export const probeAssistant = async (): Promise<AssistantHealth> => {
   }
 }
 
-export const askAssistant = async (input: { system: string; context: unknown; question: string; signal?: AbortSignal }): Promise<string> => {
+// `context` is a string, not the raw aggregate object: the proxy only forwards a string, and an
+// object used to be dropped in silence, so the model answered as if it had never seen the panel.
+export const askAssistant = async (input: { system: string; context: string; question: string; signal?: AbortSignal }): Promise<string> => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS)
   const onAbort = () => controller.abort()

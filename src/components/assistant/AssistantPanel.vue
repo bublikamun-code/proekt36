@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { assistantContextDisclosure, buildAssistantContext } from '../../domain/assistantContext'
+import { assistantContextDisclosure, buildAssistantContext, formatAssistantContext } from '../../domain/assistantContext'
 import type { Category } from '../../domain/types'
 import { validateProject } from '../../domain/validation'
 import { ASSISTANT_SYSTEM_PROMPT, askAssistant, parseAssistantAnswer, probeAssistant, type AssistantAction, type AssistantHealth } from '../../services/aiAssistant'
@@ -96,7 +96,7 @@ const ask = async () => {
   cancelled.value = false
   inFlight = new AbortController()
   try {
-    const raw = await askAssistant({ system: ASSISTANT_SYSTEM_PROMPT, context: context.value, question: text, signal: inFlight.signal })
+    const raw = await askAssistant({ system: ASSISTANT_SYSTEM_PROMPT, context: formatAssistantContext(context.value), question: text, signal: inFlight.signal })
     const answer = parseAssistantAnswer(raw, projectState())
     log.value = [...log.value, { id: (nextId += 1), question: text, text: answer.text, actions: answer.actions, rejected: answer.rejected, applied: [] }]
   } catch (failure) {
@@ -219,7 +219,7 @@ onMounted(check)
 }
 
 .badge {
-  font: 500 11px/1 var(--mono);
+  font:500 var(--text-xs)/1 var(--mono);
   padding: 3px 7px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -231,7 +231,7 @@ onMounted(check)
 
 .assistant-body { display: grid; gap: 10px; padding-top: 8px; }
 
-.state-line { margin: 0; font-size: 12px; color: var(--text-muted); }
+.state-line { margin: 0; font-size: var(--text-xs); color: var(--text-muted); }
 .state-line.off { color: var(--error); }
 .state-line.nokey { color: var(--warning); }
 
@@ -244,28 +244,28 @@ onMounted(check)
   background: var(--surface-raised);
 }
 
-.state-help p { margin: 0; font-size: 12px; color: var(--text-muted); }
-.state-help code { font: 500 12px/1.4 var(--mono); background: var(--canvas); padding: 1px 5px; border-radius: 4px; }
+.state-help p { margin: 0; font-size: var(--text-xs); color: var(--text-muted); }
+.state-help code { font:500 var(--text-xs)/1.4 var(--mono); background: var(--canvas); padding: 1px 5px; border-radius: 4px; }
 .state-help .text-button { justify-self: start; }
 
 .disclosure { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; }
-.disclosure summary { cursor: pointer; font-size: 12px; color: var(--text-muted); }
-.disclosure ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.disclosure summary { cursor: pointer; font-size: var(--text-xs); color: var(--text-muted); }
+.disclosure ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--text-xs); color: var(--text-muted); }
 
 .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 320px; overflow-y: auto; }
 .log:empty { display: none; }
 
 .entry { border-left: 2px solid var(--line); padding-left: 10px; display: grid; gap: 6px; }
-.entry.pending { color: var(--text-muted); font-size: 12px; }
-.asked { margin: 0; font-size: 12px; color: var(--text-faint); }
-.answer { margin: 0; font-size: 13px; white-space: pre-wrap; }
+.entry.pending { color: var(--text-muted); font-size: var(--text-xs); }
+.asked { margin: 0; font-size: var(--text-xs); color: var(--text-faint); }
+.answer { margin: 0; font-size: var(--text-sm); white-space: pre-wrap; }
 
 .actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .actions button {
   width: 100%;
   text-align: left;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-xs);
   padding: 7px 9px;
   border: 1px solid var(--accent);
   border-radius: 7px;
@@ -275,15 +275,15 @@ onMounted(check)
 }
 .actions button:disabled { border-color: var(--line); background: none; color: var(--text-faint); cursor: default; }
 
-.rejected { margin: 0; font-size: 11px; color: var(--warning); }
-.applied { display: block; font-size: 11px; color: var(--ok); }
-.error-line { margin: 0; font-size: 12px; color: var(--error); }
+.rejected { margin: 0; font-size: var(--text-xs); color: var(--warning); }
+.applied { display: block; font-size: var(--text-xs); color: var(--ok); }
+.error-line { margin: 0; font-size: var(--text-xs); color: var(--error); }
 
-.ask-label { font-size: 12px; color: var(--text-muted); }
+.ask-label { font-size: var(--text-xs); color: var(--text-muted); }
 textarea {
   width: 100%;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -295,7 +295,7 @@ textarea {
 .ask-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ask-row button {
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-xs);
   padding: 7px 12px;
   border: 0;
   border-radius: 7px;

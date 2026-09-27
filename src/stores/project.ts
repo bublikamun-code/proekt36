@@ -452,7 +452,7 @@ export const useProjectStore = defineStore('project', () => {
     const values = patch as Record<string, unknown>
     const allowed = new Set(['address', 'marking', 'note', 'quantity', 'phase'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Для выбранного устройства можно изменить только адрес, маркировку, примечание, количество и фазу.')
-    if ('address' in values && !validText(values.address, 64)) return rejectCommand('Адрес должен быть строкой не длиннее 64 символов.')
+    if ('address' in values && !validText(values.address, 64, true)) return rejectCommand('Адрес не может быть пустым и должен быть не длиннее 64 символов.')
     if ('marking' in values && !validText(values.marking, 64)) return rejectCommand('Маркировка должна быть строкой не длиннее 64 символов.')
     if ('note' in values && !validText(values.note, PROJECT_LIMITS.text)) return rejectCommand(`Примечание должно быть строкой не длиннее ${PROJECT_LIMITS.text} символов.`)
     if ('quantity' in values && !finiteInRange(values.quantity, 1, PROJECT_LIMITS.quantity, true)) return rejectCommand('Количество должно быть целым от 1 до 99. Физический размер устройства от него не зависит.')
