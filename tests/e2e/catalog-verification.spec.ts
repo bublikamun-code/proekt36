@@ -23,8 +23,11 @@ test.describe('catalogue provenance', () => {
     const flagged = page.locator('.catalog-list .verify-flag')
 
     expect(await items.count()).toBeGreaterThan(100)
-    // Most of the catalogue is templated, so a flag is expected on the default view.
     expect(await flagged.count()).toBeGreaterThan(0)
+    // A missing status is its own case: the built-in catalogue has no `verificationStatus`
+    // at all, and those are real products, not historical data.
+    await expect(page.locator('.catalog-list .verify-flag', { hasText: 'Статус не указан' }).first()).toBeAttached()
+    expect(await page.locator('.catalog-list .verify-flag', { hasText: 'Исторические данные' }).count()).toBe(0)
   })
 
   test('the filter narrows the list to confirmed entries only', async ({ page }) => {

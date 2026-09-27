@@ -53,7 +53,10 @@ const verificationLabel = (product: DeviceDefinition) => {
   if (product.verificationStatus === 'verified') return ''
   if (product.imported) return 'Импорт, не проверено'
   if (product.verificationStatus === 'template') return 'Шаблон'
-  return 'Исторические данные'
+  if (product.verificationStatus === 'legacy') return 'Исторические данные'
+  // A missing status is not the same as a historical one: the built-in catalogue carries no
+  // status field at all, and calling those real products historical would be simply untrue.
+  return 'Статус не указан'
 }
 
 const browse = () => fileInput.value?.click()

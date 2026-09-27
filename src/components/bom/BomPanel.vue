@@ -18,7 +18,13 @@ const weight = computed(() => currentProject.value.devices.reduce((sum, item) =>
 const productFor = (productId: string) => definitions.value.get(productId)
 const verificationLabel = (productId: string) => {
   const product = productFor(productId)
-  return product?.verificationStatus === 'verified' ? 'Подтверждено' : product?.verificationStatus === 'template' ? 'Шаблон' : product?.imported ? 'Импорт, не проверено' : 'Исторические данные'
+  // A missing status is not a historical one: the built-in catalogue carries no status field at
+  // all, and reporting real products as historical would be untrue.
+  return product?.verificationStatus === 'verified' ? 'Подтверждено'
+    : product?.verificationStatus === 'template' ? 'Шаблон'
+      : product?.imported ? 'Импорт, не проверено'
+        : product?.verificationStatus === 'legacy' ? 'Исторические данные'
+          : 'Статус не указан'
 }
 
 const exportCsv = () => {

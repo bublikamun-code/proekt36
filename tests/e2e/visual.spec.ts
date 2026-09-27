@@ -9,10 +9,13 @@ import { gotoEditor, seedProject } from './helpers'
  * pure appearance defect and slips past every assertion that does not read a pixel.
  *
  * Two caveats worth knowing before a baseline is regenerated:
- * - Manrope and IBM Plex Mono are not bundled. Where they are installed the render uses
- *   them, elsewhere it falls back, so a baseline is only valid for the machine that made it.
- * - Baselines live per platform in tests/e2e/visual.spec.ts-snapshots. Running on a new
- *   OS produces a diff that says nothing about the design.
+ * - Manrope and IBM Plex Mono are bundled from @fontsource, Latin and Cyrillic both, so the
+ *   render does not depend on what the machine happens to have installed. What it does still
+ *   depend on is the platform: text antialiasing differs between operating systems and
+ *   versions.
+ * - Baselines live per platform in tests/e2e/visual.spec.ts-snapshots and are named for the OS.
+ *   Running on a new one produces a diff that says nothing about the design, and it needs a new
+ *   baseline rather than a repair of the existing one.
  */
 const freeze = async (page: import('@playwright/test').Page) => {
   // The board animates width and transform; a screenshot mid-transition is a coin flip.
