@@ -89,14 +89,14 @@ const validateEnvelope = (value: unknown): string[] => {
   // A file written against an older catalogue is still readable; a newer or unreadable
   // revision is not. Comparing for plain equality would retire every export on each release.
   if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
-  else if (!isKnownRevision(value.catalogRevision) || text(value.catalogRevision) !== DOMAIN_CATALOG_REVISION) errors.push('неверна ревизия каталога')
+  else if (!isKnownRevision(value.catalogRevision)) errors.push('неверна ревизия каталога')
   if (isFutureRevision(value.validationRevision, VALIDATION_REVISION)) errors.push(`validationRevision новее установленного (${String(value.validationRevision)} > ${VALIDATION_REVISION})`)
   if (!isRecord(value.validation)) errors.push('отсутствует вложенная ревизия валидации')
   else if (isFutureRevision(value.validation.revision, VALIDATION_REVISION)) errors.push(`вложенная ревизия валидации новее установленной (${String(value.validation.revision)} > ${VALIDATION_REVISION})`)
   if (typeof value.exportedAt !== 'string' || Number.isNaN(Date.parse(value.exportedAt))) errors.push('ожидается корректная дата exportedAt')
   if (!isRecord(value.catalog)) errors.push('отсутствует вложенная ревизия каталога')
   else if (isFutureRevision(value.catalog.revision, DOMAIN_CATALOG_REVISION)) errors.push(`вложенная ревизия каталога новее установленной (${String(value.catalog.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-  else if (!isKnownRevision(value.catalog.revision) || text(value.catalog.revision) !== DOMAIN_CATALOG_REVISION) errors.push('неверна вложенная ревизия каталога')
+  else if (!isKnownRevision(value.catalog.revision)) errors.push('неверна вложенная ревизия каталога')
   if (isRecord(value.catalog) && JSON.stringify(value.catalog.snapshot) !== JSON.stringify(value.catalogSnapshot)) errors.push('вложенный snapshot каталога не совпадает с catalogSnapshot')
   if (isRecord(value.catalog) && JSON.stringify(value.catalog.manifest) !== JSON.stringify(value.catalogManifest)) errors.push('вложенный manifest каталога не совпадает с catalogManifest')
   if (!Array.isArray(value.catalogSnapshot)) errors.push('отсутствует catalogSnapshot')
@@ -104,7 +104,7 @@ const validateEnvelope = (value: unknown): string[] => {
   if (Array.isArray(value.catalogSnapshot) && isRecord(value.catalogManifest)) {
     const ids = value.catalogSnapshot.map((item) => isRecord(item) ? text(item.id) : '').filter(Boolean)
     if (isFutureRevision(value.catalogManifest.revision, DOMAIN_CATALOG_REVISION)) errors.push(`ревизия manifest каталога новее установленной (${String(value.catalogManifest.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-    else if (!isKnownRevision(value.catalogManifest.revision) || text(value.catalogManifest.revision) !== DOMAIN_CATALOG_REVISION) errors.push('неверна ревизия manifest каталога')
+    else if (!isKnownRevision(value.catalogManifest.revision)) errors.push('неверна ревизия manifest каталога')
     if (value.catalogManifest.count !== value.catalogSnapshot.length) errors.push('count каталога не совпадает со snapshot')
     if (JSON.stringify(value.catalogManifest.productIds) !== JSON.stringify(ids)) errors.push('productIds manifest не совпадают со snapshot')
     if (value.catalogManifest.hash !== stableHash(value.catalogSnapshot)) errors.push('hash каталога не совпадает со snapshot')

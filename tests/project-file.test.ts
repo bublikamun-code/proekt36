@@ -45,6 +45,23 @@ describe('project file import', () => {
     await expect(readProjectFile(new File(['{broken'], 'broken.json'))).rejects.toThrow('Не удалось прочитать JSON проекта')
   })
 
+  it('accepts an envelope written against an older catalogue revision', async () => {
+    const source = project()
+    const envelope = createProjectFileEnvelope(source, '2026-09-24T12:00:00.000Z')
+    // The catalogue moves on with every release; yesterday's export must stay readable.
+    const olderRevision = '2026-01-01.1'
+    const older = {
+      ...envelope,
+      catalogRevision: olderRevision,
+      catalog: { ...envelope.catalog, revision: olderRevision, manifest: { ...envelope.catalog.manifest, revision: olderRevision } },
+      catalogManifest: { ...envelope.catalogManifest, revision: olderRevision },
+    }
+    const imported = await readProjectFile(jsonFile(older))
+    expect(imported.id).toBe(source.id)
+
+    await expect(readProjectFile(jsonFile({ ...envelope, catalogRevision: '2999-01-01.1' }))).rejects.toThrow('новее установленного')
+  })
+
   it('rejects files larger than 5 MB before reading them', async () => {
     const oversized = { size: 5 * 1024 * 1024 + 1, text: async () => '{}' } as File
     await expect(readProjectFile(oversized)).rejects.toThrow('Файл проекта больше 5 МБ')
