@@ -17,9 +17,6 @@ export const getFootprintModules = (device: PlacedDevice, definitions: Map<strin
   return product ? getProductFootprintModules(product) : 1
 }
 
-/** Alias for callers that used the less explicit name while the schema was being migrated. */
-export const getDeviceFootprint = getFootprintModules
-
 export const resolveLayout = (project: PanelProject) => {
   const cabinet = project.settings.cabinetId ? cabinetById.get(project.settings.cabinetId) : undefined
   const rail = project.settings.railId ? railById.get(project.settings.railId) : undefined

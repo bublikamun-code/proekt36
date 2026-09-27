@@ -10,7 +10,6 @@ const MODEL_MAX_COMPRESSION_RATIO = 1000
 const ZIP_EOCD_SIGNATURE = 0x06054b50
 const ZIP_CENTRAL_SIGNATURE = 0x02014b50
 
-const textEncoder = new TextEncoder()
 
 export async function validateModelFile(file: File): Promise<PreparedModel> {
   if (file.size === 0) throw new Error('Файл пуст')
@@ -164,5 +163,3 @@ export function detectImportKind(file: File) {
   if (name.endsWith('.gltf')) return 'gltf'
   return 'invalid'
 }
-
-export const utf8Size = (value: string) => textEncoder.encode(value).byteLength

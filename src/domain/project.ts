@@ -1,4 +1,3 @@
-import { builtinCatalog } from '../data/catalog'
 import { cabinetById, railById } from '../data/enclosures'
 import type { Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings } from './types'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
@@ -183,5 +182,3 @@ export const presetProducts = (preset: string): { settings: Partial<ProjectSetti
     default: return { settings: { phase: 1, inputCurrent: 63, cabinetId: DEFAULT_CABINET_ID, railId: DEFAULT_RAIL_ID }, catalog: ['MCB', 'RCCB', 'SPD', 'terminals', 'meter'] }
   }
 }
-
-export const demoProductIds = builtinCatalog.map((product) => product.id)
