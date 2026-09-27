@@ -99,7 +99,9 @@ const fitScale = computed(() => {
 const renderScale = computed(() => boardZoom.value ?? fitScale.value)
 const fitted = computed(() => boardZoom.value === null)
 
-const clampScale = (scale: number) => Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, Math.round(scale * 10) / 10))
+// Rounding lives only in setBoardZoom; a second rounding here fought the store's and the
+// recorded value could disagree with the zoom label.
+const clampScale = (scale: number) => Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, scale))
 /** Leaving auto-fit steps from whatever the board is showing now, so the first click does not jump. */
 const changeZoom = (delta: number) => preferences.setBoardZoom(clampScale((boardZoom.value ?? renderScale.value) + delta))
 const fitToView = () => preferences.setBoardZoom(null)
