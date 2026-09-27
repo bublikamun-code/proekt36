@@ -23,7 +23,7 @@ const router = useRouter()
 const store = useProjectStore()
 const preferences = usePreferencesStore()
 const { confirm } = useConfirm()
-const { currentProject, projects, currentProjectId, selectedDevice, undoStack, redoStack, theme, definitions, importedModels, storageStatus, storageError, storageAlert, hasStorageBackup, hasStorageRecovery, lastSavedAt } = storeToRefs(store)
+const { currentProject, projects, currentProjectId, selectedDevice, undoStack, redoStack, theme, definitions, modelLibrary, storageStatus, storageError, storageAlert, hasStorageBackup, hasStorageRecovery, lastSavedAt } = storeToRefs(store)
 const { panelsOpen } = storeToRefs(preferences)
 /**
  * Whether the editor shows the board alone. It is kept rather than reset on every visit: a
@@ -101,7 +101,7 @@ const exportBackup = async () => {
     })
     if (!proceed) return
   }
-  downloadWorkspaceBackup(projects.value, importedModels.value, currentProjectId.value)
+  downloadWorkspaceBackup(projects.value, modelLibrary.value, currentProjectId.value)
   liveMessage.value = 'Экспорт резервной копии начат.'
 }
 const chooseBackupRestore = () => { backupInput.value?.click() }

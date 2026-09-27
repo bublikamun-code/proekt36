@@ -14,6 +14,7 @@ import {
   WebGLRenderer,
 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import type { ModelAsset } from '../../domain/types'
 import { getModelAsset } from '../../storage/modelDb'
 
 type PreviewObject = Object3D
@@ -77,13 +78,11 @@ const parseLocalModel = async (data: ArrayBuffer) => {
 }
 
 const props = withDefaults(defineProps<{
-  url?: string
-  assetId?: string
+  model: ModelAsset
   width?: number
   height?: number
   label?: string
-  rotationY?: number
-}>(), { width: 42, height: 66, label: 'CAD-модель устройства', rotationY: 0 })
+}>(), { width: 42, height: 66, label: 'CAD-модель устройства' })
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const state = ref<'loading' | 'ready' | 'error'>('loading')
@@ -98,16 +97,16 @@ let disposed = false
 let renderToken = 0
 
 const loadModel = () => {
-  const sourceKey = props.assetId ? `asset:${props.assetId}` : `url:${props.url ?? ''}`
-  if (!props.assetId && !props.url) return Promise.reject(new Error('Источник CAD-модели не указан'))
+  const { model } = props
+  const sourceKey = model.source === 'local' ? `asset:${model.id}` : `url:${model.url ?? ''}`
   const existing = loadCache.get(sourceKey)
   if (existing) return existing
-  const promise = props.assetId
-    ? getModelAsset(props.assetId).then((data) => {
-      if (!data) throw new Error('Локальный CAD-файл не найден в IndexedDB')
-      return parseLocalModel(data)
+  const promise = model.source === 'local'
+    ? getModelAsset(model.id).then((record) => {
+      if (!record) throw new Error('Локальный CAD-файл не найден в IndexedDB')
+      return parseLocalModel(record.data)
     })
-    : new GLTFLoader().loadAsync(props.url!)
+    : new GLTFLoader().loadAsync(model.url!)
   const modelPromise = promise.then((gltf) => gltf.scene)
   loadCache.set(sourceKey, modelPromise)
   modelPromise.catch(() => loadCache.delete(sourceKey))
@@ -117,7 +116,8 @@ const loadModel = () => {
 const renderModel = (model: PreviewObject) => {
   if (!renderer || !scene || !camera) return
   root = new Group()
-  root.rotation.y = props.rotationY
+  root.rotation.y = props.model.transform.rotationY
+  root.scale.setScalar(props.model.transform.scale)
   root.add(model.clone(true))
   const box = new Box3().setFromObject(root)
   const center = box.getCenter(new Vector3())
@@ -193,12 +193,12 @@ const dispose = () => {
 }
 
 onMounted(() => { void render() })
-watch([() => props.url, () => props.assetId], () => { if (!disposed) void render() })
+watch([() => props.model, () => props.width, () => props.height], () => { if (!disposed) void render() })
 onBeforeUnmount(dispose)
 </script>
 
 <template>
-  <div class="model-preview" role="img" :class="`state-${state}`" :style="{ width: `${width}px`, height: `${height}px` }" :data-model-preview="assetId ? `asset:${assetId}` : url" :aria-label="label">
+  <div class="model-preview" role="img" :class="`state-${state}`" :style="{ width: `${width}px`, height: `${height}px` }" :data-model-preview="model.source === 'local' ? `asset:${model.id}` : model.url" :aria-label="label">
     <canvas ref="canvas" aria-hidden="true"></canvas>
     <span v-if="state === 'loading'" class="model-preview-status">загрузка CAD…</span>
     <span v-else-if="state === 'error'" class="model-preview-status error">{{ errorMessage || 'CAD недоступен' }}</span>

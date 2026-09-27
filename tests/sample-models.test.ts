@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { enmasSeriesCatalog, sampleCatalog } from '../src/data/catalog'
+import { embeddedModelById } from '../src/data/models'
 
 const modelPath = resolve(process.cwd(), 'public/models/city9-mcb-2p.glb')
 
@@ -17,11 +18,20 @@ const modelPath = resolve(process.cwd(), 'public/models/city9-mcb-2p.glb')
     expect(sampleCatalog.map((item) => item.poles)).toEqual([1, 2])
   })
 
-  it('bundles the real 2P STEP-derived GLB for the 2D preview', () => {
+  it('binds the 2P sample to the embedded CAD manifest entry', () => {
     const twoPole = sampleCatalog.find((item) => item.id === 'city9-mcb-2p-c16')
-    expect(twoPole?.modelPreviewUrl).toBe('/models/city9-mcb-2p.glb')
-    expect(twoPole?.modelPreviewRotationY).toBe(-Math.PI / 2)
+    expect(twoPole?.modelId).toBe('city9-mcb-2p')
+    const asset = twoPole?.modelId ? embeddedModelById.get(twoPole.modelId) : undefined
+    expect(asset).toMatchObject({ source: 'embedded', url: '/models/city9-mcb-2p.glb', format: 'glb' })
+    expect(asset?.transform.rotationY).toBe(-Math.PI / 2)
     expect(existsSync(modelPath)).toBe(true)
     expect(statSync(modelPath).size).toBeGreaterThan(1_000_000)
+  })
+
+  it('never references an embedded model that the manifest does not declare', () => {
+    const declared = new Set(embeddedModelById.keys())
+    for (const product of sampleCatalog) {
+      if (product.modelId) expect(declared.has(product.modelId)).toBe(true)
+    }
   })
 })

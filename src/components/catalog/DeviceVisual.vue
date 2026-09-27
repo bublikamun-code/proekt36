@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
-import type { DeviceDefinition } from '../../domain/types'
+import type { DeviceDefinition, ModelAsset } from '../../domain/types'
 import DeviceChassis from './deviceFace/DeviceChassis.vue'
 import DeviceFace from './deviceFace/DeviceFace.vue'
 import { getDeviceFaceMetrics, faceShellFamily } from './deviceFace/metrics'
 
 const ModelPreview = defineAsyncComponent(() => import('./ModelPreview.vue'))
 
-const props = defineProps<{ product: DeviceDefinition; width?: number; height?: number }>()
+const props = defineProps<{ product: DeviceDefinition; model?: ModelAsset | null; width?: number; height?: number }>()
 
 const face = computed(() => getDeviceFaceMetrics(props.product))
 const isBusbar = computed(() => props.product.category === 'busbar')
@@ -19,12 +19,10 @@ const pxHeight = computed(() => Math.max(20, props.height ?? face.value.heightMm
 
 <template>
   <ModelPreview
-    v-if="product.modelPreviewUrl || product.modelAssetId"
-    :url="product.modelPreviewUrl"
-    :asset-id="product.modelAssetId"
+    v-if="model"
+    :model="model"
     :width="pxWidth"
     :height="pxHeight"
-    :rotation-y="product.modelPreviewRotationY"
     :label="`Реальная модель: ${product.name}`"
   />
   <svg

@@ -1,15 +1,10 @@
 export type Phase = 1 | 3
 
-export type Category =
-  | 'MCB'
-  | 'RCCB'
-  | 'RCBO'
-  | 'SPD'
-  | 'relay'
-  | 'terminals'
-  | 'busbar'
-  | 'meter'
-  | 'PSU'
+export const DEVICE_CATEGORIES = [
+  'MCB', 'RCCB', 'RCBO', 'SPD', 'relay', 'terminals', 'busbar', 'meter', 'PSU',
+] as const
+
+export type Category = typeof DEVICE_CATEGORIES[number]
 
 export type BusType = 'L' | 'N' | 'PE'
 
@@ -84,17 +79,69 @@ export interface DeviceDefinition {
   weight: number
   height: number
   depth: number
-  color: string
   imported?: boolean
-  modelAssetId?: string
-  modelPreviewUrl?: string
-  modelPreviewRotationY?: number
+  /** Link to a ModelAsset; visual only, never part of the electrical model. */
+  modelId?: string
   series?: string
   tripCurve?: 'B' | 'C' | 'D'
   residualCurrentMa?: number
   terminalCount?: number
   sourceUrl?: string
   verificationStatus?: VerificationStatus
+}
+
+export type ModelFormat = 'glb' | 'gltf' | 'gltf-zip'
+
+/** Normalization applied at import so every asset renders in metres, front to the viewer. */
+export interface ModelTransform {
+  scale: number
+  rotationY: number
+}
+
+export interface ModelAsset {
+  id: string
+  name: string
+  /** 'embedded' ships with the app from /public; 'local' lives in IndexedDB. */
+  source: 'embedded' | 'local'
+  url?: string
+  format: ModelFormat
+  transform: ModelTransform
+  /** Raster preview generated on import; boards and catalog lists never spawn WebGL for it. */
+  thumbnailDataUrl?: string
+  fileName?: string
+  createdAt: string
+  /** The IndexedDB binary is gone; re-importing the same file restores it in place. */
+  missing?: boolean
+}
+
+export type StoredModelAsset = ModelAsset & { source: 'local' }
+
+/** Everything the model library persists in one localStorage record. */
+export interface StoredModelLibrary {
+  assets: StoredModelAsset[]
+  /** Product stubs created from imports; referenced by PlacedDevice.productId. */
+  products: DeviceDefinition[]
+  /** productId → modelId overrides that attach a model to a built-in product. */
+  bindings: Record<string, string>
+}
+
+/** Form defaults offered when an imported file becomes a catalogue product stub. */
+export interface ImportedProductDraft {
+  name: string
+  brand: string
+  sku: string
+  category: Category
+  moduleWidth: number
+  poles: number
+  ratedCurrent: number
+  voltage: 230 | 400
+  bus: BusType
+  price: number
+  weight: number
+  height: number
+  depth: number
+  fileName: string
+  format: ModelFormat
 }
 
 export interface PlacedDevice {
@@ -167,29 +214,8 @@ export interface BomLine {
   priceStatus: 'known' | 'unknown'
 }
 
-export interface ModelMetadata {
-  id: string
-  name: string
-  brand: string
-  sku: string
-  category: Category
-  moduleWidth: number
-  rows: number
-  height: number
-  depth: number
-  poles: number
-  ratedCurrent: number
-  voltage: 230 | 400
-  bus: BusType
-  price: number
-  weight: number
-  fileName: string
-  fileType: 'glb' | 'gltf'
-  createdAt: string
-}
-
 export interface PreparedModel {
-  metadata: Omit<ModelMetadata, 'id' | 'createdAt'>
+  draft: ImportedProductDraft
   data: ArrayBuffer
   mimeType: string
   fileName: string

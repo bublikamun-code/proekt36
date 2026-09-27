@@ -161,7 +161,7 @@ const exportBackup = async () => {
     })
     if (!proceed) return
   }
-  downloadWorkspaceBackup(projects.value, store.importedModels, currentProjectId.value)
+  downloadWorkspaceBackup(projects.value, store.modelLibrary, currentProjectId.value)
   liveMessage.value = 'Экспорт резервной копии начат.'
 }
 const chooseBackupRestore = () => { importError.value = ''; backupInput.value?.click() }

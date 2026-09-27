@@ -10,7 +10,6 @@ const device = (
 ): DeviceDefinition => ({
   id, name, brand, sku, category, moduleWidth, poles, ratedCurrent, voltage, bus,
   price, weight, height: 82, depth: 70,
-  color: category === 'MCB' ? '#f3f4ef' : category === 'SPD' ? '#e7b957' : '#f7f5ef',
 })
 
 export const categoryLabels: Record<Category, string> = {
@@ -84,7 +83,6 @@ const enmasDevice = (
   weight: options.weight ?? 0,
   height: options.height ?? 82,
   depth: options.depth ?? 78,
-  color: options.color ?? (category === 'SPD' ? '#e7b957' : category === 'busbar' ? '#aeb8b4' : '#f7f5ef'),
   series,
   verificationStatus: options.verificationStatus ?? 'verified',
   sourceUrl: options.sourceUrl,
@@ -173,11 +171,10 @@ for (const [series, current, poles, width] of [['NJVA1-63', 63, 2, 2], ['NJVA1-1
 
 for (const poles of [1, 2, 3, 4] as const) {
   for (const ratedCurrent of [63, 100] as const) {
-    addEnmas(enmasDevice(`enmas-fork-${poles}p-${ratedCurrent}a`, `FORK ${poles}P ${ratedCurrent}A, 12 модулей`, 'busbar', 'FORK', 12, poles, ratedCurrent, {
-      verificationStatus: 'verified',
-      sourceUrl: 'https://ensmas.ru/catalog/oborudovanie_nizkogo_napryazheniya/modulnye_apparaty_raspredeleniya_elektroenergii/modulnye_avtomaticheskie_vyklyuchateli/nb_nxb_aksessuary/',
-      color: '#aeb8b4',
-      height: 54,
+      addEnmas(enmasDevice(`enmas-fork-${poles}p-${ratedCurrent}a`, `FORK ${poles}P ${ratedCurrent}A, 12 модулей`, 'busbar', 'FORK', 12, poles, ratedCurrent, {
+        verificationStatus: 'verified',
+        sourceUrl: 'https://ensmas.ru/catalog/oborudovanie_nizkogo_napryazheniya/modulnye_apparaty_raspredeleniya_elektroenergii/modulnye_avtomaticheskie_vyklyuchateli/nb_nxb_aksessuary/',
+        height: 54,
       depth: 52,
     }))
   }
@@ -188,7 +185,6 @@ for (const poles of [1, 2, 3, 4] as const) {
     addEnmas(enmasDevice(`enmas-nu6-iig-${poles}p-${uc}v`, `NU6-IIG ${poles}P Uc ${uc}V`, 'SPD', 'NU6-IIG', poles, poles, 63, {
       verificationStatus: 'verified',
       sourceUrl: 'https://ensmas.ru/catalog/oborudovanie_nizkogo_napryazheniya/modulnye_apparaty_raspredeleniya_elektroenergii/ustroystva_zashchity_ot_impulsnykh_perenapryazheniy/nu6_g/',
-      color: '#e7b957',
       height: 82,
       depth: 70,
     }))
@@ -243,7 +239,6 @@ const sampleDevice = (
   weight: 0.16,
   height: 82,
   depth: 74,
-  color: '#f3f4ef',
   series: 'CITY9-MCB',
   tripCurve: 'C',
   verificationStatus: 'template',
@@ -253,8 +248,7 @@ const sampleDevice = (
 export const sampleCatalog: DeviceDefinition[] = [
   sampleDevice('city9-mcb-1p-c16', 'City9 MCB 1P C16', 'CITY9-MCB-1P-C16', 1, 1),
   sampleDevice('city9-mcb-2p-c16', 'City9 MCB 2P C16', 'CITY9-MCB-2P-C16', 2, 2, {
-    modelPreviewUrl: '/models/city9-mcb-2p.glb',
-    modelPreviewRotationY: -Math.PI / 2,
+    modelId: 'city9-mcb-2p',
   }),
 ]
 

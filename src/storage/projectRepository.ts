@@ -1,13 +1,16 @@
-import { assertValidProjectSchema, PROJECT_SCHEMA_VERSION, validateProjectSchema } from '../domain/projectSchema'
+import { assertValidProjectSchema, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import { migrateProject } from '../domain/project'
-import type { ModelMetadata, PanelProject } from '../domain/types'
+import { DEVICE_CATEGORIES } from '../domain/types'
+import type { DeviceDefinition, ModelFormat, PanelProject, StoredModelAsset, StoredModelLibrary } from '../domain/types'
 
 export const PROJECTS_KEY = 'panel36.projects.v2'
 export const LEGACY_PROJECTS_KEY = 'panel36.projects.v1'
-export const MODELS_KEY = 'panel36.models.v1'
+export const MODELS_KEY = 'panel36.models.v2'
+export const LEGACY_MODELS_KEY = 'panel36.models.v1'
 export const CURRENT_PROJECT_KEY = 'panel36.currentProjectId.v1'
 export const PROJECTS_BACKUP_KEY = 'panel36.projects.backup.v1'
-export const MODELS_BACKUP_KEY = 'panel36.models.backup.v1'
+export const MODELS_BACKUP_KEY = 'panel36.models.backup.v2'
+export const LEGACY_MODELS_BACKUP_KEY = 'panel36.models.backup.v1'
 export const RECOVERY_KEY = 'panel36.storage.recovery.v1'
 
 export interface StorageRecovery {
@@ -20,7 +23,7 @@ export interface StorageRecovery {
 
 export interface StorageBackupData {
   projects: PanelProject[] | null
-  models: ModelMetadata[] | null
+  models: StoredModelLibrary | null
   currentProjectId: string | null
   rawProjects: string | null
   rawModels: string | null
@@ -28,7 +31,7 @@ export interface StorageBackupData {
 
 export interface WorkspaceRepositorySnapshot {
   projects: PanelProject[]
-  models: ModelMetadata[]
+  models: StoredModelLibrary
   currentProjectId: string | null
   available: boolean
   recovery: StorageRecovery[]
@@ -59,13 +62,117 @@ const getDefaultStorage = (): LocalStorageLike | null => {
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
-const isModelMetadata = (value: unknown): value is ModelMetadata => {
+const MODEL_FORMATS: readonly ModelFormat[] = ['glb', 'gltf', 'gltf-zip']
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+const isStoredModelAsset = (value: unknown): value is StoredModelAsset => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const item = value as Partial<ModelMetadata>
+  const item = value as Partial<StoredModelAsset> & { transform?: Partial<StoredModelAsset['transform']> }
   return typeof item.id === 'string' && Boolean(item.id.trim())
     && typeof item.name === 'string'
-    && typeof item.category === 'string'
-    && typeof item.fileType === 'string'
+    && item.source === 'local'
+    && MODEL_FORMATS.includes(item.format as ModelFormat)
+    && Boolean(item.transform && isFiniteNumber(item.transform.scale) && item.transform.scale > 0 && isFiniteNumber(item.transform.rotationY))
+    && (item.thumbnailDataUrl === undefined || typeof item.thumbnailDataUrl === 'string')
+    && (item.fileName === undefined || typeof item.fileName === 'string')
+    && (item.missing === undefined || typeof item.missing === 'boolean')
+    && typeof item.createdAt === 'string'
+}
+
+/** Product stubs enter definitions and board geometry, so every number must survive a reload. */
+export const isImportedProduct = (value: unknown): value is DeviceDefinition => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Partial<DeviceDefinition>
+  return typeof item.id === 'string' && Boolean(item.id.trim())
+    && typeof item.name === 'string' && Boolean(item.name.trim())
+    && typeof item.brand === 'string'
+    && typeof item.sku === 'string'
+    && (DEVICE_CATEGORIES as readonly string[]).includes(String(item.category))
+    && isFiniteNumber(item.moduleWidth) && item.moduleWidth > 0 && item.moduleWidth <= 24
+    && isFiniteNumber(item.poles) && item.poles >= 1 && item.poles <= 12
+    && isFiniteNumber(item.ratedCurrent) && item.ratedCurrent > 0
+    && (item.voltage === 230 || item.voltage === 400)
+    && (item.bus === 'L' || item.bus === 'N' || item.bus === 'PE')
+    && isFiniteNumber(item.price) && item.price >= 0
+    && isFiniteNumber(item.weight) && item.weight >= 0
+    && isFiniteNumber(item.height) && item.height >= 1
+    && isFiniteNumber(item.depth) && item.depth >= 1
+    && item.imported === true
+    && (item.modelId === undefined || typeof item.modelId === 'string')
+}
+
+/** One record of the pre-split library: a model that also was a product. */
+interface LegacyModelMetadata {
+  id: string
+  name: string
+  brand: string
+  sku: string
+  category: string
+  moduleWidth: number
+  poles: number
+  ratedCurrent: number
+  voltage: 230 | 400
+  bus: string
+  price: number
+  weight: number
+  height: number
+  depth: number
+  fileName: string
+  fileType: 'glb' | 'gltf'
+  createdAt: string
+}
+
+const asLegacyModelMetadata = (value: unknown): LegacyModelMetadata | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const item = value as Partial<LegacyModelMetadata>
+  if (typeof item.id !== 'string' || !item.id.trim() || typeof item.name !== 'string' || typeof item.fileType !== 'string') return null
+  const numbers = [item.moduleWidth, item.poles, item.ratedCurrent, item.price, item.weight, item.height, item.depth]
+  return numbers.every(isFiniteNumber)
+    && typeof item.brand === 'string' && typeof item.sku === 'string' && typeof item.category === 'string'
+    && typeof item.bus === 'string' && typeof item.fileName === 'string' && typeof item.createdAt === 'string'
+    ? value as LegacyModelMetadata
+    : null
+}
+
+/**
+ * v1 stored one record per import where the asset and the product shared an id. The split keeps
+ * that id on both sides, so every PlacedDevice.productId written before the migration still
+ * resolves to the migrated product stub.
+ */
+export const migrateLegacyModels = (items: unknown[]): StoredModelLibrary => {
+  const library: StoredModelLibrary = { assets: [], products: [], bindings: {} }
+  for (const entry of items) {
+    const legacy = asLegacyModelMetadata(entry)
+    if (!legacy) continue
+    library.assets.push({
+      id: legacy.id,
+      name: legacy.name,
+      source: 'local',
+      format: legacy.fileType === 'glb' ? 'glb' : 'gltf',
+      transform: { scale: 1, rotationY: 0 },
+      fileName: legacy.fileName,
+      createdAt: legacy.createdAt,
+    })
+    library.products.push({
+      id: legacy.id,
+      name: legacy.name,
+      brand: legacy.brand,
+      sku: legacy.sku,
+      category: (DEVICE_CATEGORIES as readonly string[]).includes(legacy.category) ? legacy.category as DeviceDefinition['category'] : 'MCB',
+      moduleWidth: legacy.moduleWidth,
+      poles: legacy.poles,
+      ratedCurrent: legacy.ratedCurrent,
+      voltage: legacy.voltage === 400 ? 400 : 230,
+      bus: legacy.bus === 'N' ? 'N' : legacy.bus === 'PE' ? 'PE' : 'L',
+      price: legacy.price,
+      weight: legacy.weight,
+      height: legacy.height,
+      depth: legacy.depth,
+      imported: true,
+      modelId: legacy.id,
+    })
+  }
+  return library
 }
 
 const normalizeProject = (value: unknown, strict: boolean): PanelProject => {
@@ -108,16 +215,32 @@ const normalizeProjects = (raw: string, strict: boolean): PanelProject[] => {
   return projects
 }
 
-const normalizeModels = (raw: string): ModelMetadata[] => {
+const normalizeModelLibrary = (raw: string): StoredModelLibrary => {
   const parsed = JSON.parse(raw) as unknown
-  if (!Array.isArray(parsed)) throw new Error('models: сохранённые данные должны быть массивом')
-  if (!parsed.every(isModelMetadata)) throw new Error('models: обнаружена некорректная метаданные модели')
-  const ids = new Set<string>()
-  for (const model of parsed) {
-    if (ids.has(model.id)) throw new Error(`models: повторяется идентификатор модели «${model.id}»`)
-    ids.add(model.id)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('models: ожидается объект библиотеки моделей')
+  const record = parsed as Partial<StoredModelLibrary> & { assets?: unknown; products?: unknown; bindings?: unknown }
+  if (!Array.isArray(record.assets) || !Array.isArray(record.products)) throw new Error('models: assets и products должны быть массивами')
+  if (record.bindings === undefined || record.bindings === null || typeof record.bindings !== 'object' || Array.isArray(record.bindings)) {
+    throw new Error('models: bindings должен быть объектом')
   }
-  return parsed
+  if (!record.assets.every(isStoredModelAsset)) throw new Error('models: обнаружен некорректный ассет модели')
+  if (!record.products.every(isImportedProduct)) throw new Error('models: обнаружен некорректный товар импорта')
+  const bindings: Record<string, string> = {}
+  for (const [productId, modelId] of Object.entries(record.bindings)) {
+    if (typeof modelId !== 'string' || !modelId.trim()) throw new Error(`models: некорректная привязка модели для «${productId}»`)
+    bindings[productId] = modelId
+  }
+  const assetIds = new Set<string>()
+  for (const asset of record.assets) {
+    if (assetIds.has(asset.id)) throw new Error(`models: повторяется идентификатор ассета «${asset.id}»`)
+    assetIds.add(asset.id)
+  }
+  const productIds = new Set<string>()
+  for (const product of record.products) {
+    if (productIds.has(product.id)) throw new Error(`models: повторяется идентификатор товара «${product.id}»`)
+    productIds.add(product.id)
+  }
+  return { assets: clone(record.assets), products: clone(record.products), bindings }
 }
 
 const errorName = (error: unknown) => error && typeof error === 'object' && 'name' in error ? String(error.name) : ''
@@ -195,8 +318,11 @@ export class WorkspaceRepository {
     return normalizeProjects(raw, strict)
   }
 
-  private parseModels(raw: string) {
-    return normalizeModels(raw)
+  private parseModels(raw: string, legacy: boolean) {
+    if (!legacy) return normalizeModelLibrary(raw)
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) throw new Error('models: сохранённые данные должны быть массивом')
+    return migrateLegacyModels(parsed)
   }
 
   private recordInvalid(sourceKey: string, raw: string, reason: string) {
@@ -237,11 +363,11 @@ export class WorkspaceRepository {
     return fallback
   }
 
-  private readModelsWithRecovery(fallback: ModelMetadata[]): ModelMetadata[] {
+  private readModelsWithRecovery(fallback: StoredModelLibrary): StoredModelLibrary {
     const raw = this.readRaw(MODELS_KEY)
     if (raw !== null) {
       try {
-        return this.parseModels(raw)
+        return this.parseModels(raw, false)
       } catch (error) {
         this.recordInvalid(MODELS_KEY, raw, error instanceof Error ? error.message : String(error))
       }
@@ -249,12 +375,23 @@ export class WorkspaceRepository {
     const backupRaw = this.readRaw(MODELS_BACKUP_KEY)
     if (backupRaw !== null) {
       try {
-        const models = this.parseModels(backupRaw)
+        const models = this.parseModels(backupRaw, false)
         this.backup.models = clone(models)
         this.backup.rawModels = backupRaw
         return models
       } catch (error) {
         this.recordInvalid(MODELS_BACKUP_KEY, backupRaw, error instanceof Error ? error.message : String(error))
+      }
+    }
+    // The pre-split library kept one array where an asset doubled as a product; both v1 keys
+    // (primary and backup) migrate the same lossless way, preserving every id.
+    for (const legacyKey of [LEGACY_MODELS_KEY, LEGACY_MODELS_BACKUP_KEY]) {
+      const legacyRaw = this.readRaw(legacyKey)
+      if (legacyRaw === null) continue
+      try {
+        return this.parseModels(legacyRaw, true)
+      } catch (error) {
+        this.recordInvalid(legacyKey, legacyRaw, error instanceof Error ? error.message : String(error))
       }
     }
     return fallback
@@ -287,7 +424,7 @@ export class WorkspaceRepository {
     }
   }
 
-  load(fallbackProjects: PanelProject[], fallbackModels: ModelMetadata[] = []): WorkspaceRepositorySnapshot {
+  load(fallbackProjects: PanelProject[], fallbackModels: StoredModelLibrary = { assets: [], products: [], bindings: {} }): WorkspaceRepositorySnapshot {
     this.recovery = []
     this.backup = { projects: null, models: null, currentProjectId: null, rawProjects: null, rawModels: null }
     if (!this.storage) {
@@ -319,7 +456,7 @@ export class WorkspaceRepository {
         const backupRaw = this.readRaw(MODELS_BACKUP_KEY)
         if (backupRaw !== null) {
           try {
-            this.backup.models = this.parseModels(backupRaw)
+            this.backup.models = this.parseModels(backupRaw, false)
             this.backup.rawModels = backupRaw
           } catch {
             // The primary snapshot is healthy; an invalid old backup is replaced on the next safe write.
@@ -352,19 +489,39 @@ export class WorkspaceRepository {
     this.writeRaw(key, value)
   }
 
-  save(snapshot: { projects: PanelProject[]; models: ModelMetadata[]; currentProjectId: string }) {
+  /**
+   * @param options.modelsDirty the model library changed since the last write; without it the
+   * models key (and its backup copy) is skipped unless it has never been written at all, so a
+   * project-only autosave stops re-serializing the library on every keystroke.
+   */
+  save(snapshot: { projects: PanelProject[]; models: StoredModelLibrary; currentProjectId: string }, options: { modelsDirty?: boolean } = {}) {
     if (!this.storage) throw new Error('Локальное хранилище недоступно')
     for (const project of snapshot.projects) assertValidProjectSchema(project)
-    if (snapshot.models.some((model) => !isModelMetadata(model))) throw new Error('Некорректные метаданные модели')
+    const library = snapshot.models
+    if (!library.assets.every(isStoredModelAsset) || !library.products.every(isImportedProduct)) {
+      throw new Error('Некорректная библиотека моделей')
+    }
     this.persistRecovery()
     this.writeWithBackup(PROJECTS_KEY, PROJECTS_BACKUP_KEY, JSON.stringify(snapshot.projects), !this.recovery.some((item) => item.sourceKey === PROJECTS_KEY))
-    this.writeWithBackup(MODELS_KEY, MODELS_BACKUP_KEY, JSON.stringify(snapshot.models), !this.recovery.some((item) => item.sourceKey === MODELS_KEY))
+    const modelsRaw = JSON.stringify(library)
+    if (options.modelsDirty || this.readRaw(MODELS_KEY) === null) {
+      this.writeWithBackup(MODELS_KEY, MODELS_BACKUP_KEY, modelsRaw, !this.recovery.some((item) => item.sourceKey === MODELS_KEY))
+    }
     this.writeRaw(CURRENT_PROJECT_KEY, snapshot.currentProjectId)
     this.backup.projects = clone(snapshot.projects)
-    this.backup.models = clone(snapshot.models)
+    this.backup.models = clone(library)
     this.backup.currentProjectId = snapshot.currentProjectId
     this.backup.rawProjects = JSON.stringify(snapshot.projects)
-    this.backup.rawModels = JSON.stringify(snapshot.models)
+    this.backup.rawModels = modelsRaw
+    // The v2 record is durable now, so the pre-split keys go; a failed removal only leaves
+    // stale data that migrates again harmlessly on the next load.
+    for (const legacyKey of [LEGACY_MODELS_KEY, LEGACY_MODELS_BACKUP_KEY]) {
+      try {
+        this.removeRaw(legacyKey)
+      } catch {
+        // Ignored on purpose: removal retries on every later save.
+      }
+    }
   }
 
   saveCurrentProjectId(id: string) {
@@ -376,7 +533,7 @@ export class WorkspaceRepository {
 
   clear() {
     if (!this.storage) throw new Error('Локальное хранилище недоступно')
-    const keys = [PROJECTS_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY]
+    const keys = [PROJECTS_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, LEGACY_MODELS_KEY, LEGACY_MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY]
     const errors: unknown[] = []
     for (const key of keys) {
       try {
@@ -389,9 +546,4 @@ export class WorkspaceRepository {
     this.backup = { projects: null, models: null, currentProjectId: null, rawProjects: null, rawModels: null }
     if (errors.length) throw new Error(errors.map((error) => errorMessage(error)).join('; '))
   }
-}
-
-export const validateStoredProjects = (value: unknown) => {
-  const projects = Array.isArray(value) ? value : []
-  return projects.map((project) => validateProjectSchema(project))
 }

@@ -1,5 +1,5 @@
 import { unzipSync } from 'fflate'
-import type { PreparedModel } from '../domain/types'
+import type { ImportedProductDraft, PreparedModel } from '../domain/types'
 
 export type { PreparedModel } from '../domain/types'
 
@@ -39,7 +39,7 @@ async function validateGlb(data: ArrayBuffer, file: File): Promise<PreparedModel
     if (offset % 4 && offset < view.byteLength) offset += 4 - (offset % 4)
   }
   assertScene(json)
-  return { metadata: baseMetadata(file, 'glb'), data, mimeType: 'model/gltf-binary', fileName: file.name }
+  return { draft: baseDraft(file, 'glb'), data, mimeType: 'model/gltf-binary', fileName: file.name }
 }
 
 async function validateGltfJson(data: ArrayBuffer, file: File): Promise<PreparedModel> {
@@ -53,7 +53,7 @@ async function validateGltfJson(data: ArrayBuffer, file: File): Promise<Prepared
     .map((resource) => resource && typeof resource === 'object' && 'uri' in resource ? (resource as { uri?: string }).uri : undefined)
     .find((uri) => uri && !uri.startsWith('data:'))
   if (external) throw new Error('glTF использует внешние ресурсы. Упакуйте .gltf, .bin и текстуры в .zip')
-  return { metadata: baseMetadata(file, 'gltf'), data, mimeType: 'model/gltf+json', fileName: file.name }
+  return { draft: baseDraft(file, 'gltf'), data, mimeType: 'model/gltf+json', fileName: file.name }
 }
 
 const assertSafeZipDirectory = (data: ArrayBuffer) => {
@@ -134,7 +134,7 @@ export function validateGltfZip(data: ArrayBuffer, file: File): PreparedModel {
     if (decoded.split('/').includes('..')) throw new Error('Недопустимый путь к ресурсу glTF')
     if (!names.includes(basePath + decoded)) throw new Error(`Не найден ресурс архива: ${decoded}`)
   }
-  return { metadata: baseMetadata(file, 'gltf'), data, mimeType: 'application/zip', fileName: file.name }
+  return { draft: zipDraft(file), data, mimeType: 'application/zip', fileName: file.name }
 }
 
 const parseGltf = (data: ArrayBuffer) => {
@@ -148,11 +148,14 @@ const assertScene = (json?: Record<string, unknown>) => {
   if (!Array.isArray(json.scenes) || json.scenes.length === 0) throw new Error('В модели не найдена сцена')
 }
 
-const baseMetadata = (file: File, fileType: 'glb' | 'gltf') => ({
-  name: file.name.replace(/\.(glb|gltf|zip)$/i, ''), brand: '', sku: '', category: 'MCB' as const,
-  moduleWidth: 1, rows: 1, height: 82, depth: 70, poles: 1, ratedCurrent: 16,
-  voltage: 230 as const, bus: 'L' as const, price: 0, weight: 0, fileName: file.name, fileType,
+const baseDraft = (file: File, format: 'glb' | 'gltf'): ImportedProductDraft => ({
+  name: file.name.replace(/\.(glb|gltf|zip)$/i, ''), brand: '', sku: '', category: 'MCB',
+  moduleWidth: 1, height: 82, depth: 70, poles: 1, ratedCurrent: 16,
+  voltage: 230, bus: 'L', price: 0, weight: 0, fileName: file.name, format,
 })
+
+/** A glTF archive is stored verbatim; the renderer unpacks it the same way the validator did. */
+const zipDraft = (file: File): ImportedProductDraft => ({ ...baseDraft(file, 'gltf'), format: 'gltf-zip' })
 
 export function detectImportKind(file: File) {
   const name = file.name.toLowerCase()

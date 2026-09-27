@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { categoryLabels } from '../../data/catalog'
 import { beginBoardDrag } from '../../composables/useBoardDrag'
 import { getProductFootprintModules } from '../../domain/layout'
-import type { BusType, Category, DeviceDefinition, ModelMetadata } from '../../domain/types'
+import type { BusType, Category, DeviceDefinition, ModelAsset, StoredModelAsset } from '../../domain/types'
 import { detectImportKind, validateGltfZip, validateModelFile, type PreparedImport } from '../../storage/modelImportFlow'
 import { useProjectStore } from '../../stores/project'
 import AppDialog from '../ui/AppDialog.vue'
@@ -22,7 +22,7 @@ import DeviceVisual from './DeviceVisual.vue'
 const props = defineProps<{ focusCategory?: Category | null }>()
 
 const store = useProjectStore()
-const { definitions, importedModels } = storeToRefs(store)
+const { definitions, modelLibrary } = storeToRefs(store)
 const search = ref('')
 const category = ref<Category | 'all'>('all')
 const verifiedOnly = ref(false)
@@ -34,8 +34,11 @@ const adding = ref(false)
 const importError = ref('')
 const prepared = ref<PreparedImport | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
-const importForm = ref<ModelMetadata | null>(null)
+const importForm = ref<{ product: DeviceDefinition; asset: StoredModelAsset } | null>(null)
 const deleteModelId = ref<string | null>(null)
+
+const productModel = (product: DeviceDefinition): ModelAsset | undefined => store.resolveProductModel(product)
+const stubProduct = (assetId: string) => modelLibrary.value.products.find((item) => item.id === assetId)
 
 const products = computed(() => {
   const term = search.value.trim().toLocaleLowerCase('ru')
@@ -70,7 +73,20 @@ const onFile = async (event: Event) => {
     const kind = detectImportKind(file)
     const data = await file.arrayBuffer()
     prepared.value = kind === 'zip' ? validateGltfZip(data, file) : await validateModelFile(file)
-    importForm.value = { id: crypto.randomUUID(), ...prepared.value.metadata, createdAt: new Date().toISOString() }
+    const draft = prepared.value.draft
+    // One id for both the asset and its product stub: a stub placed on the board keeps
+    // resolving after the file is re-imported in this or another browser.
+    const id = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
+    importForm.value = {
+      asset: { id, name: draft.name, source: 'local', format: draft.format, transform: { scale: 1, rotationY: 0 }, fileName: draft.fileName, createdAt },
+      product: {
+        id, name: draft.name, brand: draft.brand, sku: draft.sku, category: draft.category,
+        moduleWidth: draft.moduleWidth, poles: draft.poles, ratedCurrent: draft.ratedCurrent,
+        voltage: draft.voltage, bus: draft.bus, price: draft.price, weight: draft.weight,
+        height: draft.height, depth: draft.depth, imported: true, modelId: id,
+      },
+    }
   } catch (error) {
     prepared.value = null
     importError.value = error instanceof Error ? error.message : 'Не удалось проверить файл'
@@ -84,7 +100,8 @@ const confirmImport = async () => {
   if (!prepared.value || !importForm.value) return
   adding.value = true
   try {
-    await store.addImportedModel(importForm.value, prepared.value.data)
+    importForm.value.asset.name = importForm.value.product.name.trim() || importForm.value.asset.name
+    await store.addImportedModel(importForm.value.product, importForm.value.asset, prepared.value.data)
     prepared.value = null
     importForm.value = null
   } catch (error) {
@@ -133,14 +150,13 @@ const removeModel = async () => {
 
     <div class="catalog-list">
       <button v-for="product in products" :key="product.id" class="catalog-item" @click="store.addDevice(product.id)" @pointerdown="startCatalogDrag($event, product.id)">
-        <DeviceVisual :product="product" :width="Math.min(44, 20 + product.moduleWidth * 5)" />
+        <DeviceVisual :product="product" :model="productModel(product)" :width="Math.min(44, 20 + product.moduleWidth * 5)" />
         <span class="item-copy">
           <strong>{{ product.name }}</strong>
           <small>{{ product.brand }} · {{ product.sku }}</small>
           <span class="specs"><b>{{ product.moduleWidth }} мод.</b><b>{{ product.ratedCurrent }} A</b><b>{{ product.price > 0 ? `${product.price.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</b><b v-if="verificationLabel(product)" class="verify-flag">{{ verificationLabel(product) }}</b></span>
         </span>
-        <span v-if="product.modelPreviewUrl" class="import-badge cad-badge">CAD</span>
-        <span v-else-if="product.imported" class="import-badge cad-badge">CAD</span>
+        <span v-if="productModel(product)" class="import-badge cad-badge">CAD</span>
         <svg class="add-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
       </button>
       <div v-if="!products.length" class="empty-list">Ничего не найдено. Измените запрос.</div>
@@ -149,33 +165,32 @@ const removeModel = async () => {
     <section class="model-import" aria-labelledby="model-import-title">
       <div class="panel-heading compact-heading">
         <div><span class="eyebrow">IndexedDB</span><h3 id="model-import-title">CAD-модели</h3></div>
-        <span class="mono count">{{ importedModels.length }}</span>
+        <span class="mono count">{{ modelLibrary.assets.length }}</span>
       </div>
       <input ref="fileInput" class="sr-only" tabindex="-1" aria-label="Файл CAD-модели" type="file" accept=".glb,.gltf,.zip,model/gltf-binary,model/gltf+json,application/zip" @change="onFile" />
       <button class="upload-button" :disabled="adding" @click="browse"><span>＋</span>{{ adding ? 'Проверка файла…' : 'Импорт .glb / .gltf / .zip' }}</button>
       <p class="file-help">GLB напрямую; glTF с ресурсами в ZIP. До 50 МБ.</p>
       <div v-if="importError" class="error-text" role="alert"><b>Ошибка импорта</b>{{ importError }}</div>
-      <div v-for="model in importedModels" :key="model.id" class="model-row">
-        <span><b>{{ model.name }}</b><small>{{ model.brand || model.fileName }} · {{ model.moduleWidth }} мод.</small></span>
+      <div v-for="model in modelLibrary.assets" :key="model.id" class="model-row">
+        <span><b>{{ model.name }}</b><small>{{ model.fileName || model.id }} · {{ stubProduct(model.id)?.moduleWidth ?? '?' }} мод.</small></span>
         <button class="icon-button danger" :aria-label="`Удалить модель ${model.name}`" @click="askRemoveModel(model.id)">×</button>
       </div>
     </section>
 
-    <AppDialog :open="Boolean(prepared && importForm)" title="Параметры импорта" description="Проверьте метаданные модели перед добавлением в локальную библиотеку." @close="prepared = null; importForm = null">
+    <AppDialog :open="Boolean(prepared && importForm)" title="Параметры импорта" description="Проверьте параметры товара, который будет создан из модели, и добавьте его в локальную библиотеку." @close="prepared = null; importForm = null">
       <div v-if="importForm" class="form-grid">
-        <label class="wide">Название<input v-model="importForm.name" required autofocus /></label>
-        <label>Бренд<input v-model="importForm.brand" /></label>
-        <label>Артикул<input v-model="importForm.sku" /></label>
-        <label>Категория<AppSelect label="Категория" :model-value="importForm.category" :options="categoryOptions" @update:model-value="importForm.category = $event as Category" /></label>
-        <label>Модулей<input v-model.number="importForm.moduleWidth" type="number" min="0.5" max="24" step="0.5" /></label>
-        <label>Рядов<input v-model.number="importForm.rows" type="number" min="1" max="6" /></label>
-        <label>Высота, мм<input v-model.number="importForm.height" type="number" min="10" /></label>
-        <label>Глубина, мм<input v-model.number="importForm.depth" type="number" min="10" /></label>
-        <label>Полюсов<input v-model.number="importForm.poles" type="number" min="1" max="12" /></label>
-        <label>Ток, А<input v-model.number="importForm.ratedCurrent" type="number" min="0.1" /></label>
-        <label>Шина<AppSelect label="Шина" :model-value="importForm.bus" :options="BUS_OPTIONS" @update:model-value="importForm.bus = $event as BusType" /></label>
-        <label>Цена, ₽<input v-model.number="importForm.price" type="number" min="0" /></label>
-        <label>Вес, кг<input v-model.number="importForm.weight" type="number" min="0" step="0.01" /></label>
+        <label class="wide">Название<input v-model="importForm.product.name" required autofocus /></label>
+        <label>Бренд<input v-model="importForm.product.brand" /></label>
+        <label>Артикул<input v-model="importForm.product.sku" /></label>
+        <label>Категория<AppSelect label="Категория" :model-value="importForm.product.category" :options="categoryOptions" @update:model-value="importForm.product.category = $event as Category" /></label>
+        <label>Модулей<input v-model.number="importForm.product.moduleWidth" type="number" min="0.5" max="24" step="0.5" /></label>
+        <label>Высота, мм<input v-model.number="importForm.product.height" type="number" min="10" /></label>
+        <label>Глубина, мм<input v-model.number="importForm.product.depth" type="number" min="10" /></label>
+        <label>Полюсов<input v-model.number="importForm.product.poles" type="number" min="1" max="12" /></label>
+        <label>Ток, А<input v-model.number="importForm.product.ratedCurrent" type="number" min="0.1" /></label>
+        <label>Шина<AppSelect label="Шина" :model-value="importForm.product.bus" :options="BUS_OPTIONS" @update:model-value="importForm.product.bus = $event as BusType" /></label>
+        <label>Цена, ₽<input v-model.number="importForm.product.price" type="number" min="0" /></label>
+        <label>Вес, кг<input v-model.number="importForm.product.weight" type="number" min="0" step="0.01" /></label>
       </div>
       <div class="app-dialog-actions"><button type="button" @click="prepared = null; importForm = null">Отмена</button><button class="primary-button" type="button" @click="confirmImport">Добавить в библиотеку</button></div>
     </AppDialog>

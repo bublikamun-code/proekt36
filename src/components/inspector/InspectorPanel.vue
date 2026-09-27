@@ -90,6 +90,7 @@ const selectedFrontView = computed(() => {
     widthMm: Math.round(face.widthMm * 10) / 10,
   }
 })
+const selectedModel = computed(() => (selectedProduct.value ? store.resolveProductModel(selectedProduct.value) : undefined))
 const errorCount = computed(() => issues.value.filter((item) => item.level === 'error').length)
 const warningCount = computed(() => issues.value.filter((item) => item.level === 'warning').length)
 const statusLabel = computed(() => errorCount.value
@@ -188,7 +189,7 @@ const migrationIssueLabel = (code: string) => ({
       <div class="section-title"><h3>Выбранное устройство</h3><span class="mono">{{ selectedDevice?.address || '—' }}</span></div>
       <template v-if="selectedDevice && selectedProduct">
         <div class="selected-product"><div class="product-monogram">{{ selectedProduct.brand.slice(0, 2).toUpperCase() }}</div><div><strong>{{ selectedProduct.name }}</strong><small>{{ selectedProduct.brand }} · {{ selectedProduct.sku }}</small></div></div>
-        <figure v-if="selectedFrontView" class="selected-front-view" data-front-view><DeviceVisual :product="selectedProduct" :width="selectedFrontView.width" :height="selectedFrontView.height" /><figcaption>фронтальный вид · {{ selectedFrontView.widthMm }} мм</figcaption></figure>
+        <figure v-if="selectedFrontView" class="selected-front-view" data-front-view><DeviceVisual :product="selectedProduct" :model="selectedModel" :width="selectedFrontView.width" :height="selectedFrontView.height" /><figcaption>фронтальный вид · {{ selectedFrontView.widthMm }} мм</figcaption></figure>
         <div class="form-grid compact-form">
           <label>Позиция<input :value="selectedDevice.row + 1 + ' ряд / ' + (selectedDevice.slot + 1)" disabled /></label>
           <label>Адрес<input :value="selectedDevice.address" @change="store.updateSelected({ address: ($event.target as HTMLInputElement).value })" /></label>

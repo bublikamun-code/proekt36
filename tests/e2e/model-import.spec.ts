@@ -129,7 +129,6 @@ const importModel = async (page: Page, item: ImportCase) => {
   await dialog.getByLabel('Артикул').fill(`P36-${item.name.replaceAll(' ', '-')}`)
   await pickOption(dialog, 'Категория', categoryLabels[item.category])
   await dialog.getByLabel('Модулей').fill('2')
-  await dialog.getByLabel('Рядов').fill('1')
   await dialog.getByLabel('Ток, А').fill(String(item.ratedCurrent))
   await dialog.getByLabel('Цена, ₽').fill(String(item.price))
   await dialog.getByLabel('Вес, кг').fill(String(item.weight))

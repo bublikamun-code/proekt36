@@ -1,7 +1,7 @@
 import { allCatalog, CATALOG_REVISION } from '../data/catalog'
 import { migrateProject } from './project'
 import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision } from './projectSchema'
-import type { ModelMetadata, PanelProject } from './types'
+import type { PanelProject, StoredModelLibrary } from './types'
 
 const BACKUP_SCHEMA = 'panel36.backup.v1'
 const MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024
@@ -30,7 +30,7 @@ export interface RestoredWorkspaceBackup {
 
 export const createWorkspaceBackup = (
   projects: PanelProject[],
-  importedModels: ModelMetadata[],
+  modelLibrary: StoredModelLibrary,
   currentProjectId: string | null,
   exportedAt = new Date().toISOString(),
 ): WorkspaceBackup => ({
@@ -38,7 +38,7 @@ export const createWorkspaceBackup = (
   application: { name: 'Panel36', revision: APPLICATION_REVISION },
   exportedAt,
   catalogRevision: CATALOG_REVISION,
-  cad: { binaryIncluded: false, modelManifest: { modelIds: importedModels.map((model) => model.id) } },
+  cad: { binaryIncluded: false, modelManifest: { modelIds: modelLibrary.assets.map((asset) => asset.id) } },
   currentProjectId: projects.some((project) => project.id === currentProjectId) ? currentProjectId : null,
   projects: clone(projects),
 })
@@ -55,10 +55,10 @@ export const downloadJsonFile = (payload: unknown, fileName: string) => {
 
 export const downloadWorkspaceBackup = (
   projects: PanelProject[],
-  importedModels: ModelMetadata[],
+  modelLibrary: StoredModelLibrary,
   currentProjectId: string | null,
 ) => {
-  const backup = createWorkspaceBackup(projects, importedModels, currentProjectId)
+  const backup = createWorkspaceBackup(projects, modelLibrary, currentProjectId)
   downloadJsonFile(backup, `panel36-backup-${new Date().toISOString().slice(0, 10)}.json`)
 }
 

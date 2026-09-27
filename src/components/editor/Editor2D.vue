@@ -132,6 +132,10 @@ const onCanvasWheel = (event: WheelEvent) => {
 }
 
 const product = (id: string) => definitions.value.get(id)
+const productModel = (id: string) => {
+  const item = product(id)
+  return item ? store.resolveProductModel(item) : undefined
+}
 const productWidth = (productId: string) => Math.max(1, Math.round(geometry.value.deviceWidthMm(productId) / geometry.value.modulePitchMm))
 const rowUsage = (row: number) => getRowUsage(row, currentProject.value, definitions.value)
 const rowHeight = (row: number) => geometry.value.rowHeightsPx[row] ?? geometry.value.rowHeightsPx[0] ?? 56
@@ -399,7 +403,7 @@ const wirePaths = computed(() => {
                   <div v-if="preview?.row === row" class="drop-preview" :class="{ blocked: Boolean(preview.error) }" :style="previewStyle"><span>{{ previewLabel }}</span></div>
                   <button v-for="device in devicesInRow(row)" :key="device.instanceId" class="placed-device" :class="[devicePhaseClass(device), deviceCategoryClass(device), { selected: selectedDeviceId === device.instanceId, dragging: device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : PREVIEW_ID), shifting: shiftingIds.has(device.instanceId), 'is-preview': device.instanceId === PREVIEW_ID, 'busbar-device': device.mount === 'busbar', 'missing-product': !product(device.productId) }]" :data-instance-id="device.instanceId" :data-phase="device.phase" :data-mount="device.mount || 'din'" :data-footprint-modules="productWidth(device.productId)" :data-width-mm="geometry.deviceWidthMm(device.productId)" :style="deviceStyle(device)" :aria-label="`${device.address}, ${product(device.productId)?.name ?? 'товар отсутствует в каталоге'}`" :aria-grabbed="isDragging && device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : '')" @click="store.selectedDeviceId = device.instanceId" @pointerdown="startDeviceDrag($event, device)" @keydown="onDeviceKeydown($event, device)">
                     <template v-if="product(device.productId)">
-                      <DeviceVisual :product="product(device.productId)!" :width="Math.max(18, geometry.deviceWidthPx(device.productId))" />
+                      <DeviceVisual :product="product(device.productId)!" :model="productModel(device.productId)" :width="Math.max(18, geometry.deviceWidthPx(device.productId))" />
                       <b>{{ device.address }}</b><small>{{ product(device.productId)?.series || `${product(device.productId)?.ratedCurrent}A` }}</small>
                     </template>
                     <template v-else>

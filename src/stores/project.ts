@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { builtinCatalog, enmasSeriesCatalog, sampleCatalog } from '../data/catalog'
+import { embeddedModelById } from '../data/models'
 import {
   compactRow,
   evaluateCabinetMigration,
@@ -14,9 +15,9 @@ import { autoNumber, createProject, migrateProject, presetProducts, uid } from '
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
-import type { Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
+import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, StoredModelAsset, StoredModelLibrary } from '../domain/types'
 import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
-import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
+import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { usePreferencesStore } from './preferences'
 
 const HISTORY_LIMIT = 50
@@ -64,7 +65,7 @@ export const useProjectStore = defineStore('project', () => {
   const currentProjectId = ref(loaded.currentProjectId && projects.value.some((project) => project.id === loaded.currentProjectId) ? loaded.currentProjectId : projects.value[0]!.id)
   const selectedDeviceId = ref<string | null>(null)
   const cabinetMigration = ref<LayoutMigrationPlan | null>(null)
-  const importedModels = ref<ModelMetadata[]>(loaded.models)
+  const modelLibrary = ref<StoredModelLibrary>(loaded.models)
   const histories = ref<Record<string, ProjectHistory>>({})
   const lastCoalesce = new Map<string, { key: string; at: number }>()
   const undoStack = computed(() => histories.value[currentProjectId.value]?.undo ?? [])
@@ -83,6 +84,7 @@ export const useProjectStore = defineStore('project', () => {
   let persistTimer: ReturnType<typeof setTimeout> | undefined
   let projectsDirty = false
   let currentProjectDirty = false
+  let modelsDirty = false
   let persistenceError: string | null = storageError.value
 
   const updateStorageState = () => {
@@ -98,17 +100,28 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   const currentProject = computed(() => projects.value.find((item) => item.id === currentProjectId.value) ?? projects.value[0]!)
-  const definitions = computed(() => new Map<string, DeviceDefinition>([
-    ...builtinCatalog.map((item) => [item.id, item] as const),
-    ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
-    ...sampleCatalog.map((item) => [item.id, item] as const),
-    ...importedModels.value.map((model) => [model.id, {
-      id: model.id, name: model.name, brand: model.brand, sku: model.sku, category: model.category,
-      moduleWidth: model.moduleWidth, poles: model.poles, ratedCurrent: model.ratedCurrent,
-      voltage: model.voltage, bus: model.bus, price: model.price, weight: model.weight,
-      height: model.height, depth: model.depth, color: '#d9ded8', imported: true, modelAssetId: model.id,
-    }] as const),
-  ]))
+  /** Embedded assets ship with the app; local ones come from imports and live in IndexedDB. */
+  const modelAssetsById = computed<Map<string, ModelAsset>>(() => {
+    const map = new Map<string, ModelAsset>(embeddedModelById)
+    for (const asset of modelLibrary.value.assets) map.set(asset.id, asset)
+    return map
+  })
+  const resolveProductModel = (product: DeviceDefinition): ModelAsset | undefined =>
+    product.modelId ? modelAssetsById.value.get(product.modelId) : undefined
+  const definitions = computed(() => {
+    const map = new Map<string, DeviceDefinition>([
+      ...builtinCatalog.map((item) => [item.id, item] as const),
+      ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
+      ...sampleCatalog.map((item) => [item.id, item] as const),
+      ...modelLibrary.value.products.map((item) => [item.id, item] as const),
+    ])
+    // Bindings attach a model to a built-in product without cloning it into the library.
+    for (const [productId, modelId] of Object.entries(modelLibrary.value.bindings)) {
+      const product = map.get(productId)
+      if (product && modelAssetsById.value.has(modelId)) map.set(productId, { ...product, modelId })
+    }
+    return map
+  })
   const selectedDevice = computed(() => currentProject.value.devices.find((item) => item.instanceId === selectedDeviceId.value) ?? null)
   const selectedProduct = computed(() => selectedDevice.value ? definitions.value.get(selectedDevice.value.productId) ?? null : null)
 
@@ -118,9 +131,10 @@ export const useProjectStore = defineStore('project', () => {
       return false
     }
     try {
-      repository.save({ projects: projects.value, models: importedModels.value, currentProjectId: currentProjectId.value })
+      repository.save({ projects: projects.value, models: modelLibrary.value, currentProjectId: currentProjectId.value }, { modelsDirty })
       projectsDirty = false
       currentProjectDirty = false
+      modelsDirty = false
       persistenceError = null
       storageError.value = null
       storageRecovery.value = repository.recoveryData
@@ -188,7 +202,10 @@ export const useProjectStore = defineStore('project', () => {
   // triggers is synchronous, so it completes before the document goes away.
   if (typeof window !== 'undefined') window.addEventListener('pagehide', () => { void flushPersistence() })
 
-  watch([projects, importedModels], schedulePersistence, { deep: true })
+  // Registered before the persistence watcher so a library change is flagged before the
+  // debounced save decides whether the models key needs to be written at all.
+  watch(modelLibrary, () => { modelsDirty = true }, { deep: true })
+  watch([projects, modelLibrary], schedulePersistence, { deep: true })
 
   watch(currentProjectId, (id) => {
     selectedDeviceId.value = null
@@ -632,10 +649,21 @@ export const useProjectStore = defineStore('project', () => {
     if (index >= 0) projects.value[index] = next
   }
 
-  const addImportedModel = async (metadata: ModelMetadata, data: ArrayBuffer) => {
+  /**
+   * Adds a CAD asset plus its product stub to the library. The stub keeps the asset id, so
+   * re-importing the same file in another browser revives placed devices instead of leaving
+   * them pointing at a product that no longer exists.
+   */
+  const addImportedModel = async (product: DeviceDefinition, asset: StoredModelAsset, data: ArrayBuffer) => {
+    if (product.id !== asset.id) return notify('Товар импорта должен наследовать id модели', 'error')
+    if (!isImportedProduct(product)) return notify('Некорректные параметры товара импорта', 'error')
     try {
-      await putModelAsset(metadata.id, data)
-      importedModels.value.push(metadata)
+      await putModelAsset(asset.id, { data })
+      modelLibrary.value = {
+        assets: [...modelLibrary.value.assets.filter((item) => item.id !== asset.id), asset],
+        products: [...modelLibrary.value.products.filter((item) => item.id !== product.id), product],
+        bindings: modelLibrary.value.bindings,
+      }
       if (repository.available) await persistNow()
       notify('Модель добавлена в библиотеку')
     } catch (error) {
@@ -651,7 +679,13 @@ export const useProjectStore = defineStore('project', () => {
     if (usage) return notify(`Модель используется в ${usage} позициях. Сначала удалите их.`, 'error')
     try {
       await deleteModelAsset(id)
-      importedModels.value = importedModels.value.filter((item) => item.id !== id)
+      modelLibrary.value = {
+        assets: modelLibrary.value.assets.filter((item) => item.id !== id),
+        products: modelLibrary.value.products
+          .filter((item) => item.id !== id)
+          .map((item) => item.modelId === id ? { ...item, modelId: undefined } : item),
+        bindings: Object.fromEntries(Object.entries(modelLibrary.value.bindings).filter(([, modelId]) => modelId !== id)),
+      }
       notify('Модель удалена')
     } catch (error) {
       persistenceError = actionableStorageError(error, 'модель в IndexedDB')
@@ -659,6 +693,18 @@ export const useProjectStore = defineStore('project', () => {
       updateStorageState()
       throw error
     }
+  }
+
+  /** Attaches (or detaches) a library model to any product, including built-in ones. */
+  const bindProductModel = (productId: string, modelId: string | null): boolean => {
+    if (!definitions.value.has(productId)) return rejectCommand('Товар не найден.')
+    if (modelId && !modelAssetsById.value.has(modelId)) return rejectCommand('Модель не найдена в библиотеке.')
+    const bindings = { ...modelLibrary.value.bindings }
+    if (modelId) bindings[productId] = modelId
+    else delete bindings[productId]
+    modelLibrary.value = { ...modelLibrary.value, bindings }
+    notify(modelId ? 'CAD-модель привязана к товару' : 'Привязка CAD-модели снята')
+    return true
   }
 
   const clearLocalData = async () => {
@@ -681,12 +727,13 @@ export const useProjectStore = defineStore('project', () => {
     const fresh = seedProject()
     projects.value = [fresh]
     currentProjectId.value = fresh.id
-    importedModels.value = []
+    modelLibrary.value = { assets: [], products: [], bindings: {} }
     histories.value = {}
     selectedDeviceId.value = null
     cabinetMigration.value = null
     projectsDirty = false
     currentProjectDirty = false
+    modelsDirty = false
     lastSavedAt.value = null
     theme.value = 'light'
     updateStorageState()
@@ -743,13 +790,13 @@ export const useProjectStore = defineStore('project', () => {
 
   return {
     projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration,
-    definitions, importedModels, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
+    definitions, modelLibrary, modelAssetsById, resolveProductModel, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
     storageAlert, storageRecoveryNotice, hasStorageBackup, hasStorageRecovery, downloadStorageSnapshot, restoreStorageBackup, dismissStorageAlert,
     lastSavedAt, theme, toast, switchProject, newProject, duplicateProject, renameProject, deleteProject,
     applyPreset, updateSettings, selectCabinet, selectRail, stageCabinetMigration, stageRailMigration,
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
     addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
-    retryPersistence, addImportedModel, deleteImportedModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
+    retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })
