@@ -39,7 +39,10 @@ const seedProject = () => {
   // what the app promises.
   project.id = 'sample-apartment'
   project.schemaVersion = PROJECT_SCHEMA_VERSION
-  project.settings = { inputCurrent: 40, phase: 1, enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9, reserveModules: 8 }
+  // Only the demo's electrical inputs are overridden; the cabinet geometry that
+  // createProject derived from the apartment preset (NX8-24, rail-12) has to survive.
+  // The old literal replacement silently degraded the seed to the 17.5 mm legacy layout.
+  project.settings = { ...project.settings, inputCurrent: 40, phase: 1, reserveModules: 8 }
   const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
   const products = [
     definitions.get('ekf-spd-t1-3p-n-pe')!, definitions.get('ekf-mcb-4p-b32')!,
@@ -48,9 +51,14 @@ const seedProject = () => {
     definitions.get('ekf-mcb-1p-c6')!, definitions.get('ekf-terminal-1p-gray')!,
     definitions.get('iek-terminal-1p-blue')!,
   ]
+  // Three 4-module apparatus fill a 12-slot rail exactly (slots 0/4/8); everything else
+  // starts row two. Preferred slots are the final ones — an insert into a packed middle
+  // would demand a row shift the full rail cannot grant.
   let devices: PlacedDevice[] = []
   for (const [index, product] of products.entries()) {
-    const result = placeProduct(devices, product, index < 4 ? 0 : 1, index < 4 ? index : index - 4, getRowCapacity(project), uid, definitions)
+    const row = index < 3 ? 0 : 1
+    const slot = index < 3 ? index * 4 : index - 3
+    const result = placeProduct(devices, product, row, slot, getRowCapacity(project), uid, definitions)
     devices = result.devices
   }
   project.devices = autoNumber(devices, definitions)
@@ -302,8 +310,15 @@ export const useProjectStore = defineStore('project', () => {
     Object.assign(project.settings, config.settings)
     project.preset = preset
     const allowed = new Set(config.catalog)
-    const products = definitions.value ? [...definitions.value.values()].filter((item) => allowed.has(item.category) && !item.imported) : []
-    const unique = Array.from(new Map(products.map((item) => [item.category, item])).values()).slice(0, Math.min(7, config.settings.rows ?? project.settings.rows))
+    // First product of the category wins, and templates/test samples never seed a board.
+    // Last-wins used to hand every preset the City9 demo breaker just because the sample
+    // catalog is appended after the real ones.
+    const picked = new Map<string, DeviceDefinition>()
+    for (const item of definitions.value.values()) {
+      if (!allowed.has(item.category) || item.imported || item.verificationStatus === 'template') continue
+      if (!picked.has(item.category)) picked.set(item.category, item)
+    }
+    const unique = [...picked.values()].slice(0, Math.min(7, project.settings.rows))
     const productsMap = new Map(definitions.value)
     let devices: PlacedDevice[] = []
     unique.forEach((product, index) => {

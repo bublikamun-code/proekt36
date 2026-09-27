@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { glb } from './model-fixtures'
-import { gotoEditor, pickOption } from './helpers'
+import { dragWithPointer, gotoEditor, pickOption } from './helpers'
 
 const importFirstFile = async (page: Page, options: { createProduct: boolean; name?: string }) => {
   const input = page.locator('input[type="file"][accept*=".glb"]')
@@ -42,7 +42,9 @@ test('re-importing the same file refreshes the asset in place and revives placem
   await expect(page.locator('.model-row').filter({ hasText: 'Возрождаемый аппарат' })).toHaveCount(1)
 
   // Place the imported product, then wipe the binaries the way a browser eviction would.
-  await page.locator('.catalog-item').filter({ hasText: 'Возрождаемый аппарат' }).click()
+  // The seed's first rail is full, so the placement is a drag into the free half of row two.
+  const source = page.locator('.catalog-item').filter({ hasText: 'Возрождаемый аппарат' })
+  await dragWithPointer(page, source, page.locator('.din-row').nth(1).locator('.slot-cell').nth(6))
   await expect(page.locator('.placed-device[aria-label*="Возрождаемый аппарат"]')).toHaveCount(1)
   await clearIndexedDbAssets(page)
   await page.reload({ waitUntil: 'domcontentloaded' })
@@ -87,18 +89,17 @@ test('an asset can live without a product and then bind to a catalogue entry', a
   const search = page.getByLabel('Поиск по каталогу')
   await search.fill('Полка без товара')
   await expect(page.locator('.catalog-item')).toHaveCount(0)
-  await search.fill('AVO-10 1P C6')
-  const item = page.locator('.catalog-item').filter({ hasText: 'AVO-10 1P C16' })
-  if (await item.count() === 0) {
-    await search.fill('AVO-10')
-  }
-  await page.locator('.catalog-item').filter({ hasText: 'AVO-10' }).first().click()
-  await page.locator('.placed-device').first().dispatchEvent('click')
+  // A concrete product, because the seed board already carries AVO devices: the drag
+  // lands in row two and the freshly placed instance is the one that gets selected.
+  await search.fill('AVO-10 4P B32')
+  const item = page.locator('.catalog-item').filter({ hasText: 'AVO-10 4P B32' }).first()
+  await dragWithPointer(page, item, page.locator('.din-row').nth(1).locator('.slot-cell').nth(6))
+  await page.locator('.din-row').nth(1).locator('.placed-device').last().dispatchEvent('click')
 
   // The inspector offers the library model on a built-in product, and the badge follows.
   await pickOption(page.locator('.inspector-panel'), 'CAD-модель', 'Полка без товара')
   await expect(page.locator('.inspector-panel .model-preview')).toBeVisible()
-  await expect(page.locator('.catalog-item').filter({ hasText: 'AVO-10' }).first().locator('.cad-badge')).toHaveCount(1)
+  await expect(page.locator('.catalog-item').filter({ hasText: 'AVO-10 4P B32' }).locator('.cad-badge')).toHaveCount(1)
 })
 
 test('a device whose product left the catalogue can be re-bound to a real product', async ({ page }) => {

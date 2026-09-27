@@ -107,13 +107,12 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   if (await reopenPanels.isVisible()) await reopenPanels.click()
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
-  const glbSource = page.locator('.catalog-item').filter({ hasText: 'Импорт GLB' })
-  const dropTarget = page.locator('.din-row').nth(1).locator('.slot-cell').nth(10)
-  await dragWithPointer(page, glbSource, dropTarget)
-  await expect(page.locator('.placed-device[aria-label*="Импорт GLB"]')).toHaveCount(1)
-
-  for (const item of importCases.slice(1)) {
-    await page.locator('.catalog-item').filter({ hasText: item.name }).click()
+  // The seed's first row is full, so every imported device is dragged into row two
+  // (seeded with six 1-module devices, six slots free) at explicit slots.
+  for (const [index, item] of importCases.entries()) {
+    const source = page.locator('.catalog-item').filter({ hasText: item.name })
+    const dropTarget = page.locator('.din-row').nth(1).locator('.slot-cell').nth(6 + index * 2)
+    await dragWithPointer(page, source, dropTarget)
     await expect(page.locator(`.placed-device[aria-label*="${item.name}"]`)).toHaveCount(1)
   }
   await expect(page.locator('.placed-device[aria-label*="Импорт"]')).toHaveCount(3)
