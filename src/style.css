@@ -77,6 +77,13 @@
   --text-4xl: 40px;
   --text-display: 44px;
 
+  /* The address printed on a device on the board. A 1-module device is 17.5mm wide, which
+     leaves about 21px of drawing space, so this sits below the 11px floor on purpose: the
+     marking on a real single-module device is physically tiny too. It is a diagram
+     annotation, not body text — the full address is in the button's aria-label and in the
+     inspector, and anything longer than about four characters still ellipsises. */
+  --text-annotation: 7px;
+
   color-scheme: light;
 }
 
@@ -324,8 +331,8 @@ kbd { position: absolute; right: 8px; top: 8px; border: 1px solid var(--line); p
 .placed-device.shifting { box-shadow: 0 0 0 1px var(--ok), 1px 2px 3px rgba(0, 0, 0, .18); }
 .placed-device.is-preview { opacity: .82; box-shadow: 0 0 0 1px var(--info), 1px 2px 3px rgba(0, 0, 0, .18); }
 .placed-device .device-visual { display: block; width: 100% !important; height: auto !important; min-height: 0; flex: 1 1 auto; }
-.placed-device b { display: block; margin: 0 1px 1px; padding: 1px 2px; border-top: 1px solid rgba(118, 128, 121, .5); background: linear-gradient(180deg, var(--dv-paper-1, #fbfaf2), var(--dv-paper-2, #e4e3d7)); color: var(--dv-ink, #2f3831); font:600 var(--text-micro) var(--mono); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.placed-device small { display: none; font:500 var(--text-micro) var(--mono); }
+.placed-device b { display: block; margin: 0 0 1px; padding: 1px 0; border-top: 1px solid rgba(118, 128, 121, .5); background: linear-gradient(180deg, var(--dv-paper-1, #fbfaf2), var(--dv-paper-2, #e4e3d7)); color: var(--dv-ink, #2f3831); font:600 var(--text-annotation) var(--mono); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.placed-device small { display: none; font:500 var(--text-annotation) var(--mono); }
 /* Frontal device faces. Gradients are defined once in DeviceFaceDefs; `url(#…)` carries a flat fallback colour. */
 .device-face-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 .device-visual { min-width: 0; color: var(--dv-ink); }

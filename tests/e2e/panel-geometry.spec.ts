@@ -179,6 +179,22 @@ test('every placed device renders a frontal face with per-pole levers and pocket
   expect(frontBox!.height).toBeGreaterThan(120)
 })
 
+test('a single-module device shows its address without truncating it', async ({ page }) => {
+  // A 1P device is 17.5mm wide, which leaves about 21px of drawing space for the marking.
+  // Raising the type scale to an 11px floor silently pushed the address past that and the
+  // label fell back to an ellipsis, so the board stopped saying which device was which.
+  await openEditorWith(page, project('marking', { rows: 1 }, [device('ekf-mcb-1p-c6', 0, 0)]))
+  const label = page.locator('.placed-device b').first()
+  await expect(label).toBeVisible()
+  const fit = await label.evaluate((element) => ({
+    text: element.textContent ?? '',
+    client: element.clientWidth,
+    scroll: element.scrollWidth,
+  }))
+  expect(fit.text).toBe('QF00')
+  expect(fit.scroll, `адрес «${fit.text}» не помещается в ${fit.client}px`).toBeLessThanOrEqual(fit.client)
+})
+
 test('the read-only demo uses the same physical pitch as the editor', async ({ page }) => {
   await page.goto('/demo/project')
   const board = page.locator('.demo-project-board-view')
