@@ -85,6 +85,19 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     if (!project.connections?.some((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
   }
 
+  // A single-phase panel already gets a per-circuit check above; a three-phase one had no
+  // aggregate check at all, so the phase totals were computed and shown but never compared with
+  // the incoming rating. Only real circuits count here: phaseBalance falls back to summing device
+  // ratings, and a sum of protective ratings is not a load. The incoming breaker is rated per
+  // phase, so the busiest phase is what matters, not the total across all three.
+  if (project.settings.phase === 3 && project.circuits?.length) {
+    for (const [index, load] of phaseBalance(project, definitions).totals.entries()) {
+      if (load <= project.settings.inputCurrent) continue
+      const bus = `L${index + 1}`
+      issues.push(issue(`phase-load-${bus.toLowerCase()}`, 'warning', `Нагрузка на ${bus} выше вводного`, `На фазе ${bus} суммарно ${load} А при вводном ${project.settings.inputCurrent} А. Проверьте вводной аппарат и перераспределите нагрузку по фазам.`, 'electrical.phase-load.preliminary', { phase: index + 1, load, inputCurrent: project.settings.inputCurrent }))
+    }
+  }
+
   const free = getFreeSlots(project, definitions)
   if (free < project.settings.reserveModules) issues.push(issue('reserve', 'warning', 'Малый запас модулей', `Осталось ${free} мод. из требуемых ${project.settings.reserveModules} резервных. Уменьшите наполнение или выберите корпус больше.`, 'layout.reserve.preliminary', { free, reserveModules: project.settings.reserveModules }))
   const result = pricing(project.devices, definitions)

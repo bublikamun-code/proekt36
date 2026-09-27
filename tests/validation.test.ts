@@ -2,8 +2,23 @@ import { describe, expect, it } from 'vitest'
 import { allCatalog, builtinCatalog } from '../src/data/catalog'
 import { createDevice, createProject } from '../src/domain/project'
 import { phaseBalance, validateProject } from '../src/domain/validation'
+import type { Circuit } from '../src/domain/types'
 
 const definitions = new Map(allCatalog.map((item) => [item.id, item]))
+
+const circuit = (patch: Partial<Circuit> = {}): Circuit => ({
+  id: 'circuit-1',
+  name: 'Цепь 1',
+  loadName: 'Розетка',
+  current: 10,
+  power: 0,
+  phase: 1,
+  protectionDeviceId: '',
+  color: '#c65c3b',
+  wireCrossSection: 1.5,
+  note: '',
+  ...patch,
+})
 
 describe('project validation', () => {
   it('marks preliminary calculation and empty board', () => {
@@ -50,6 +65,36 @@ describe('project validation', () => {
     const loaded = createProject('Одна фаза', 'demo', { phase: 3 })
     loaded.devices = [createDevice(definitions.get('ekf-mcb-3p-c25')!, 0, 0)]
     expect(phaseBalance(loaded, definitions).spread).toBe(100)
+  })
+
+  it('reports a three-phase load above the incoming rating', () => {
+    // A single-phase board already had a per-circuit check; a three-phase one had no aggregate
+    // check, so the phase totals were displayed but never compared with the incoming rating.
+    const project = createProject('Перегруз по L1', 'demo', { phase: 3, inputCurrent: 40 })
+    project.circuits = [1, 2, 3].map((index) => ({ ...circuit(), id: `c${index}`, name: `Цепь ${index}`, current: 20, phase: 1 }))
+
+    const flagged = validateProject(project, definitions).filter((issue) => issue.ruleCode === 'electrical.phase-load.preliminary')
+    expect(flagged.map((issue) => issue.id)).toEqual(['phase-load-l1'])
+    expect(flagged[0].message).toContain('60 А')
+  })
+
+  it('stays quiet while every phase is under the incoming rating', () => {
+    const project = createProject('В норме', 'demo', { phase: 3, inputCurrent: 40 })
+    project.circuits = [1, 2, 3].map((index) => ({ ...circuit(), id: `c${index}`, name: `Цепь ${index}`, current: 10, phase: 1 }))
+
+    const flagged = validateProject(project, definitions).filter((issue) => issue.ruleCode === 'electrical.phase-load.preliminary')
+    expect(flagged).toEqual([])
+  })
+
+  it('does not read device ratings as load on a board with no circuits', () => {
+    // phaseBalance falls back to summing the rated current of every device when a project has no
+    // circuits. A sum of protective ratings is not a load, so this must not raise the alarm —
+    // otherwise every freshly seeded board would come out overloaded.
+    const project = createProject('Без цепей', 'demo', { phase: 3, inputCurrent: 16 })
+    project.devices = ['ekf-mcb-4p-b32', 'ekf-mcb-3p-c25', 'ekf-mcb-1p-b16'].map((id, index) => createDevice(definitions.get(id)!, 0, index * 4))
+
+    const flagged = validateProject(project, definitions).filter((issue) => issue.ruleCode === 'electrical.phase-load.preliminary')
+    expect(flagged).toEqual([])
   })
 })
 

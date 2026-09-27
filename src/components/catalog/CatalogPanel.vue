@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { categoryLabels } from '../../data/catalog'
 import { beginBoardDrag } from '../../composables/useBoardDrag'
 import { getProductFootprintModules } from '../../domain/layout'
-import type { BusType, Category, ModelMetadata } from '../../domain/types'
+import type { BusType, Category, DeviceDefinition, ModelMetadata } from '../../domain/types'
 import { detectImportKind, validateGltfZip, validateModelFile, type PreparedImport } from '../../storage/modelImportFlow'
 import { useProjectStore } from '../../stores/project'
 import AppDialog from '../ui/AppDialog.vue'
@@ -25,6 +25,7 @@ const store = useProjectStore()
 const { definitions, importedModels } = storeToRefs(store)
 const search = ref('')
 const category = ref<Category | 'all'>('all')
+const verifiedOnly = ref(false)
 
 // The assistant can point the catalogue at a category without touching the store, so the
 // filter stays local view state and never becomes part of the saved project.
@@ -41,9 +42,19 @@ const products = computed(() => {
   return [...definitions.value.values()].filter((product) => {
     const matchesCategory = category.value === 'all' || product.category === category.value
     const matchesSearch = !term || `${product.name} ${product.brand} ${product.sku}`.toLocaleLowerCase('ru').includes(term)
-    return matchesCategory && matchesSearch
+    // Most of the catalogue is generated from a series template, so "verified" is the exception
+    // rather than the rule. Imported models carry no status at all and count as unverified.
+    const matchesVerification = !verifiedOnly.value || product.verificationStatus === 'verified'
+    return matchesCategory && matchesSearch && matchesVerification
   })
 })
+
+const verificationLabel = (product: DeviceDefinition) => {
+  if (product.verificationStatus === 'verified') return ''
+  if (product.imported) return 'Импорт, не проверено'
+  if (product.verificationStatus === 'template') return 'Шаблон'
+  return 'Исторические данные'
+}
 
 const browse = () => fileInput.value?.click()
 const onFile = async (event: Event) => {
@@ -115,13 +126,15 @@ const removeModel = async () => {
       </button>
     </div>
 
+    <button type="button" class="filter-toggle" :class="{ active: verifiedOnly }" :aria-pressed="verifiedOnly" @click="verifiedOnly = !verifiedOnly">Только проверенные</button>
+
     <div class="catalog-list">
       <button v-for="product in products" :key="product.id" class="catalog-item" @click="store.addDevice(product.id)" @pointerdown="startCatalogDrag($event, product.id)">
         <DeviceVisual :product="product" :width="Math.min(44, 20 + product.moduleWidth * 5)" />
         <span class="item-copy">
           <strong>{{ product.name }}</strong>
           <small>{{ product.brand }} · {{ product.sku }}</small>
-          <span class="specs"><b>{{ product.moduleWidth }} мод.</b><b>{{ product.ratedCurrent }} A</b><b>{{ product.price > 0 ? `${product.price.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</b></span>
+          <span class="specs"><b>{{ product.moduleWidth }} мод.</b><b>{{ product.ratedCurrent }} A</b><b>{{ product.price > 0 ? `${product.price.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</b><b v-if="verificationLabel(product)" class="verify-flag">{{ verificationLabel(product) }}</b></span>
         </span>
         <span v-if="product.modelPreviewUrl" class="import-badge cad-badge">CAD</span>
         <span v-else-if="product.imported" class="import-badge cad-badge">CAD</span>

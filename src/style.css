@@ -706,6 +706,20 @@ kbd {
   color: var(--on-service);
   border-color: var(--service);
 }
+/* Most of the catalogue is generated from a series template, so "confirmed" is the exception here
+   rather than the rule. The filter gives a reader a way to work in that exception on purpose. */
+.filter-toggle {
+  min-height: 27px;
+  margin: 0 10px 9px;
+  padding: 0 8px;
+  font-size: var(--text-micro);
+  color: var(--text-muted);
+}
+.filter-toggle.active {
+  background: var(--service);
+  color: var(--on-service);
+  border-color: var(--service);
+}
 .catalog-list {
   border-top: 1px solid var(--line);
 }
@@ -756,6 +770,17 @@ kbd {
   font-family: var(--mono);
   font-size: var(--text-micro);
   font-weight: 500;
+}
+/* A chip with its own background rather than warning-coloured text: the text of a flag has to
+   stay readable over whatever the row is sitting on, including the hover fill, so the warning
+   is carried by the tint and the border and the wording carries the meaning. */
+.specs .verify-flag {
+  border: 1px solid var(--warning);
+  border-radius: 2px;
+  background: var(--warning-soft);
+  color: var(--text);
+  font-weight: 600;
+  padding: 0 3px;
 }
 .add-icon {
   position: absolute;

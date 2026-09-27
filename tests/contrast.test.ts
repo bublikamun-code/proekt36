@@ -79,6 +79,9 @@ describe('контраст токенов', () => {
       ['--on-error', '--error-hover'],
       ['--on-service', '--service'],
       ['--on-ok', '--ok'],
+      // The catalogue's "not confirmed" chip: dark text on a warning tint, so the flag stays
+      // readable over its row and over the row's hover fill alike.
+      ['--text', '--warning-soft'],
     ]
 
     const failures = pairs.flatMap(([foreground, background]) => {
