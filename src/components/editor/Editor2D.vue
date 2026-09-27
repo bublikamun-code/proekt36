@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { getRowUsage, isDinDevice, placeProduct, resolveDeviceMove, resolveLayout } from '../../domain/layout'
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { useProjectStore } from '../../stores/project'
+import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, usePreferencesStore } from '../../stores/preferences'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
 import type { PlacedDevice } from '../../domain/types'
@@ -27,7 +28,9 @@ interface PlacementPreview {
 
 const store = useProjectStore()
 const { currentProject, definitions, selectedDeviceId } = storeToRefs(store)
-const zoom = ref(1)
+const preferences = usePreferencesStore()
+// storeToRefs hands back state only — the action stays on the store.
+const { boardZoom } = storeToRefs(preferences)
 const canvasScroll = ref<HTMLElement | null>(null)
 const viewport = ref({ width: 0, height: 0 })
 const preview = ref<PlacementPreview | null>(null)
@@ -53,12 +56,18 @@ const updateViewport = () => {
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateViewport)
-  if (canvasScroll.value) resizeObserver.observe(canvasScroll.value)
+  if (canvasScroll.value) {
+    resizeObserver.observe(canvasScroll.value)
+    // Not passive: the handler calls preventDefault, and a passive wheel listener would let the
+    // page zoom the browser's own way on top of the board's.
+    canvasScroll.value.addEventListener('wheel', onCanvasWheel, { passive: false })
+  }
   updateViewport()
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  canvasScroll.value?.removeEventListener('wheel', onCanvasWheel)
   setBoardDropHandler(null)
   window.cancelAnimationFrame(frame)
 })
@@ -82,7 +91,45 @@ const fitScale = computed(() => {
   if (!props.focused || !viewport.value.width || !viewport.value.height) return 1
   return Math.min(1, viewport.value.width / naturalWidth.value, viewport.value.height / naturalHeight.value)
 })
-const renderScale = computed(() => fitScale.value * zoom.value)
+/**
+ * Auto-fit and manual zoom are alternatives, not factors: a manual zoom is a plain multiple of the
+ * board's natural size, so it does not silently shrink or grow when the side panels come and go.
+ * `null` means the working area is still fitting the board by itself.
+ */
+const renderScale = computed(() => boardZoom.value ?? fitScale.value)
+const fitted = computed(() => boardZoom.value === null)
+
+const clampScale = (scale: number) => Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, Math.round(scale * 10) / 10))
+/** Leaving auto-fit steps from whatever the board is showing now, so the first click does not jump. */
+const changeZoom = (delta: number) => preferences.setBoardZoom(clampScale((boardZoom.value ?? renderScale.value) + delta))
+const fitToView = () => preferences.setBoardZoom(null)
+
+/**
+ * Ctrl/⌘ + wheel zooms about the pointer. The board point under the cursor is held in place, which
+ * needs the scroll offset recomputed for the new scale — without it the view jumps away from the
+ * detail you were aiming at, and zooming in is only useful if you can aim.
+ */
+const onCanvasWheel = (event: WheelEvent) => {
+  if (!event.ctrlKey && !event.metaKey) return
+  const element = canvasScroll.value
+  if (!element) return
+  event.preventDefault()
+  const before = renderScale.value
+  const after = clampScale(before - Math.sign(event.deltaY) * 0.1)
+  if (after === before) return
+  const rect = element.getBoundingClientRect()
+  const pointerX = event.clientX - rect.left
+  const pointerY = event.clientY - rect.top
+  const boardX = (pointerX + element.scrollLeft) / before
+  const boardY = (pointerY + element.scrollTop) / before
+  preferences.setBoardZoom(after)
+  // The stage is centred by auto margins, so it has no fixed offset to add: the new scroll position
+  // follows from where the board point now sits relative to the pointer.
+  nextTick(() => {
+    element.scrollLeft = boardX * after - pointerX
+    element.scrollTop = boardY * after - pointerY
+  })
+}
 
 const product = (id: string) => definitions.value.get(id)
 const productWidth = (productId: string) => Math.max(1, Math.round(geometry.value.deviceWidthMm(productId) / geometry.value.modulePitchMm))
@@ -328,7 +375,12 @@ const wirePaths = computed(() => {
       <div class="view-caption"><span class="live-dot"></span><span>Схема щита</span><b>{{ geometry.cabinetWidthMm }} × {{ geometry.cabinetHeightMm }} × {{ geometry.cabinetDepthMm }} мм</b><b class="canvas-spec">{{ geometry.capacity }} мод./рейка · {{ pitchLabel }}</b></div>
       <div class="canvas-tools">
         <button class="panel-toggle" data-panel-toggle :aria-pressed="focused" :aria-label="focused ? 'Показать боковые панели' : 'Скрыть боковые панели'" @click="emit('toggle-focus')">{{ focused ? 'Панели' : 'Только щит' }}</button>
-        <div class="zoom-controls"><button aria-label="Уменьшить масштаб" @click="zoom = Math.max(0.7, zoom - 0.1)">−</button><span class="mono">{{ Math.round(renderScale * 100) }}%</span><button aria-label="Увеличить масштаб" @click="zoom = Math.min(1.4, zoom + 0.1)">＋</button></div>
+        <div class="zoom-controls" role="group" aria-label="Масштаб схемы">
+          <button aria-label="Уменьшить масштаб" @click="changeZoom(-0.1)">−</button>
+          <span class="mono">{{ Math.round(renderScale * 100) }}%</span>
+          <button aria-label="Увеличить масштаб" @click="changeZoom(0.1)">＋</button>
+          <button class="fit-toggle" :class="{ active: fitted }" :aria-pressed="fitted" title="Вписать схему в рабочую область" @click="fitToView">Вписать</button>
+        </div>
       </div>
     </div>
 

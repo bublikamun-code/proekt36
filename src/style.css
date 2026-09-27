@@ -968,11 +968,22 @@ kbd {
   text-align: center;
   color: var(--text-muted);
 }
+.zoom-controls .fit-toggle {
+  min-width: 0;
+  padding: 0 9px;
+  font-size: var(--text-micro);
+  color: var(--text-muted);
+}
+.zoom-controls .fit-toggle.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+}
 .canvas-scroll {
   min-height: 500px;
   overflow: auto;
   display: grid;
-  place-items: start center;
+  place-items: start start;
   padding: 28px;
   background-color: var(--canvas);
   background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
@@ -980,6 +991,9 @@ kbd {
 }
 .canvas-stage {
   position: relative;
+  /* Auto margins centre the board while it fits and pin it to the start edge once it overflows.
+     A centred grid item cannot do both: its left half ends up outside the scrollable area. */
+  margin: 0 auto;
 }
 .cabinet {
   position: relative;
