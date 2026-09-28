@@ -126,7 +126,9 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   const circuitCard = page.locator('.circuit-card')
   await circuitCard.getByLabel('Ток, А').fill('40')
   await circuitCard.getByLabel('Ток, А').press('Tab')
-  await expect(page.locator('.issue-list')).toContainText('Ток цепи выше номинала защиты')
+  // The checks tab renders the same rules in its own list, so the assertion stays scoped
+  // to the inspector copy.
+  await expect(page.locator('.inspector-panel .issue-list')).toContainText('Ток цепи выше номинала защиты')
 
   const connectionCard = circuitCard.locator('.connection-card').first()
   const connectionId = await connectionCard.getAttribute('data-connection-id')

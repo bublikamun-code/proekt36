@@ -128,7 +128,7 @@ test('workspace backup restores projects only after explicit confirmation', asyn
   await expect(page.getByText('Резервная копия восстановлена: 1 проект.')).toBeAttached()
 })
 
-test('editor BOM exposes unknown pricing and shared print report without tab dependency', async ({ page }) => {
+test('editor BOM exposes unknown pricing and the print report works from any tab', async ({ page }) => {
   await gotoEditor(page)
   await page.evaluate(() => {
     const target = window as Window & { __panel36Printed?: boolean }
@@ -138,11 +138,15 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
 
   await page.getByRole('button', { name: 'Показать боковые панели' }).click()
   await page.getByRole('button', { name: /NB1-63H 1P 6A C/ }).click()
+  // The bill lives behind the centre-column «Спецификация» tab.
+  await page.getByRole('tab', { name: 'Спецификация' }).click()
   const bom = page.getByRole('region', { name: 'Сводная ведомость' })
   await expect(bom).toContainText('«уточняется»')
   await expect(bom).toContainText('Коммерческая сумма не рассчитана')
   await expect(bom).toContainText('Источник указан')
 
+  // Printing must not depend on the active section, so the board tab is restored first.
+  await page.getByRole('tab', { name: 'Схема 2D' }).click()
   await page.getByRole('button', { name: 'Печать', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as Window & { __panel36Printed?: boolean }).__panel36Printed)).toBe(true)
   await page.emulateMedia({ media: 'print' })

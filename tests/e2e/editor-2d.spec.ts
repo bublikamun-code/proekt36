@@ -37,7 +37,42 @@ test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) 
   await expect(page.locator('.app-shell')).toHaveClass(/panels-open/)
   await expect(page.locator('.catalog-panel')).toBeVisible()
   await expect(page.locator('.inspector-panel')).toBeVisible()
+  // The bill lives behind the center-column tab; switching to it must show the panel.
+  await page.locator('[data-editor-tab="bom"]').click()
   await expect(page.locator('.bom-panel')).toBeVisible()
+})
+
+test('center-column tabs switch sections, keep the URL and survive a reload', async ({ page }) => {
+  await gotoEditor(page)
+  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+
+  const tabs = page.locator('.editor-tabs [role="tab"]')
+  await expect(tabs).toHaveCount(4)
+  await expect(page.locator('[data-editor-tab="2d"]')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.editor-2d')).toBeVisible()
+
+  // The bill tab shows the BOM and only it; the board keeps its DOM (state survives switching).
+  await page.locator('[data-editor-tab="bom"]').click()
+  await expect(page.locator('.bom-panel')).toBeVisible()
+  await expect(page.locator('#editor-panel-2d')).toBeHidden()
+  await expect(page).toHaveURL(/tab=bom/)
+
+  // Checks render the validation summary for the seeded board.
+  await page.locator('[data-editor-tab="checks"]').click()
+  await expect(page.locator('[data-checks-panel]')).toBeVisible()
+  await expect(page.locator('.checks-summary')).toBeVisible()
+
+  // The report is readable on screen and the URL reload lands on the same tab.
+  await page.locator('[data-editor-tab="report"]').click()
+  await expect(page.getByRole('article', { name: /Печатный отчёт/ })).toBeVisible()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.locator('[data-editor-tab="report"]')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('article', { name: /Печатный отчёт/ })).toBeVisible()
+
+  // Arrow-key navigation walks the tablist like the demo does.
+  await page.locator('[data-editor-tab="report"]').focus()
+  await page.keyboard.press('Home')
+  await expect(page.locator('[data-editor-tab="2d"]')).toHaveAttribute('aria-selected', 'true')
 })
 
 test('DIN drag shows a stable insertion preview before committing the move', async ({ page }) => {

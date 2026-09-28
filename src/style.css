@@ -942,6 +942,139 @@ kbd {
   min-height: 0;
   overflow-y: auto;
 }
+/* Center-column tabs: the board, the bill, the checks and the report share one column,
+   each reachable in both panel modes. Keyboard follows the demo tablist pattern. */
+.editor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  width: fit-content;
+  margin: 8px 10px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.editor-tabs button {
+  min-height: 32px;
+  padding: 0 14px;
+  color: var(--text-muted);
+  font: 700 var(--text-xs) var(--mono);
+  cursor: pointer;
+}
+.editor-tabs button.active {
+  color: var(--on-service);
+  background: var(--service);
+}
+.tab-panel-2d {
+  display: grid;
+  /* The board takes whatever the position pad leaves; without the definite 1fr track
+     the editor falls back to content height and its rows end up clipped. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 600px;
+}
+.tab-panel > .bom-panel,
+.tab-panel > .checks-panel {
+  margin: 10px;
+}
+.print-report.screen-visible {
+  display: block;
+  margin: 10px;
+}
+.checks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.checks-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+}
+.checks-summary.ok {
+  border-left-color: var(--ok, var(--accent));
+}
+.checks-summary strong {
+  font-size: var(--text-sm);
+}
+.checks-summary span {
+  color: var(--text-muted);
+}
+.checks-phase h4 {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.checks-phase dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 6px 0 0;
+}
+.checks-phase dl div {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.checks-phase dt {
+  color: var(--text-muted);
+  font-size: var(--text-micro);
+}
+.checks-phase dd {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+.checks-issue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.checks-issue-list li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: var(--surface-raised);
+  border-left: 2px solid var(--warning);
+}
+.checks-issue-list li.issue-error {
+  border-left-color: var(--error);
+}
+.checks-issue-list li.issue-info {
+  border-left-color: var(--accent);
+}
+.issue-goto {
+  margin-left: auto;
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.issue-goto:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.count-error {
+  color: var(--error);
+}
+.count-warning {
+  color: var(--warning);
+}
 .editor-2d {
   min-height: 600px;
   display: grid;
@@ -1890,9 +2023,22 @@ kbd {
 }
 .canvas-focus .workspace {
   grid-template-columns: minmax(0, 1fr);
+  /* Without a stretched row the tab column collapses to content height, the board
+     stops short of the viewport bottom and its rows land inside the drag autoscroll
+     edge band — every aimed drop would scroll the board mid-drag. */
+  grid-template-rows: minmax(0, 1fr);
 }
 .canvas-focus .center-workspace {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-focus .editor-tabs {
+  flex: none;
+}
+.canvas-focus .tab-panel-2d {
+  flex: 1;
+  min-height: 0;
 }
 .canvas-focus .editor-2d {
   height: 100%;
@@ -1913,7 +2059,9 @@ kbd {
 .canvas-focus .inspector-panel {
   position: fixed;
   z-index: 50;
-  top: 144px;
+  /* 102px header + 8px gap + 42px section tabs + 42px board toolbar: the toolbar's zoom
+     and panel toggles must stay reachable while the floating panels are open. */
+  top: 194px;
   bottom: 0;
   display: block;
   width: min(330px, calc(100vw - 24px));
@@ -1948,7 +2096,7 @@ kbd {
   backdrop-filter: blur(1px);
 }
 .canvas-focus .panel-scrim {
-  top: 144px;
+  top: 194px;
 }
 /* On wide screens the panels float beside the board, so the board stays interactive and the canvas itself collapses them. */
 @media (min-width: 1025px) {

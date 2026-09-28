@@ -261,12 +261,23 @@ const autoscroll = () => {
   if (!element) return
   const rect = element.getBoundingClientRect()
   const { x, y } = dragPointer.value
+  // The board renders full-bleed behind the floating panels, so a pointer over the
+  // catalogue or the inspector is geometrically inside the canvas edge band. That is
+  // not a request to scroll the board: it would shift the rails away from under a
+  // drop that is still being aimed.
+  const overOverlay = document.elementFromPoint(x, y)?.closest('.catalog-panel, .inspector-panel, .editor-tabs, .app-header, .mobile-nav')
+  if (overOverlay) return
   let dx = 0
   let dy = 0
   if (x < rect.left + EDGE_PX) dx = -SCROLL_STEP_PX
   else if (x > rect.right - EDGE_PX) dx = SCROLL_STEP_PX
-  if (y < rect.top + EDGE_PX) dy = -SCROLL_STEP_PX
-  else if (y > rect.bottom - EDGE_PX) dy = SCROLL_STEP_PX
+  // A pointer that already snaps to a rail is aiming a live drop; scrolling the board
+  // now would slide the rails away from under it. Vertical autoscroll only serves a
+  // pointer hunting for a rail that is still off screen.
+  if (rowAtPoint(y) < 0) {
+    if (y < rect.top + EDGE_PX) dy = -SCROLL_STEP_PX
+    else if (y > rect.bottom - EDGE_PX) dy = SCROLL_STEP_PX
+  }
   if (!dx && !dy) return
   element.scrollLeft += dx
   element.scrollTop += dy

@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import CatalogPanel from '../components/catalog/CatalogPanel.vue'
 import Editor2D from '../components/editor/Editor2D.vue'
+import ChecksPanel from '../components/editor/ChecksPanel.vue'
 import DevicePositionPad from '../components/editor/DevicePositionPad.vue'
 import InspectorPanel from '../components/inspector/InspectorPanel.vue'
 import BomPanel from '../components/bom/BomPanel.vue'
@@ -203,6 +204,33 @@ const clearData = async () => {
   await store.clearLocalData(); clearConfirmOpen.value = false; liveMessage.value = 'Локальные данные удалены.'
 }
 const printProject = () => requestAnimationFrame(() => window.print())
+
+const EDITOR_TABS = [
+  { id: '2d', label: 'Схема 2D' },
+  { id: 'bom', label: 'Спецификация' },
+  { id: 'checks', label: 'Проверки' },
+  { id: 'report', label: 'Отчёт' },
+] as const
+type EditorTab = typeof EDITOR_TABS[number]['id']
+
+/** The tab lives in the URL, so a BOM link survives a reload and the back button works. */
+const normalizeTab = (value: unknown): EditorTab => {
+  const tab = Array.isArray(value) ? value[0] : value
+  return EDITOR_TABS.some((item) => item.id === tab) ? tab as EditorTab : '2d'
+}
+const activeTab = computed<EditorTab>(() => normalizeTab(route.query.tab))
+const setTab = (tab: EditorTab) => {
+  if (tab === activeTab.value) return
+  void router.replace({ query: { ...route.query, tab: tab === '2d' ? undefined : tab } })
+}
+const onTabKeydown = (event: KeyboardEvent, index: number) => {
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? EDITOR_TABS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + EDITOR_TABS.length) % EDITOR_TABS.length
+  setTab(EDITOR_TABS[next].id)
+  void nextTick(() => document.querySelector<HTMLButtonElement>(`[data-editor-tab="${EDITOR_TABS[next].id}"]`)?.focus())
+}
+// Focus mode is a statement about the board: arriving at it from another tab returns there.
+watch(canvasFocus, (focused) => { if (focused) setTab('2d') })
+
 const togglePanels = () => {
   if (window.matchMedia('(max-width: 760px)').matches) { mobilePanel.value = mobilePanel.value === 'catalog' ? null : 'catalog'; return }
   canvasFocus.value = !canvasFocus.value
@@ -322,10 +350,20 @@ onUnmounted(() => {
     <main class="workspace" @click="onWorkspaceClick">
       <CatalogPanel :focus-category="catalogFocus" :class="{ 'mobile-active': mobilePanel === 'catalog' }" />
       <div class="center-workspace">
-        <Editor2D :focused="canvasFocus" @toggle-focus="togglePanels" />
-        <DevicePositionPad v-if="selectedDevice" />
-        <BomPanel />
-        <ProjectPrintReport :project="currentProject" :definitions="definitions" />
+        <nav class="editor-tabs" role="tablist" aria-label="Разделы редактора">
+          <button v-for="(tab, index) in EDITOR_TABS" :id="`editor-tab-${tab.id}`" :key="tab.id" :data-editor-tab="tab.id" :aria-controls="`editor-panel-${tab.id}`" :aria-selected="activeTab === tab.id" :class="{ active: activeTab === tab.id }" :tabindex="activeTab === tab.id ? 0 : -1" type="button" role="tab" @click="setTab(tab.id)" @keydown="onTabKeydown($event, index)">{{ tab.label }}</button>
+        </nav>
+        <div id="editor-panel-2d" class="tab-panel tab-panel-2d" role="tabpanel" aria-labelledby="editor-tab-2d" v-show="activeTab === '2d'">
+          <Editor2D :focused="canvasFocus" @toggle-focus="togglePanels" />
+          <DevicePositionPad v-if="selectedDevice" />
+        </div>
+        <div id="editor-panel-bom" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-bom" v-show="activeTab === 'bom'">
+          <BomPanel />
+        </div>
+        <div id="editor-panel-checks" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-checks" v-show="activeTab === 'checks'">
+          <ChecksPanel @goto-board="setTab('2d')" />
+        </div>
+        <ProjectPrintReport id="editor-panel-report" :project="currentProject" :definitions="definitions" :class="{ 'screen-visible': activeTab === 'report' }" />
       </div>
       <InspectorPanel :class="{ 'mobile-active': mobilePanel === 'inspector' }" @focus-category="catalogFocus = $event" />
     </main>
