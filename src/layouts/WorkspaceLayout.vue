@@ -18,6 +18,7 @@ const isHere = (name: string) =>
   <nav class="workspace-nav" aria-label="Разделы кабинета">
     <RouterLink :to="{ name: 'projects' }" :aria-current="isHere('projects') ? 'page' : undefined">Проекты</RouterLink>
     <RouterLink :to="{ name: 'current-editor' }" :aria-current="isHere('editor') ? 'page' : undefined">Редактор</RouterLink>
+    <RouterLink :to="{ name: 'settings' }" :aria-current="isHere('settings') ? 'page' : undefined">Настройки</RouterLink>
   </nav>
   <RouterView />
   <Transition name="toast">

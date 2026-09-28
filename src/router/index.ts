@@ -37,6 +37,7 @@ export const router = createRouter({
         { path: 'projects', name: 'projects', component: () => import('../views/ProjectsView.vue') },
         { path: 'projects/:projectId/editor', name: 'editor', component: () => import('../views/EditorView.vue') },
         { path: 'editor', name: 'current-editor', component: () => import('../views/EditorView.vue') },
+        { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', name: 'notFound', component: () => import('../views/NotFoundView.vue') },

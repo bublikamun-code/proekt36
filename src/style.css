@@ -21,6 +21,8 @@
   --text-muted: #59635d;
   --text-faint: #6a706c;
   --ok: #2c7155;
+  /* Set at runtime by the editor (measured board top); `initial` keeps var() fallbacks live. */
+  --editor-panels-top: initial;
   --on-ok: #ffffff;
   --ok-soft: #dcece4;
   --warning: #9a6418;
@@ -936,6 +938,56 @@ kbd {
 .import-dialog .primary-button {
   width: 100%;
   min-height: 40px;
+}
+/* Settings page: one column of blocks, tables read like the BOM. */
+.settings-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px clamp(14px, 4vw, 40px) 40px;
+  background: var(--canvas);
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.settings-block {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.settings-block h2 {
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+}
+.settings-block .button-row {
+  margin-top: 10px;
+}
+.settings-table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+.settings-table th {
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-bottom: 1px solid var(--line);
+}
+.settings-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+.settings-table td small {
+  display: block;
+  color: var(--text-muted);
 }
 /* Persistent workspace navigation: one strip above every /app screen, so switching
    between the project list and the editor stops living in each screen's own header. */

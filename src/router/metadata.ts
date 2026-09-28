@@ -78,6 +78,12 @@ export const pageMetadata: Record<string, PageMetadata> = {
     robots: 'noindex,nofollow',
     public: false,
   },
+  settings: {
+    title: 'Настройки кабинета — Панель 36',
+    description: 'Тема, локальное хранилище и библиотека CAD-моделей Панель 36.',
+    robots: 'noindex,nofollow',
+    public: false,
+  },
   notFound: {
     title: 'Страница не найдена — Панель 36',
     description: 'Запрошенная страница Панель 36 не найдена.',
