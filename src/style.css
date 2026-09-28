@@ -937,6 +937,31 @@ kbd {
   width: 100%;
   min-height: 40px;
 }
+/* Persistent workspace navigation: one strip above every /app screen, so switching
+   between the project list and the editor stops living in each screen's own header. */
+.workspace-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.workspace-nav a {
+  padding: 4px 12px;
+  color: var(--text-muted);
+  font: 600 var(--text-xs) var(--mono);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.workspace-nav a:hover {
+  color: var(--text);
+}
+.workspace-nav a[aria-current='page'] {
+  color: var(--on-service);
+  background: var(--service);
+  border-color: var(--service);
+}
 .center-workspace {
   min-width: 0;
   min-height: 0;
@@ -2059,9 +2084,10 @@ kbd {
 .canvas-focus .inspector-panel {
   position: fixed;
   z-index: 50;
-  /* 102px header + 8px gap + 42px section tabs + 42px board toolbar: the toolbar's zoom
-     and panel toggles must stay reachable while the floating panels are open. */
-  top: 194px;
+  /* --editor-panels-top is measured at runtime (the board top under its toolbar band),
+     so extra chrome above the editor cannot desync the overlay from the toolbar. The
+     fallback chain is 102px header + 8px gap + 42px tabs + 42px toolbar. */
+  top: var(--editor-panels-top, 194px);
   bottom: 0;
   display: block;
   width: min(330px, calc(100vw - 24px));
@@ -2096,7 +2122,7 @@ kbd {
   backdrop-filter: blur(1px);
 }
 .canvas-focus .panel-scrim {
-  top: 194px;
+  top: var(--editor-panels-top, 194px);
 }
 /* On wide screens the panels float beside the board, so the board stays interactive and the canvas itself collapses them. */
 @media (min-width: 1025px) {
@@ -3183,7 +3209,7 @@ kbd {
     position: fixed;
     z-index: 70;
     right: 0;
-    top: 102px;
+    top: var(--editor-panels-top, 102px);
     bottom: 0;
     width: min(340px, 92vw);
     transform: translateX(100%);

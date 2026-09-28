@@ -54,6 +54,17 @@ const updateViewport = () => {
   }
 }
 
+/**
+ * Publishes the viewport top of the board as a CSS variable. The floating panels and the
+ * scrim anchor to it instead of a hardcoded pixel count, so any chrome added above the
+ * editor (workspace nav, tabs) keeps the toolbar band clickable without touching this file.
+ */
+const syncPanelsTop = () => {
+  const element = canvasScroll.value
+  if (!element) return
+  document.documentElement.style.setProperty('--editor-panels-top', `${Math.round(element.getBoundingClientRect().top)}px`)
+}
+
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateViewport)
   if (canvasScroll.value) {
@@ -63,11 +74,14 @@ onMounted(() => {
     canvasScroll.value.addEventListener('wheel', onCanvasWheel, { passive: false })
   }
   updateViewport()
+  requestAnimationFrame(syncPanelsTop)
+  window.addEventListener('resize', syncPanelsTop)
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   canvasScroll.value?.removeEventListener('wheel', onCanvasWheel)
+  window.removeEventListener('resize', syncPanelsTop)
   setBoardDropHandler(null)
   window.cancelAnimationFrame(frame)
 })
