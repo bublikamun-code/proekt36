@@ -44,7 +44,8 @@ const nguSockets = computed(() => [0.34, 0.66].flatMap((ratioY) => [0.32, 0.68].
   cy: props.metrics.heightMm * ratioY,
   r: Math.min(2, props.metrics.body.width * 0.08),
 }))))
-const points = (values: { x: number; y: number }[]) => values.map((point) => `${point.x} ${point.y}`).join(' L ')
+/** The path prefix matters: a leading M is required, otherwise the browser drops the whole d. */
+const points = (values: { x: number; y: number }[]) => `M ${values.map((point) => `${point.x} ${point.y}`).join(' L ')}`
 const leverPath = (toggle: typeof props.metrics.toggles[number]) => `${points(toggle.points)} Z`
 </script>
 
