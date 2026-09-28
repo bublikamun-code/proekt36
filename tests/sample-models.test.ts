@@ -18,13 +18,17 @@ const modelPath = resolve(process.cwd(), 'public/models/city9-mcb-2p.glb')
     expect(sampleCatalog.map((item) => item.poles)).toEqual([1, 2])
   })
 
-  it('binds the 2P sample to the embedded CAD manifest entry', () => {
+  it('binds both samples to pre-oriented embedded CAD models', () => {
+    const onePole = sampleCatalog.find((item) => item.id === 'city9-mcb-1p-c16')
     const twoPole = sampleCatalog.find((item) => item.id === 'city9-mcb-2p-c16')
     expect(twoPole?.modelId).toBe('city9-mcb-2p')
     const asset = twoPole?.modelId ? embeddedModelById.get(twoPole.modelId) : undefined
     expect(asset).toMatchObject({ source: 'embedded', url: '/models/city9-mcb-2p.glb', format: 'glb' })
-    expect(asset?.transform.rotationY).toBe(-Math.PI / 2)
+    // The GLB is baked with height on +Y and the face toward +Z, so the stage adds no rotation.
+    expect(asset?.transform.rotationY).toBe(0)
+    expect(onePole?.modelId).toBe('city9-mcb-1p')
     expect(existsSync(modelPath)).toBe(true)
+    expect(existsSync(resolve(process.cwd(), 'public/models/city9-mcb-1p.glb'))).toBe(true)
     expect(statSync(modelPath).size).toBeGreaterThan(1_000_000)
   })
 

@@ -5,6 +5,9 @@ export const FACE_MODULE_MM = 18
 export const FACE_DEFAULT_HEIGHT_MM = 82
 export const FACE_MIN_HEIGHT_MM = 45
 export const FACE_MIN_WIDTH_MM = 14
+/** City9 shells measure 17.7 mm per module and 85.5 mm tall, per the manufacturer drawing. */
+export const CITY9_MODULE_MM = 17.7
+export const CITY9_HEIGHT_MM = 85.5
 
 const EDGE_MM = 0.7
 const CLIP_MM = 1.9
@@ -198,8 +201,13 @@ const buildToggle = (rect: FaceRect, column: number, shared: boolean): FaceToggl
 export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetrics => {
   const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
   const poles = Math.max(1, Math.round(product.poles || 1))
-  const widthMm = Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
-  const heightMm = clamp(product.height || FACE_DEFAULT_HEIGHT_MM, FACE_MIN_HEIGHT_MM, 260)
+  const city9 = faceShellFamily(product) === 'city9'
+  const widthMm = city9
+    ? Math.max(FACE_MIN_WIDTH_MM, moduleWidth * CITY9_MODULE_MM)
+    : Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
+  const heightMm = city9
+    ? CITY9_HEIGHT_MM
+    : clamp(product.height || FACE_DEFAULT_HEIGHT_MM, FACE_MIN_HEIGHT_MM, 260)
   const columns = faceTerminalColumns(product)
   const sharedToggle = faceSharedToggle(product)
   const columnWidth = widthMm / Math.max(1, columns || moduleWidth)

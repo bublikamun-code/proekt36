@@ -12,11 +12,12 @@
     "bus": "L",
     "price": 0,
     "weight": 0.16,
-    "height": 82,
-    "depth": 74,
     "series": "CITY9-MCB",
     "tripCurve": "C",
-    "verificationStatus": "template"
+    "verificationStatus": "template",
+    "height": 85.5,
+    "depth": 75.7,
+    "modelId": "city9-mcb-1p"
   },
   {
     "id": "city9-mcb-2p-c16",
@@ -31,11 +32,11 @@
     "bus": "L",
     "price": 0,
     "weight": 0.16,
-    "height": 82,
-    "depth": 74,
     "series": "CITY9-MCB",
     "tripCurve": "C",
     "verificationStatus": "template",
+    "height": 85.5,
+    "depth": 75.7,
     "modelId": "city9-mcb-2p"
   }
 ]
