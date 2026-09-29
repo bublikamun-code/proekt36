@@ -11,13 +11,13 @@ import {
   resolveDeviceMove,
   type LayoutMigrationPlan,
 } from '../domain/layout'
-import { autoNumber, createProject, migrateProject, presetProducts, uid } from '../domain/project'
+import { autoConnectionLabel, autoNumber, autoNumberConnections, createProject, migrateProject, presetProducts, uid } from '../domain/project'
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, RowComb, StoredModelAsset, StoredModelLibrary } from '../domain/types'
 import { terminalOccupied } from '../domain/wireRouting'
-import { sameTerminal, terminalColumnForPole, terminalColumns, terminalDisplayName, terminalMarkedName, terminalType } from '../domain/terminals'
+import { sameTerminal, terminalColumnForPole, terminalColumns, terminalType } from '../domain/terminals'
 import type { TerminalRef, TerminalType } from '../domain/terminals'
 import { clearModelAssets, deleteModelAsset, listModelAssetIds, putModelAsset } from '../storage/modelDb'
 import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
@@ -76,6 +76,7 @@ export const useProjectStore = defineStore('project', () => {
   const projects = ref<PanelProject[]>(loaded.projects.length ? loaded.projects : [fallbackProject])
   const currentProjectId = ref(loaded.currentProjectId && projects.value.some((project) => project.id === loaded.currentProjectId) ? loaded.currentProjectId : projects.value[0]!.id)
   const selectedDeviceId = ref<string | null>(null)
+  const selectedConnectionId = ref<string | null>(null)
   const cabinetMigration = ref<LayoutMigrationPlan | null>(null)
   const modelLibrary = ref<StoredModelLibrary>(loaded.models)
   const histories = ref<Record<string, ProjectHistory>>({})
@@ -133,6 +134,14 @@ export const useProjectStore = defineStore('project', () => {
     }
     return map
   })
+  /**
+   * Addresses and the wire labels that quote them are one thing. Renumbering the devices and
+   * leaving the wiring alone would leave every conductor pointing at an address that moved.
+   */
+  const renumber = (project: PanelProject, devices: PlacedDevice[] = project.devices) => {
+    project.devices = autoNumber(devices, definitions.value)
+    project.connections = autoNumberConnections(project.connections ?? [], project.devices, definitions.value)
+  }
   const selectedDevice = computed(() => currentProject.value.devices.find((item) => item.instanceId === selectedDeviceId.value) ?? null)
   const selectedProduct = computed(() => selectedDevice.value ? definitions.value.get(selectedDevice.value.productId) ?? null : null)
 
@@ -327,7 +336,7 @@ export const useProjectStore = defineStore('project', () => {
       const result = placeProduct(devices, product, row, 0, getRowCapacity(project), uid, productsMap)
       devices = result.devices
     })
-    project.devices = autoNumber(devices, definitions.value)
+    renumber(project, devices)
   }, 'Пресет применён')
 
   const rejectCommand = (message: string) => {
@@ -439,7 +448,7 @@ export const useProjectStore = defineStore('project', () => {
     const previousIds = new Set(currentProject.value.devices.map((item) => item.instanceId))
     let linked = 0
     commit((project) => {
-      project.devices = autoNumber(result.devices, definitions.value)
+      renumber(project, result.devices)
       linked = syncBusbarConnections(project, new Set(project.devices.filter((item) => !previousIds.has(item.instanceId)).map((item) => item.instanceId)))
     })
     selectedDeviceId.value = result.devices.find((item) => !previousIds.has(item.instanceId))?.instanceId ?? null
@@ -465,7 +474,7 @@ export const useProjectStore = defineStore('project', () => {
         return Boolean(before) && before!.row === item.row && before!.slot === item.slot
       })
     if (unchanged) return
-    commit((project) => { project.devices = autoNumber(result.devices, definitions.value) }, undefined, { coalesce: options?.coalesce })
+    commit((project) => { renumber(project, result.devices) }, undefined, { coalesce: options?.coalesce })
   }
 
   const moveSelected = (row: number, slot: number) => {
@@ -528,7 +537,7 @@ export const useProjectStore = defineStore('project', () => {
     }, 'Ряды уплотнены')
   }
 
-  const autoNumberAll = () => commit((project) => { project.devices = autoNumber(project.devices, definitions.value) }, 'Адреса обновлены')
+  const autoNumberAll = () => commit((project) => renumber(project), 'Адреса и подписи проводов обновлены')
 
   /** The slot span a new comb on this row should cover: every device already in the row. */
   const addComb = (row: number, poles: 1 | 2 | 3 | 4 = 1) => {
@@ -571,6 +580,8 @@ export const useProjectStore = defineStore('project', () => {
 
   const terminalDevice = (ref: TerminalRef) => currentProject.value.devices.find((item) => item.instanceId === ref.deviceId)
 
+  const deviceMap = (project: PanelProject) => new Map(project.devices.map((item) => [item.instanceId, item]))
+
   /** What a clamp is: the marking on the device, not the pole number, decides it. */
   const terminalMarking = (ref: TerminalRef): TerminalType | null => {
     const product = terminalProduct(ref)
@@ -582,12 +593,6 @@ export const useProjectStore = defineStore('project', () => {
   const terminalProduct = (ref: TerminalRef) => {
     const device = terminalDevice(ref)
     return device ? definitions.value.get(device.productId) : undefined
-  }
-
-  /** «QF01:N верх» rather than the pole number, which is not what is printed on the clamp. */
-  const terminalName = (ref: TerminalRef, address: string) => {
-    const product = terminalProduct(ref)
-    return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
   }
 
   /**
@@ -606,10 +611,12 @@ export const useProjectStore = defineStore('project', () => {
     const connection: Connection = {
       id: uid(), circuitId: '', fromBus: marking === 'neutral' ? 'N' : marking === 'pe' ? 'PE' : 'L',
       toDeviceId: to.deviceId, color: '', thickness: 2, kind: 'jumper',
-      fromTerminal: from, toTerminal: to,
-      label: `${terminalName(from, source.address)} → ${terminalName(to, target.address)}`,
+      fromTerminal: from, toTerminal: to, label: '',
     }
     if (marking === 'phase') connection.phase = (((from.pole - 1) % 3) + 1) as 1 | 2 | 3
+    // The label quotes addresses, so it comes from the same rule the renumbering pass uses rather
+    // than from a second spelling of it that could drift.
+    connection.label = autoConnectionLabel(connection, deviceMap(currentProject.value), definitions.value)
     commit((project) => { project.connections.push(connection) }, 'Провод добавлен')
     return true
   }
@@ -622,9 +629,9 @@ export const useProjectStore = defineStore('project', () => {
     if (terminalOccupied(currentProject.value, to)) return rejectCommand('Клемма уже занята другим проводом.')
     const connection: Connection = {
       id: uid(), circuitId: '', fromBus: bus.kind, toDeviceId: to.deviceId,
-      color: '', thickness: 2, kind: 'circuit', busId, toTerminal: to,
-      label: `${bus.label || bus.kind} → ${terminalName(to, target.address)}`,
+      color: '', thickness: 2, kind: 'circuit', busId, toTerminal: to, label: '',
     }
+    connection.label = autoConnectionLabel(connection, deviceMap(currentProject.value), definitions.value)
     if (bus.kind === 'L') connection.phase = 1
     commit((project) => { project.connections.push(connection) }, 'Провод от шины добавлен')
     return true
@@ -738,9 +745,21 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  const deleteConnection = (id: string) => commit((project) => {
-    project.connections = project.connections.filter((item) => item.id !== id)
-  }, 'Подключение удалено')
+  const deleteConnection = (id: string) => {
+    if (selectedConnectionId.value === id) selectedConnectionId.value = null
+    commit((project) => {
+      project.connections = project.connections.filter((item) => item.id !== id)
+    }, 'Подключение удалено')
+  }
+
+  /**
+   * Which conductor the user is looking at. It lives in the store, not in the board, because the
+   * inspector lists the same wires and has to be able to point at one: a selection the board owns
+   * would leave the list blind to the click, and Delete would remove nothing the panel shows.
+   */
+  const selectConnection = (id: string | null) => {
+    selectedConnectionId.value = selectedConnectionId.value === id ? null : id
+  }
 
   const deleteCircuit = (id: string) => commit((project) => {
     project.circuits = project.circuits.filter((item) => item.id !== id)
@@ -844,7 +863,7 @@ export const useProjectStore = defineStore('project', () => {
     const result = resolveDeviceMove(staged, instanceId, device.row, device.slot, getRowCapacity(currentProject.value), definitions.value)
     if (result.error) return rejectCommand(result.error)
     commit((project) => {
-      project.devices = autoNumber(result.devices, definitions.value)
+      renumber(project, result.devices)
     }, 'Товар заменён')
     return true
   }
@@ -957,7 +976,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   return {
-    projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration,
+    projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration, selectedConnectionId, selectConnection,
     definitions, modelLibrary, modelAssetsById, resolveProductModel, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
     storageAlert, storageRecoveryNotice, hasStorageBackup, hasStorageRecovery, downloadStorageSnapshot, restoreStorageBackup, dismissStorageAlert,
     lastSavedAt, theme, toast, switchProject, newProject, duplicateProject, renameProject, deleteProject,

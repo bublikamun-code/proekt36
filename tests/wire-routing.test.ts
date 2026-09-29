@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { routeBoard, terminalTargets as terminalTargetsOf, wireFrameFromGeometry } from '../src/domain/wireRouting'
+import { routeBoard, terminalTargets as terminalTargetsOf, wireBadge, wireFrameFromGeometry } from '../src/domain/wireRouting'
+import { autoConnectionLabel, autoNumber, autoNumberConnections } from '../src/domain/project'
 import { getPanelGeometry } from '../src/domain/panelGeometry'
 import { deviceTerminals, facePlacementMm, faceSizeMm, terminalAnchorMm, terminalColumns } from '../src/domain/terminals'
 import type { Connection, DeviceDefinition, PanelProject } from '../src/domain/types'
@@ -323,5 +324,55 @@ describe('wire routing', () => {
     expect(fit.scale).toBeCloseTo(1, 6)
     expect(fit.offsetXMm).toBeCloseTo(0, 6)
     expect(fit.offsetYMm).toBeCloseTo(0, 6)
+  })
+})
+
+describe('подписи разводки', () => {
+  it('называет провод по маркировке клемм, а не по номерам полюсов', () => {
+    const map = new Map(CATALOG.map((item) => [item.id, item]))
+    const devices = [placed('qf01', 'mcb-1p', 0), placed('qfi01', 'rcbo-1pn', 3)]
+    const byId = new Map(devices.map((item) => [item.instanceId, item]))
+    const jumper: Connection = {
+      id: 'w', circuitId: '', fromBus: 'L', toDeviceId: 'qfi01', color: '', thickness: 2, kind: 'jumper',
+      fromTerminal: { deviceId: 'qf01', pole: 1, side: 'bottom' },
+      toTerminal: { deviceId: 'qfi01', pole: 2, side: 'top' },
+      label: '',
+    }
+    // Pole 2 of a 1P+N RCBO is the clamp marked «N», and the wire has to say so: «2 верх» is the
+    // number its neighbour wears. The source clamp is numbered the other way round, as the
+    // bottom row of every breaker is.
+    expect(autoConnectionLabel(jumper, byId, map)).toBe('QF01:2 низ → QFI01:N верх')
+  })
+
+  it('переписывает подписи проводов при перенумерации и не трогает линии без клемм', () => {
+    const map = new Map(CATALOG.map((item) => [item.id, item]))
+    const devices = [placed('qf01', 'mcb-1p', 0), placed('qf02', 'mcb-1p', 1)]
+    const byId = new Map(devices.map((item) => [item.instanceId, item]))
+    const jumper: Connection = {
+      id: 'w', circuitId: '', fromBus: 'L', toDeviceId: 'qf02', color: '', thickness: 2, kind: 'jumper',
+      fromTerminal: { deviceId: 'qf01', pole: 1, side: 'top' },
+      toTerminal: { deviceId: 'qf02', pole: 1, side: 'top' },
+      label: 'QF09:1 верх → QF09:1 верх',
+    }
+    const circuit: Connection = { id: 'c', circuitId: 'c1', fromBus: 'L', toDeviceId: 'qf01', color: '', thickness: 2, label: 'Розетки' }
+    const [wire, feed] = autoNumberConnections([jumper, circuit], devices, map)
+    expect(wire.label).toBe('QF01:1 верх → QF02:1 верх')
+    // A circuit line belongs to a load, not to a clamp, and keeps the name an installer gave it.
+    expect(feed.label).toBe('Розетки')
+  })
+
+  it('выдаёт всем аппаратам одного вида разные адреса', () => {
+    const map = new Map(CATALOG.map((item) => [item.id, item]))
+    const devices = [placed('a', 'mcb-1p', 0), placed('b', 'mcb-1p', 1), placed('c', 'rcbo-1pn', 2), placed('d', 'mcb-1p', 3)]
+    const numbered = autoNumber(devices, map)
+    expect(numbered.map((item) => item.address)).toEqual(['QF01', 'QF02', 'QFI01', 'QF03'])
+    expect(new Set(numbered.map((item) => item.address)).size).toBe(devices.length)
+  })
+
+  it('печатает на проводе фазу, а не пару клемм', () => {
+    expect(wireBadge({ label: 'QF01:1 верх → QF03:1 верх', fromBus: 'L', phase: 2, toTerminal: {} })).toBe('L2')
+    expect(wireBadge({ label: 'N → QF03:N верх', fromBus: 'N', toTerminal: {} })).toBe('N')
+    // A line that predates clamping keeps its own text: nobody asked to have it rewritten.
+    expect(wireBadge({ label: 'Розетки кухни', fromBus: 'L', phase: 1 })).toBe('Розетки кухни')
   })
 })

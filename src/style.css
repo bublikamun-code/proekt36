@@ -2749,6 +2749,99 @@ kbd {
   font-size: var(--text-micro);
   font-weight: 600;
 }
+/* The clamp list mirrors the board: one row per screw, so the two can be read against each
+   other. A free clamp is greyed rather than hidden, because a hole with nothing in it is the
+   thing an installer looks for when deciding where the next wire goes. */
+.terminal-grid {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.terminal-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: rgba(251, 250, 242, .5);
+  font: var(--text-micro) var(--mono);
+}
+.terminal-row.busy {
+  border-color: rgba(109, 118, 111, .55);
+  background: rgba(251, 250, 242, .85);
+}
+.terminal-mark {
+  color: var(--text-muted);
+}
+.terminal-mark i {
+  font-style: normal;
+  color: var(--text-faint);
+}
+.terminal-free {
+  color: var(--text-faint);
+  font-family: 'Manrope', Arial, sans-serif;
+}
+.wire-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: var(--text-micro) var(--mono);
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.wire-link:hover,
+.wire-link.selected {
+  color: var(--service);
+  text-decoration-style: solid;
+}
+.wire-card.selected {
+  border-color: var(--service);
+  box-shadow: inset 3px 0 0 var(--service);
+}
+.wire-card-head .wire-phase {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 2px;
+  background: var(--line);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+}
+.wire-card-head .wire-phase.bus-n {
+  background: var(--wire-neutral);
+  color: #fff;
+}
+.wire-card-head .wire-phase.bus-pe {
+  background: var(--wire-pe);
+  color: #1d231f;
+}
+.wire-ends {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font: var(--text-micro) var(--mono);
+}
+.wire-arrow {
+  color: var(--text-faint);
+}
+.bus-chip {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--text-muted);
+}
+.wire-rename {
+  display: grid;
+  gap: 2px;
+  color: var(--text-muted);
+}
 .compact-empty {
   min-height: 62px;
 }

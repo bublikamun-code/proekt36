@@ -400,11 +400,9 @@ const onBoardKeydown = (event: KeyboardEvent) => {
     toggleWireMode()
     return
   }
-  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedConnectionId.value) {
+  if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedConnectionId) {
     event.preventDefault()
-    const id = selectedConnectionId.value
-    selectedConnectionId.value = null
-    store.deleteConnection(id)
+    store.deleteConnection(store.selectedConnectionId)
   }
 }
 
@@ -435,7 +433,6 @@ const boardRoot = ref<HTMLElement | null>(null)
 const wireMode = ref(false)
 const wireStart = ref<TerminalRef | null>(null)
 const wireCursor = ref<WirePoint | null>(null)
-const selectedConnectionId = ref<string | null>(null)
 
 const boardFrame = computed(() => wireFrameFromGeometry(geometry.value))
 const board = computed(() => routeBoard(currentProject.value, definitions.value, boardFrame.value))
@@ -498,7 +495,7 @@ const onWirePointerMove = (event: PointerEvent) => {
 
 const selectWire = (id: string) => {
   if (wireMode.value) return
-  selectedConnectionId.value = selectedConnectionId.value === id ? null : id
+  store.selectConnection(id)
   const connection = currentProject.value.connections.find((item) => item.id === id)
   if (connection) announcement.value = `Выбран провод: ${connection.label || connection.id}`
 }
@@ -580,7 +577,7 @@ const selectWire = (id: string) => {
                  conductor clickable at all. Terminal targets come from the router, so a click and
                  the wire it will create land on the same screw. -->
             <svg class="wire-hits" :class="{ active: wireMode }" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true" @pointermove="onWirePointerMove" @pointerleave="wireCursor = null">
-              <path v-for="path in wirePaths" :key="`hit-${path.id}`" class="wire-hit" :class="{ selected: selectedConnectionId === path.id }" :d="path.d" :data-connection-id="path.id" @click="selectWire(path.id)" />
+              <path v-for="path in wirePaths" :key="`hit-${path.id}`" class="wire-hit" :class="{ selected: store.selectedConnectionId === path.id }" :d="path.d" :data-connection-id="path.id" @click="selectWire(path.id)" />
               <template v-if="wireMode">
                 <g class="wire-port-hits">
                   <circle v-for="target in terminalTargets" :key="target.key" class="wire-port" :class="{ taken: target.occupied, source: wireStart && wireStart.deviceId === target.deviceId && wireStart.pole === target.pole && wireStart.side === target.side }" :cx="target.x" :cy="target.y" r="2.6" :data-terminal="target.key" :data-terminal-state="target.occupied ? 'taken' : 'free'" :data-terminal-label="target.label" @click.stop="wireStart ? finishWire(target) : startWire(target)" />

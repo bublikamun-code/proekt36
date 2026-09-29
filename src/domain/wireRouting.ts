@@ -109,7 +109,10 @@ export const wireFrameFromGeometry = (geometry: PanelGeometry): WireFrame => ({
   // geometry.rowTopMm is measured from the cabinet top, while the overlay's viewBox starts at the
   // plate. Every frame coordinate is plate-local, so the offset is taken off here once rather
   // than at each use — a corridor left 24mm low runs a wire straight through the device row.
-  rowTopMm: (row) => (geometry.rowTopMm[row] ?? 0) - geometry.plateTopMm,
+  // A row the cabinet no longer has falls back to the plate's own top edge: the zero of the
+  // geometry is the cabinet top, which sits above the plate, so a plain zero here would hand
+  // the caller a corridor drawn off the top of the board.
+  rowTopMm: (row) => (geometry.rowTopMm[row] ?? geometry.plateTopMm) - geometry.plateTopMm,
   rowHeightMm: (row) => geometry.rowHeightsMm[row] ?? 0,
   deviceLeftMm: (device) => geometry.railStartXMm + device.slot * (geometry.railWidthMm / Math.max(1, geometry.capacity)),
   deviceTopMm: (device) => geometry.deviceTopMm(device.row, device.productId) - geometry.plateTopMm,
@@ -239,6 +242,19 @@ const walk = (points: WirePoint[], x: number, y: number): WirePoint[] => {
 }
 
 /**
+ * What the badge on the conductor reads. A wire drawn by hand names two clamps, and that text is
+ * the inspector's, not the board's: on a 12-module-wide rail a badge long enough to spell
+ * «QF01:1 верх → QF03:1 верх» would cover the very devices it connects. The board shows what an
+ * installer reads off it in the field — the phase, or N/PE — and the inspector keeps the full pair.
+ * A line that predates clamping, or that an installer named by hand, keeps its own text.
+ */
+export const wireBadge = (connection: { label: string; fromBus: string; phase?: 1 | 2 | 3; fromTerminal?: unknown; toTerminal?: unknown }): string => {
+  if (!connection.toTerminal) return connection.label
+  if (connection.fromBus === 'N' || connection.fromBus === 'PE') return connection.fromBus
+  return `L${connection.phase ?? 1}`
+}
+
+/**
  * Where a wire's badge sits: the middle of its longest horizontal run. A horizontal stretch is the
  * only part of an orthogonal route long enough to hold a label without covering a corner or a
  * neighbouring conductor, and a corner is exactly where two wires tend to cross.
@@ -342,7 +358,7 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       labelAt: at,
       color: wireColor(connection),
       thickness: connection.thickness > 0 ? connection.thickness : 2,
-      label: connection.label,
+      label: wireBadge(connection),
       bus: connection.fromBus,
       phase: connection.phase,
       kind: connection.kind ?? 'circuit',

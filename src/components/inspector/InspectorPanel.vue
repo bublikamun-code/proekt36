@@ -5,6 +5,8 @@ import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity,
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { cabinetDefinitions, cabinetSpecLabel, railDefinitions } from '../../data/enclosures'
 import { phaseBalance, validateProject } from '../../domain/validation'
+import { deviceTerminals as deviceTerminalList, sameTerminal, terminalDisplayName, terminalMarkedName } from '../../domain/terminals'
+import type { TerminalRef } from '../../domain/terminals'
 import { useProjectStore } from '../../stores/project'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
 import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
@@ -145,6 +147,28 @@ const changeCombSpan = (id: string, key: 'fromSlot' | 'toSlot', event: Event) =>
   store.updateComb(id, { [key]: Math.min(metrics.value.capacity - 1, Math.max(0, slot)) })
 }
 const removeComb = (id: string) => store.removeComb(id)
+/** Wiring drawn on the board. A line with no clamp is a circuit feed from the old schema, and the
+ *  circuits section below already lists those. */
+const drawnWires = computed(() => currentProject.value.connections.filter((item) => item.toTerminal))
+const deviceTerminals = computed(() => (selectedProduct.value ? deviceTerminalList(selectedProduct.value) : []))
+/** The wire clamped into one hole, whichever end of it that hole is. */
+const wireAt = (ref: TerminalRef) => drawnWires.value.find((item) => sameTerminal(item.toTerminal, ref) || sameTerminal(item.fromTerminal, ref)) ?? null
+const terminalWire = (pole: number, side: 'top' | 'bottom') =>
+  (selectedDevice.value ? wireAt({ deviceId: selectedDevice.value.instanceId, pole, side }) : null)
+const terminalText = (ref: TerminalRef) => {
+  const device = currentProject.value.devices.find((item) => item.instanceId === ref.deviceId)
+  const product = device ? definitions.value.get(device.productId) : undefined
+  const address = device?.address || ref.deviceId
+  return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
+}
+const removeWire = async (id: string, label: string) => {
+  if (await confirm({
+    title: 'Снять провод?',
+    description: `Провод «${label}» будет удалён, а его клеммы снова станут свободными.`,
+    confirmLabel: 'Снять провод',
+    danger: true,
+  })) store.deleteConnection(id)
+}
 const removeCircuit = async (id: string, circuitName: string) => {
   if (await confirm({
     title: 'Удалить цепь?',
@@ -283,6 +307,33 @@ const migrationIssueLabel = (code: string) => ({
         <p v-if="combCovers(comb).length < comb.poles" class="connection-warn">Ряду не хватает {{ comb.poles - combCovers(comb).length }} аппарат(а) — часть зубцов пустая.</p>
       </div>
       <p v-if="!(currentProject.combs ?? []).length" class="connection-empty">Кнопка «Гребёнка» в жёлобе ряда добавляет гребёнку на весь ряд.</p>
+    </section>
+
+    <section class="inspector-section" aria-labelledby="wires-title">
+      <div class="section-title"><h3 id="wires-title">Клеммы и провода</h3><span class="mono">{{ drawnWires.length }}</span></div>
+      <p class="microcopy">Инструмент «Провод» (клавиша W) соединяет клеммы на доске. Здесь видно, что в какую клемму входит; щелчок по строке подсвечивает провод на щите.</p>
+      <div v-if="selectedProduct" class="terminal-grid" data-terminal-grid>
+        <div v-for="info in deviceTerminals" :key="info.pole + info.side" class="terminal-row" :class="{ busy: terminalWire(info.pole, info.side) }" :data-terminal-row="`${selectedDevice!.instanceId}:${info.pole}:${info.side}`">
+          <span class="terminal-mark">{{ info.label }} <i>{{ info.side === 'top' ? 'верх' : 'низ' }}</i></span>
+          <button v-if="terminalWire(info.pole, info.side)" class="wire-link" :class="{ selected: store.selectedConnectionId === terminalWire(info.pole, info.side)!.id }" :aria-label="`Показать провод ${terminalWire(info.pole, info.side)!.label} на доске`" @click="store.selectConnection(terminalWire(info.pole, info.side)!.id)">{{ terminalWire(info.pole, info.side)!.label }}</button>
+          <span v-else class="terminal-free">свободна</span>
+        </div>
+      </div>
+      <div v-for="wire in drawnWires" :key="wire.id" class="connection-card wire-card" :class="{ selected: store.selectedConnectionId === wire.id }" :data-wire-row="wire.id">
+        <div class="connection-card-head">
+          <strong>{{ wire.label }}</strong>
+          <span class="wire-phase" :class="`bus-${wire.fromBus.toLowerCase()}`">{{ wire.fromBus === 'L' ? `L${wire.phase ?? 1}` : wire.fromBus }}</span>
+          <button class="icon-button danger" :aria-label="`Снять провод ${wire.label}`" @click="removeWire(wire.id, wire.label)">×</button>
+        </div>
+        <div class="wire-ends">
+          <span v-if="wire.fromTerminal">{{ terminalText(wire.fromTerminal) }}</span>
+          <span v-else class="bus-chip">шина {{ wire.fromBus }}</span>
+          <span class="wire-arrow">→</span>
+          <span v-if="wire.toTerminal">{{ terminalText(wire.toTerminal) }}</span>
+        </div>
+        <label class="wide wire-rename">Подпись<input :value="wire.label" placeholder="Например, L1 → QF03" @change="store.updateConnection(wire.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+      </div>
+      <p v-if="!drawnWires.length" class="connection-empty">Проводов пока нет. Нажмите «Провод» в панели доски и щёлкните две клеммы подряд.</p>
     </section>
 
     <section class="inspector-section circuits-section">

@@ -1,6 +1,7 @@
 import { cabinetById, railById } from '../data/enclosures'
 import type { BusAssembly, Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings, RowComb } from './types'
 import type { TerminalRef } from './terminals'
+import { terminalDisplayName, terminalMarkedName } from './terminals'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
 export { PROJECT_SCHEMA_VERSION } from './projectSchema'
@@ -237,9 +238,44 @@ export const autoNumber = (devices: PlacedDevice[], definitions: Map<string, Dev
     const product = definitions.get(item.productId)
     const prefix = product?.category === 'RCCB' ? 'QFD' : product?.category === 'RCBO' ? 'QFI' : product?.category === 'SPD' ? 'SPD' : product?.category === 'busbar' ? 'BUS' : product?.category === 'terminals' ? 'XT' : 'QF'
     const number = (counters.get(prefix) ?? 0) + 1
+    counters.set(prefix, number)
     const address = `${prefix}${String(number).padStart(2, '0')}`
     return { ...item, address, marking: item.marking || address }
   })
+}
+
+const terminalText = (ref: TerminalRef, devices: Map<string, PlacedDevice>, definitions: Map<string, DeviceDefinition>) => {
+  const device = devices.get(ref.deviceId)
+  const product = device ? definitions.get(device.productId) : undefined
+  const address = device?.address || ref.deviceId
+  return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
+}
+
+/**
+ * What a wire drawn on the board should read: «QF01:1 верх → QF03:1 верх». A wire that names
+ * clamps is only as good as the addresses it quotes, which is why this is recomputed rather than
+ * written once — see `autoNumberConnections`.
+ */
+export const autoConnectionLabel = (
+  connection: Connection, devices: Map<string, PlacedDevice>, definitions: Map<string, DeviceDefinition>,
+): string => {
+  if (!connection.toTerminal) return connection.label
+  const target = terminalText(connection.toTerminal, devices, definitions)
+  if (connection.fromTerminal) return `${terminalText(connection.fromTerminal, devices, definitions)} → ${target}`
+  return `${connection.fromBus} → ${target}`
+}
+
+/**
+ * Renumbering devices silently invalidates every wire label that quotes an address: the badge
+ * keeps naming QF01 after the breaker that used to be QF01 is now QF03. Wiring drawn on the board
+ * is therefore relabelled with the same pass, and only that wiring — a line an installer named by
+ * hand keeps the text they gave it.
+ */
+export const autoNumberConnections = (
+  connections: Connection[], devices: PlacedDevice[], definitions: Map<string, DeviceDefinition>,
+): Connection[] => {
+  const byId = new Map(devices.map((item) => [item.instanceId, item]))
+  return connections.map((connection) => ({ ...connection, label: autoConnectionLabel(connection, byId, definitions) }))
 }
 
 export const presetProducts = (preset: string): { settings: Partial<ProjectSettings>; catalog: Category[] } => {
