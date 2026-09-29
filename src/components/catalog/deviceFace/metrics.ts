@@ -1,8 +1,11 @@
-import { hasSharedToggle, terminalColumns, terminalLabel } from '../../../domain/terminals'
+import { faceSizeMm, genericTerminalPockets, hasSharedToggle, terminalColumns, terminalLabel } from '../../../domain/terminals'
 import type { DeviceDefinition } from '../../../domain/types'
 
 /** Frontal face drawings live in millimetres so a 1P and a 4P keep their real proportions. */
 export const FACE_MODULE_MM = 18
+/** The CHINT platform carries its own manufacturer heights and series table, both in the domain. */
+export { CHINT_FACE_HEIGHTS, CHINT_TERMINAL_SCREWS, chintFaceKind } from '../../../domain/terminals'
+export type { ChintKind } from '../../../domain/terminals'
 export const FACE_DEFAULT_HEIGHT_MM = 82
 export const FACE_MIN_HEIGHT_MM = 45
 export const FACE_MIN_WIDTH_MM = 14
@@ -15,11 +18,6 @@ const SIDEWALL_MM = 1.5
 const PANEL_INSET_X_MM = 1.4
 const PANEL_INSET_TOP_MM = 1.2
 const PANEL_INSET_BOTTOM_MM = 2.7
-const PANEL_MARGIN_MM = 0.9
-const POCKET_MIN_MM = 4.6
-const POCKET_MAX_MM = 9.6
-const POCKET_SIDE_MM = 1.6
-const POCKET_GAP_MM = 1.2
 const POCKET_BEVEL_MM = 0.55
 const TOGGLE_MIN_MM = 5
 const TOGGLE_MAX_MM = 8.6
@@ -107,25 +105,6 @@ export const faceShellFamily = (product: DeviceDefinition): string => {
   return 'generic'
 }
 
-/** CHINT NB/NL face heights measured off the manufacturer front drawings, millimetres. */
-export type ChintKind = 'nb1' | 'nbh8' | 'nl1' | 'nb1l' | 'nb1l40' | 'nb2le' | 'nb310l' | 'nbh8le'
-export const CHINT_FACE_HEIGHTS: Record<ChintKind, number> = {
-  nb1: 86, nbh8: 86, nl1: 86, nb1l: 85, nb1l40: 88, nb2le: 95, nb310l: 85, nbh8le: 86,
-}
-
-/** Which drawing the face follows; the series code picks the family template. */
-export const chintFaceKind = (product: DeviceDefinition): ChintKind => {
-  const code = (product.series || product.sku || '').trim().toUpperCase()
-  if (/^NBH8LE/.test(code)) return 'nbh8le'
-  if (/^NBH8/.test(code)) return 'nbh8'
-  if (/^NB2/.test(code)) return 'nb2le'
-  if (/^NB1L-?(40|63)/.test(code)) return 'nb1l40'
-  if (/^NB1L/.test(code)) return 'nb1l'
-  if (/^NB310L/.test(code)) return 'nb310l'
-  if (/^NL1/.test(code)) return 'nl1'
-  return 'nb1'
-}
-
 /** Linked 1P+N devices carry one lever for both poles, exactly like the photographed RCCB. */
 export const faceSharedToggle = (product: DeviceDefinition): boolean => hasSharedToggle(product)
 
@@ -197,11 +176,8 @@ const buildToggle = (rect: FaceRect, column: number, shared: boolean): FaceToggl
 export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetrics => {
   const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
   const poles = Math.max(1, Math.round(product.poles || 1))
-  const chint = faceShellFamily(product) === 'chint'
-  const widthMm = Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
-  const heightMm = chint
-    ? CHINT_FACE_HEIGHTS[chintFaceKind(product)]
-    : clamp(product.height || FACE_DEFAULT_HEIGHT_MM, FACE_MIN_HEIGHT_MM, 260)
+  // The size comes from the domain so the router and this drawing can never disagree about it.
+  const { widthMm, heightMm } = faceSizeMm(product)
   const columns = faceTerminalColumns(product)
   const sharedToggle = faceSharedToggle(product)
   const columnWidth = widthMm / Math.max(1, columns || moduleWidth)
@@ -228,16 +204,16 @@ export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetri
     width: body.width - PANEL_INSET_X_MM * 2,
     height: body.height - PANEL_INSET_TOP_MM - PANEL_INSET_BOTTOM_MM,
   }
-  const pocketHeight = clamp(heightMm * 0.095, 5.8, 8.6)
-  const pocketWidth = clamp(columnWidth - POCKET_GAP_MM * 2 - POCKET_SIDE_MM, POCKET_MIN_MM, POCKET_MAX_MM)
-  const topPocketY = panel.y + PANEL_MARGIN_MM
-  const bottomPocketY = panel.y + panel.height - PANEL_MARGIN_MM - pocketHeight
+  // The pocket band comes from the domain so the wire router anchors to the same screws.
+  const band = genericTerminalPockets(widthMm, heightMm, Math.max(1, columns))
+  const pocketHeight = band.top.height
+  const pocketWidth = band.top.width
 
   const pockets: FacePocket[] = Array.from({ length: columns }, (_, column) => {
     const center = columnWidth * (column + 0.5)
     return buildPocket(
-      clamp(center - pocketWidth / 2, panel.x + 0.4, panel.x + panel.width - pocketWidth - 0.4),
-      topPocketY,
+      clamp(center - pocketWidth / 2, band.top.x, band.top.x + Math.max(0, panel.width - pocketWidth - 0.4)),
+      band.top.y,
       pocketWidth,
       pocketHeight,
       column,
@@ -246,7 +222,7 @@ export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetri
     )
   })
 
-  const bottomPockets = pockets.map((pocket) => buildPocket(pocket.x, bottomPocketY, pocket.width, pocket.height, pocket.column, pocket.topLabel, pocket.bottomLabel))
+  const bottomPockets = pockets.map((pocket) => buildPocket(pocket.x, band.bottom.y, pocket.width, pocket.height, pocket.column, pocket.topLabel, pocket.bottomLabel))
 
   const toggles: FaceToggle[] = sharedToggle
     ? [buildToggle({

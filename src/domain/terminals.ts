@@ -102,9 +102,13 @@ export const terminalColumnCenterMm = (product: DeviceDefinition, pole: number, 
 /** Which drawing column a pole belongs to, needed because markings skip numbers on 3P+ devices. */
 export const terminalColumnForPole = (product: DeviceDefinition, pole: number): number => {
   const columns = terminalColumns(product)
-  for (let column = 0; column < columns; column += 1) {
-    if (parseInt(terminalLabel(product, column, columns, false), 10) === pole) return column
-    if (terminalLabel(product, column, columns, false) === `N` && pole === 0) return column
+  // Both rows are searched: on a three-pole device the top clamps read 1/3/5 and the bottom
+  // 2/4/6, so looking only at the top row sends a wire to bottom pole 2 to the wrong column.
+  for (const bottom of [false, true]) {
+    for (let column = 0; column < columns; column += 1) {
+      if (parseInt(terminalLabel(product, column, columns, bottom), 10) === pole) return column
+      if (terminalLabel(product, column, columns, bottom) === `N` && pole === 0) return column
+    }
   }
   return clamp(pole - 1, 0, Math.max(0, columns - 1))
 }
@@ -138,4 +142,155 @@ export const wireColor = (connection: { fromBus?: string; phase?: 1 | 2 | 3; kin
   if (connection.fromBus === 'PE') return WIRE_COLORS.pe
   const phase = connection.phase ?? 1
   return phase === 2 ? WIRE_COLORS.phase2 : phase === 3 ? WIRE_COLORS.phase3 : WIRE_COLORS.phase1
+}
+
+/**
+ * Where the clamps physically sit on the frontal face, in millimetres from the face's top-left
+ * corner. The face drawing and the wire router both read these numbers: a wire that stops a few
+ * millimetres off its terminal is the most visible way to get this wrong.
+ */
+export const FACE_MODULE_MM = 18
+/** Narrowest face the drawing bothers to resolve, so a stub product still reads as a device. */
+export const FACE_MIN_WIDTH_MM = 14
+
+const FACE_EDGE_MM = 0.7
+const FACE_PANEL_INSET_X_MM = 1.4
+const FACE_PANEL_INSET_TOP_MM = 1.2
+const FACE_PANEL_INSET_BOTTOM_MM = 2.7
+const FACE_PANEL_MARGIN_MM = 0.9
+const POCKET_MIN_MM = 4.6
+const POCKET_MAX_MM = 9.6
+const POCKET_GAP_MM = 1.2
+const POCKET_SIDE_MM = 1.6
+const POCKET_BEVEL_MM = 0.55
+
+export interface FaceRectMm { x: number; y: number; width: number; height: number }
+
+/** Terminal band of the procedural chassis: the pocket rects and the screw centre inside each. */
+export interface TerminalPocketGeometry {
+  top: FaceRectMm
+  bottom: FaceRectMm
+  /** Centre of the slotted screw, which is where a conductor is actually clamped. */
+  screw: { topY: number; bottomY: number }
+}
+
+export const genericTerminalPockets = (widthMm: number, heightMm: number, terminalCount: number): TerminalPocketGeometry => {
+  const columns = Math.max(1, terminalCount)
+  const panel: FaceRectMm = {
+    x: FACE_EDGE_MM + FACE_PANEL_INSET_X_MM,
+    y: FACE_EDGE_MM + FACE_PANEL_INSET_TOP_MM,
+    width: widthMm - (FACE_EDGE_MM + FACE_PANEL_INSET_X_MM) * 2,
+    height: heightMm - FACE_EDGE_MM * 2 - FACE_PANEL_INSET_TOP_MM - FACE_PANEL_INSET_BOTTOM_MM,
+  }
+  const columnWidth = widthMm / columns
+  const pocketHeight = clamp(heightMm * 0.095, 5.8, 8.6)
+  const pocketWidth = clamp(columnWidth - POCKET_GAP_MM * 2 - POCKET_SIDE_MM, POCKET_MIN_MM, POCKET_MAX_MM)
+  const x = clamp(columnWidth * 0.5 - pocketWidth / 2, panel.x + 0.4, panel.x + panel.width - pocketWidth - 0.4)
+  const topY = panel.y + FACE_PANEL_MARGIN_MM
+  const bottomY = panel.y + panel.height - FACE_PANEL_MARGIN_MM - pocketHeight
+  return {
+    top: { x, y: topY, width: pocketWidth, height: pocketHeight },
+    bottom: { x, y: bottomY, width: pocketWidth, height: pocketHeight },
+    screw: { topY: topY + POCKET_BEVEL_MM + (pocketHeight - POCKET_BEVEL_MM * 1.7) * 0.62, bottomY: bottomY + POCKET_BEVEL_MM + (pocketHeight - POCKET_BEVEL_MM * 1.7) * 0.62 },
+  }
+}
+
+/** CHINT NB/NL families, keyed by the series code that selects the manufacturer's drawing. */
+export type ChintKind = 'nb1' | 'nbh8' | 'nl1' | 'nb1l' | 'nb1l40' | 'nb2le' | 'nb310l' | 'nbh8le'
+
+/** CHINT NB/NL face heights measured off the manufacturer front drawings, millimetres. */
+export const CHINT_FACE_HEIGHTS: Record<ChintKind, number> = {
+  nb1: 86, nbh8: 86, nl1: 86, nb1l: 85, nb1l40: 88, nb2le: 95, nb310l: 85, nbh8le: 86,
+}
+
+/** Which drawing the face follows; the series code picks the family template. */
+export const chintFaceKind = (product: DeviceDefinition): ChintKind => {
+  const code = (product.series || product.sku || '').trim().toUpperCase()
+  if (/^NBH8LE/.test(code)) return 'nbh8le'
+  if (/^NBH8/.test(code)) return 'nbh8'
+  if (/^NB2/.test(code)) return 'nb2le'
+  if (/^NB1L-?(40|63)/.test(code)) return 'nb1l40'
+  if (/^NB1L/.test(code)) return 'nb1l'
+  if (/^NB310L/.test(code)) return 'nb310l'
+  if (/^NL1/.test(code)) return 'nl1'
+  return 'nb1'
+}
+
+/**
+ * Terminal screw centres per CHINT family, millimetres from the face top. Off the 2D front
+ * drawings that ship with the series; the face drawing and the wire router read the same table.
+ */
+export const CHINT_TERMINAL_SCREWS: Record<ChintKind, { topMm: number; bottomMm: number }> = {
+  nb1: { topMm: 9.9, bottomMm: 72.8 },
+  nbh8: { topMm: 9.3, bottomMm: 72.2 },
+  nl1: { topMm: 5.9, bottomMm: 74.1 },
+  nb1l: { topMm: 8.4, bottomMm: 72.5 },
+  nb1l40: { topMm: 9.7, bottomMm: 71 },
+  nb2le: { topMm: 12.8, bottomMm: 75.7 },
+  nb310l: { topMm: 9.7, bottomMm: 70 },
+  nbh8le: { topMm: 13.1, bottomMm: 66.7 },
+}
+
+/** Face height the generic chassis is drawn at; the CHINT platform uses its own table instead. */
+export const genericFaceHeightMm = (product: DeviceDefinition): number => clamp(product.height || 82, 45, 260)
+
+/** True when the product is drawn on the CHINT NB/NL platform rather than the generic chassis. */
+export const usesChintPlatform = (product: DeviceDefinition): boolean =>
+  /CHINT/i.test(product.brand || '') && ['MCB', 'RCCB', 'RCBO'].includes(product.category)
+
+/** The viewBox the frontal face is drawn into, millimetres. */
+export const faceSizeMm = (product: DeviceDefinition): { widthMm: number; heightMm: number } => ({
+  widthMm: Math.max(FACE_MIN_WIDTH_MM, Math.max(1, Math.round(product.moduleWidth || 1)) * FACE_MODULE_MM),
+  heightMm: usesChintPlatform(product) ? CHINT_FACE_HEIGHTS[chintFaceKind(product)] : genericFaceHeightMm(product),
+})
+
+export interface FacePlacement {
+  /** Face millimetres per board millimetre: the SVG scales its viewBox into the device box. */
+  scale: number
+  offsetXMm: number
+  offsetYMm: number
+}
+
+/**
+ * Where the drawn face lands inside the box the board gives the device. The face SVG carries
+ * `preserveAspectRatio="xMidYMid meet"`, so it is scaled down until it fits and then centred in
+ * whatever the panel geometry reserved. A wire routed without this lands on a different point of
+ * the shell than the screw it names, which is the one thing a wiring drawing cannot get wrong.
+ */
+export const facePlacementMm = (product: DeviceDefinition, boxWidthMm: number, boxHeightMm: number): FacePlacement => {
+  const face = faceSizeMm(product)
+  const scale = Math.min(boxWidthMm / face.widthMm, boxHeightMm / face.heightMm)
+  return {
+    scale,
+    offsetXMm: (boxWidthMm - face.widthMm * scale) / 2,
+    offsetYMm: (boxHeightMm - face.heightMm * scale) / 2,
+  }
+}
+
+/**
+ * The clamp a conductor enters, in face millimetres from the face's top-left corner. Returns
+ * nothing for a device that has no clamps of its own — a busbar is fed at the bar, not at a
+ * terminal. Pass the result through `facePlacementMm` to reach board coordinates.
+ */
+export const terminalAnchorMm = (
+  product: DeviceDefinition,
+  pole: number,
+  side: TerminalSide,
+): { x: number; y: number } | null => {
+  const columns = terminalColumns(product)
+  if (columns <= 0) return null
+  const column = terminalColumnForPole(product, pole)
+  const { widthMm, heightMm } = faceSizeMm(product)
+  if (usesChintPlatform(product)) {
+    // The CHINT drawings repeat one physical cell per pole, so a linked-lever device still has
+    // screws on the pole pitch rather than on the module pitch the generic chassis assumes.
+    const poles = Math.max(1, Math.round(product.poles || columns))
+    const screws = CHINT_TERMINAL_SCREWS[chintFaceKind(product)]
+    return { x: (widthMm / poles) * (column + 0.5), y: side === 'top' ? screws.topMm : screws.bottomMm }
+  }
+  const pockets = genericTerminalPockets(widthMm, heightMm, columns)
+  return {
+    x: (widthMm / columns) * (column + 0.5),
+    y: side === 'top' ? pockets.screw.topY : pockets.screw.bottomY,
+  }
 }

@@ -939,6 +939,50 @@ kbd {
   width: 100%;
   min-height: 40px;
 }
+/* First-run orientation card; deliberately quiet in the focus mode. */
+.editor-hints {
+  margin: 8px 10px 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  font-size: var(--text-xs);
+}
+.editor-hints b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--text-sm);
+}
+.editor-hints ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.editor-hints button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.editor-hints button:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.canvas-focus:not(.panels-open) .editor-hints {
+  display: none;
+}
+/* The settings screen is a plain flowing page like the projects list. It must not
+   inherit the editor shell's grid: with no action bar of its own, the content row
+   lands in the 44px second track and the whole page clips to a sliver (and on
+   mobile, under the editor's bottom-nav padding). */
+.app-shell.settings-shell {
+  display: block;
+  padding-bottom: 0;
+}
 /* Settings page: one column of blocks, tables read like the BOM. */
 .settings-page {
   flex: 1;
@@ -1053,9 +1097,136 @@ kbd {
 .tab-panel > .checks-panel {
   margin: 10px;
 }
-.print-report.screen-visible {
-  display: block;
-  margin: 10px;
+/* In the tab the bill scrolls with its tab; the 360px window belongs to the
+   floating-panel era and would nest a second scrollbar inside the tab. Keeping
+   overflow visible also lets the sticky table head stick to the tab's scroller. */
+.tab-panel .bom-table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+/* The report tab reads the same document as print, but in the app palette.
+   Screen rules live in their own media block so they can never outrank the
+   print sheet's pt/mm measurements and its deliberate black-on-white look. */
+@media screen {
+  .print-report.screen-visible {
+    display: block;
+    margin: 10px;
+    padding: 16px 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .print-report .print-report-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--service);
+  }
+  .print-report .print-report-head h1 {
+    margin: 2px 0 4px;
+    font-size: var(--text-2xl);
+  }
+  .print-report .print-report-head p,
+  .print-report .print-report-head time {
+    color: var(--text-muted);
+    font: var(--text-xs)/1.5 var(--mono);
+  }
+  .print-report .print-report-head time {
+    flex: none;
+    color: var(--text-faint);
+  }
+  .print-report .print-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 12px 0;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+  }
+  .print-report .print-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 9px;
+    border-right: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .print-report .print-summary span {
+    color: var(--text-muted);
+    font: var(--text-micro) var(--mono);
+  }
+  .print-report .print-summary strong {
+    font-size: var(--text-sm);
+  }
+  .print-report h2 {
+    margin: 16px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .print-report table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-micro);
+  }
+  .print-report th {
+    padding: 6px 8px;
+    background: var(--canvas);
+    color: var(--text-muted);
+    text-align: left;
+    font: var(--text-micro) var(--mono);
+    text-transform: uppercase;
+  }
+  .print-report td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+  .print-report .print-connections p,
+  .print-report .print-issues p {
+    color: var(--text-muted);
+    font: var(--text-xs)/1.5 var(--mono);
+  }
+  .print-report .print-connections ol,
+  .print-report .print-issues ol {
+    margin: 0;
+    padding-left: 18px;
+    font-size: var(--text-xs);
+  }
+  .print-report .print-connections li,
+  .print-report .print-issues li {
+    margin: 6px 0;
+  }
+  .print-report .print-connections li span,
+  .print-report .print-issues li span {
+    display: block;
+    color: var(--text-muted);
+  }
+  .print-report .print-issue-error strong {
+    color: var(--error);
+  }
+  .print-report .print-issue-warning strong {
+    color: var(--warning);
+  }
+  .print-report .print-issue-info strong {
+    color: var(--info);
+  }
+  .print-report .print-price-note {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    font: var(--text-micro)/1.5 var(--mono);
+  }
+  .print-report .print-revisions {
+    margin-top: 16px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--text-muted);
+    font: var(--text-micro)/1.6 var(--mono);
+  }
+  .print-report .print-disclaimer {
+    color: var(--text-faint);
+  }
 }
 .checks-panel {
   display: flex;
@@ -1452,40 +1623,44 @@ kbd {
 .editor-2d.is-dragging {
   user-select: none;
 }
+/* While a drag is live the hover state must not repaint the frame the user is dragging. */
 .editor-2d.is-dragging .placed-device:hover {
-  border-color: inherit;
+  --device-edge: var(--board-device-edge);
 }
+/* The frame is an inset shadow rather than a border on purpose: a border and padding would
+   shrink the box the face is drawn into, and the wire router anchors to that box. The two frame
+   colours are variables so hover and selection only restate a colour, never the whole shadow. */
 .placed-device {
+  --device-edge: var(--board-device-edge);
+  --device-cap: #9ca69f;
   position: absolute;
   z-index: 3;
   min-width: 0;
-  border: 1px solid var(--board-device-edge);
-  border-top: 2px solid #9ca69f;
-  border-radius: 1.5px;
-  padding: 0 1px 1px;
+  padding: 0;
+  /* The global button rule paints a 1px border, which would eat a millimetre off every side of the
+     box the wire router anchors to. The frame below is drawn as an inset shadow for that reason. */
+  border: 0;
   background: transparent;
-  box-shadow: 1px 2px 3px rgba(0, 0, 0, .18);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-end;
+  box-shadow: inset 0 0 0 1px var(--device-edge), inset 0 2px 0 var(--device-cap), 1px 2px 3px rgba(0, 0, 0, .18);
+  border-radius: 1.5px;
+  display: block;
   overflow: hidden;
   cursor: grab;
   user-select: none;
   touch-action: pan-y;
-  transition: left .16s ease, box-shadow .16s ease, opacity .12s ease, border-color .12s ease;
+  transition: left .16s ease, box-shadow .16s ease, opacity .12s ease;
 }
 .placed-device.phase-1 {
-  border-top-color: var(--accent);
+  --device-cap: var(--accent);
 }
 .placed-device.phase-2 {
-  border-top-color: #2b6254;
+  --device-cap: #2b6254;
 }
 .placed-device.phase-3 {
-  border-top-color: var(--copper);
+  --device-cap: var(--copper);
 }
 .placed-device.busbar-device {
-  border-color: rgba(96, 108, 99, .8);
+  --device-edge: rgba(96, 108, 99, .8);
 }
 .placed-device.busbar-device b {
   color: #30473b;
@@ -1494,10 +1669,7 @@ kbd {
   color: #53645a;
 }
 .placed-device.missing-product {
-  align-items: center;
-  justify-content: center;
-  border-style: dashed;
-  border-color: var(--error);
+  --device-edge: var(--error);
   background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 .placed-device.missing-product b {
@@ -1506,26 +1678,27 @@ kbd {
 .placed-device.missing-product small {
   color: var(--error);
 }
+/* Centred absolutely for the same reason the face is: the device box is a block now, so a flex
+   child would collapse to zero height and the question mark would vanish. */
 .missing-mark {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
   color: var(--error);
   font-size: var(--text-base);
   font-weight: 800;
 }
 .placed-device:hover {
   z-index: 5;
-  border-color: var(--service);
+  --device-edge: var(--service);
 }
 .placed-device:active {
   cursor: grabbing;
 }
 .placed-device.selected {
   z-index: 6;
-  border-color: var(--accent);
+  --device-edge: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 2px 2px 3px rgba(0, 0, 0, .2);
 }
 .placed-device.dragging {
@@ -1542,16 +1715,22 @@ kbd {
   opacity: .82;
   box-shadow: 0 0 0 1px var(--info), 1px 2px 3px rgba(0, 0, 0, .18);
 }
+/* The face fills the whole device box and the marking floats over it, so a drawn screw sits
+   exactly where `facePlacementMm` says it does and a wire can be anchored to that point. */
 .placed-device .device-visual {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100% !important;
-  height: auto !important;
-  min-height: 0;
-  flex: 1 1 auto;
+  height: 100% !important;
 }
 .placed-device b {
-  display: block;
-  margin: 0 0 1px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
   padding: 1px 0;
   border-top: 1px solid rgba(118, 128, 121, .5);
   background: linear-gradient(180deg, var(--dv-paper-1, #fbfaf2), var(--dv-paper-2, #e4e3d7));
@@ -1811,14 +1990,6 @@ kbd {
   --dv-panel: #eef0e9;
   --dv-sidewall: #bcc2b9;
 }
-.family-city9 {
-  --dv-shell-1: #dfe3dd;
-  --dv-shell-2: #fbfcf9;
-  --dv-shell-3: #eff2eb;
-  --dv-shell-4: #d7dbd4;
-  --dv-panel: #f6f8f2;
-  --dv-sidewall: #c4cac1;
-}
 [data-theme="dark"] .family-light {
   --dv-shell-1: #3a413b;
   --dv-shell-2: #515950;
@@ -1858,14 +2029,6 @@ kbd {
   --dv-shell-4: #303531;
   --dv-panel: #474e48;
   --dv-sidewall: #292e2a;
-}
-[data-theme="dark"] .family-city9 {
-  --dv-shell-1: #3e453f;
-  --dv-shell-2: #586058;
-  --dv-shell-3: #4c534c;
-  --dv-shell-4: #373d38;
-  --dv-panel: #515952;
-  --dv-sidewall: #2e342f;
 }
 .row-capacity {
   position: absolute;
@@ -1948,20 +2111,84 @@ kbd {
   height: 100%;
   pointer-events: none;
   overflow: visible;
+  /* Bars and conductors are real objects, so they carry the phase palette as custom
+     properties: the drawing, the legend and the print report all read one set of values. */
+  --wire-phase-1: #c0392b;
+  --wire-phase-2: #8e44ad;
+  --wire-phase-3: #2c6fbb;
+  --wire-neutral: #1f6fb4;
+  --wire-pe: #4f9d3a;
+  --wire-jumper: #5a6672;
+  --bus-bar-fill: #9aa2a6;
+  --wire-label-ink: #2f3831;
+  --wire-label-paper: #fbfaf2;
 }
 .wires path {
   fill: none;
-  stroke-width: 1.2;
-  vector-effect: non-scaling-stroke;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+/* A conductor is a solid core with a darker casing, the way it is drawn on a real board. */
+.wire-core {
+  stroke-width: .8;
+  opacity: .95;
+}
+.wire-casing {
+  stroke-width: 2.4;
+  opacity: .3;
 }
 .wire-l {
-  stroke: #a44d37;
+  stroke: var(--wire-phase-1);
+}
+.wire-l.phase-2 {
+  stroke: var(--wire-phase-2);
+}
+.wire-l.phase-3 {
+  stroke: var(--wire-phase-3);
 }
 .wire-n {
-  stroke: #8a9599;
+  stroke: var(--wire-neutral);
 }
 .wire-pe {
-  stroke: #47a067;
+  stroke: var(--wire-pe);
+}
+.wire-jumper {
+  stroke: var(--wire-jumper);
+}
+/* The badge sits on the wire, so it is drawn in the wire's own coordinate space and needs a
+   readable paper behind it — a label laid over a busy chassis is worse than no label. */
+.wire-label {
+  fill: var(--wire-label-ink);
+  stroke: var(--wire-label-paper);
+  stroke-width: 1.6;
+  paint-order: stroke fill;
+  font-family: var(--mono);
+  font-size: 4.4px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.wires.labels-off .wire-label {
+  display: none;
+}
+.bus-bar {
+  fill: var(--bus-bar-fill);
+  stroke: rgba(28, 32, 30, .34);
+  stroke-width: .4;
+}
+.bus-bar.bus-n {
+  fill: #b9bfc2;
+}
+.bus-bar.bus-pe {
+  fill: #7fbf8d;
+}
+.bus-tag {
+  fill: #1d211f;
+  font-family: var(--mono);
+  letter-spacing: .06em;
+}
+.bus-tag-pe {
+  fill: #1f4a26;
 }
 .cabinet-label {
   position: absolute;
@@ -2117,6 +2344,14 @@ kbd {
   flex: 1;
   min-height: 0;
 }
+/* The other tabs share the same overflow:hidden column, so each carries its own
+   scroll region instead of clipping its content at the fold. */
+.canvas-focus .tab-panel:not(.tab-panel-2d),
+.canvas-focus .print-report.screen-visible {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .canvas-focus .editor-2d {
   height: 100%;
   min-height: 0;
@@ -2124,12 +2359,10 @@ kbd {
 .canvas-focus .canvas-scroll {
   min-height: 0;
 }
-.canvas-focus:not(.panels-open) .position-pad,
-.canvas-focus:not(.panels-open) .bom-panel {
+.canvas-focus:not(.panels-open) .position-pad {
   display: none;
 }
-.canvas-focus.panels-open .position-pad,
-.canvas-focus.panels-open .bom-panel {
+.canvas-focus.panels-open .position-pad {
   display: block;
 }
 .canvas-focus .catalog-panel,
@@ -3507,6 +3740,16 @@ kbd {
   }
   .bom-panel {
     margin: 8px;
+  }
+  .print-report.screen-visible {
+    margin: 8px;
+    padding: 12px;
+  }
+  .print-report .print-report-head {
+    flex-direction: column;
+  }
+  .print-report .print-summary {
+    grid-template-columns: repeat(2, 1fr);
   }
   .bom-heading {
     grid-template-columns: 1fr auto;

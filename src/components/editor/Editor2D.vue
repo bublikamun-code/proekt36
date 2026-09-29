@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { getRowUsage, isDinDevice, placeProduct, resolveDeviceMove, resolveLayout } from '../../domain/layout'
 import { getPanelGeometry } from '../../domain/panelGeometry'
+import { routeBoard, wireFrameFromGeometry } from '../../domain/wireRouting'
 import { useProjectStore } from '../../stores/project'
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, usePreferencesStore } from '../../stores/preferences'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
@@ -64,6 +65,9 @@ const syncPanelsTop = () => {
   if (!element) return
   document.documentElement.style.setProperty('--editor-panels-top', `${Math.round(element.getBoundingClientRect().top)}px`)
 }
+// The board's top moves when the focus mode toggles chrome above it (the hints card),
+// so the anchor measured at mount goes stale until re-measured after the layout settles.
+watch(() => props.focused, () => { void nextTick(syncPanelsTop) })
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateViewport)
@@ -380,23 +384,22 @@ const onBoardKeydown = (event: KeyboardEvent) => {
   preview.value = null
 }
 
-const wirePaths = computed(() => {
-  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string }> = []
-  const busX: Record<'L' | 'N' | 'PE', number> = { L: 3, N: 7, PE: 11 }
-  for (const connection of currentProject.value.connections ?? []) {
-    const target = currentProject.value.devices.find((device) => device.instanceId === connection.toDeviceId)
-    if (!target) continue
-    const width = geometry.value.deviceWidthPx(target.productId)
-    const targetX = geometry.value.railStartXPx + (target.slot * geometry.value.moduleWidthPx) + width / 2
-    const targetY = geometry.value.rowTopPx[target.row] + geometry.value.deviceHeightPx(target.productId) / 2
-    const sourceX = busX[connection.fromBus]
-    const sourceY = targetY - geometry.value.railHeightPx / 2
-    const bendX = Math.max(sourceX + 8, targetX - 8)
-    const d = `M ${sourceX} ${sourceY} H ${bendX} V ${targetY} H ${targetX}`
-    paths.push({ id: connection.id, d, bus: connection.fromBus, color: connection.color || '#c65c3b', thickness: connection.thickness || 2, label: connection.label })
-  }
-  return paths
-})
+// The router works in plate-local millimetres, so a wire no longer drifts by the plate offset
+// the old hand-rolled paths carried: their Y came from the cabinet top while the overlay's
+// viewBox starts at the plate.
+const board = computed(() => routeBoard(currentProject.value, definitions.value, wireFrameFromGeometry(geometry.value)))
+const wirePaths = computed(() => board.value.wires)
+
+/** A jumper carries no phase, so it takes the neutral grey; everything else takes its bus. */
+const wireClass = (path: { kind: string; bus: string; phase?: number }): string => {
+  if (path.kind === 'jumper') return 'jumper'
+  if (path.bus === 'N') return 'n'
+  if (path.bus === 'PE') return 'pe'
+  return `l phase-${path.phase ?? 1}`
+}
+
+// Markings crowd a dense board, so the drawing keeps a switch that turns them off.
+const showWireLabels = ref(true)
 </script>
 
 <template>
@@ -406,6 +409,7 @@ const wirePaths = computed(() => {
       <div class="view-caption"><span class="live-dot"></span><span>Схема щита</span><b>{{ geometry.cabinetWidthMm }} × {{ geometry.cabinetHeightMm }} × {{ geometry.cabinetDepthMm }} мм</b><b class="canvas-spec">{{ geometry.capacity }} мод./рейка · {{ pitchLabel }}</b></div>
       <div class="canvas-tools">
         <button class="panel-toggle" data-panel-toggle :aria-pressed="focused" :aria-label="focused ? 'Показать боковые панели' : 'Скрыть боковые панели'" @click="emit('toggle-focus')">{{ focused ? 'Панели' : 'Только щит' }}</button>
+        <button class="panel-toggle" data-wire-labels :aria-pressed="showWireLabels" :aria-label="showWireLabels ? 'Скрыть подписи проводов' : 'Показать подписи проводов'" @click="showWireLabels = !showWireLabels">{{ showWireLabels ? 'Подписи' : 'Без подписей' }}</button>
         <div class="zoom-controls" role="group" aria-label="Масштаб схемы">
           <button aria-label="Уменьшить масштаб" @click="changeZoom(-0.1)">−</button>
           <span class="mono">{{ Math.round(renderScale * 100) }}%</span>
@@ -442,7 +446,21 @@ const wirePaths = computed(() => {
                 <div class="row-capacity" :class="{ 'is-full': rowUsage(row).percent >= 100 }" role="img" :aria-label="`Ряд ${row + 1}: занято ${rowUsage(row).used} из ${capacity} модулей${rowUsage(row).percent >= 100 ? ', ряд заполнен' : ''}`"><span :style="{ height: `${rowUsage(row).percent}%` }"></span></div>
               </div>
             </div>
-            <svg class="wires" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true"><path v-for="path in wirePaths" :key="path.id" :data-connection-id="path.id" :d="path.d" :class="`wire-${path.bus.toLowerCase()}`" :stroke="path.color" :style="{ strokeWidth: `${path.thickness}px` }"><title>{{ path.label }}</title></path></svg>
+            <svg class="wires" :class="{ 'labels-off': !showWireLabels }" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true">
+              <g class="wire-buses">
+                <g v-for="bus in board.buses" :key="bus.id" :data-bus-id="bus.id" :data-bus-kind="bus.kind">
+                  <rect :x="bus.x" :y="bus.y" :width="bus.width" :height="bus.height" rx="1.5" :class="`bus-bar bus-${bus.kind.toLowerCase()}`" />
+                  <text :x="bus.x + 3" :y="bus.y + bus.height * 0.78" font-size="4" font-weight="700" :class="`bus-tag bus-tag-${bus.kind.toLowerCase()}`">{{ bus.label }}</text>
+                </g>
+              </g>
+              <!-- Casing first, core on top: one pass per wire so every conductor keeps its own
+                   outline instead of merging with its neighbours where they run side by side. -->
+              <path v-for="path in wirePaths" :key="`${path.id}-casing`" :d="path.d" :class="`wire-casing wire-${wireClass(path)}`" />
+              <path v-for="path in wirePaths" :key="`${path.id}-core`" :data-connection-id="path.id" :d="path.d" :class="`wire-core wire-${wireClass(path)}`"><title>{{ path.label }}</title></path>
+              <g class="wire-labels">
+                <text v-for="path in wirePaths" :key="`${path.id}-label`" :x="path.labelAt.x" :y="path.labelAt.y" class="wire-label">{{ path.label }}</text>
+              </g>
+            </svg>
           </div>
           <div class="cabinet-label"><span>{{ currentProject.name }}</span><small>{{ cabinetLabel }}</small></div>
         </div>

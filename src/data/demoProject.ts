@@ -30,7 +30,10 @@ export const demoProject: PanelProject = {
     { instanceId: 'demo-xt02', productId: 'enmas-template-kbr', row: 1, slot: 1, address: 'XT02', marking: 'XT02', quantity: 1, phase: 1, note: 'Клемма КБР', mount: 'din' },
     { instanceId: 'demo-xt03', productId: 'enmas-template-ksv', row: 1, slot: 2, address: 'XT03', marking: 'XT03', quantity: 1, phase: 1, note: 'Клемма КСВ', mount: 'din' },
   ],
-  busAssemblies: [],
+  busAssemblies: [
+    { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+    { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+  ],
   combs: [],
   circuits: [
     { id: 'demo-circuit-living', name: 'Розетки гостиной', loadName: 'Розетки гостиной', current: 16, power: 1500, phase: 1, protectionDeviceId: 'demo-qfi01', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
@@ -41,5 +44,8 @@ export const demoProject: PanelProject = {
     { id: 'demo-connection-living', circuitId: 'demo-circuit-living', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#d65b43', thickness: 2, label: 'L → QFI01' },
     { id: 'demo-connection-kitchen', circuitId: 'demo-circuit-kitchen', fromBus: 'L', toDeviceId: 'demo-qfi02', color: '#d65b43', thickness: 2, label: 'L → QFI02' },
     { id: 'demo-connection-light', circuitId: 'demo-circuit-light', fromBus: 'L', toDeviceId: 'demo-qf02', color: '#d65b43', thickness: 2, label: 'L → QF02' },
+    { id: 'demo-connection-living-n', circuitId: 'demo-circuit-living', fromBus: 'N', toDeviceId: 'demo-qfi01', color: '#1f6fb4', thickness: 2, label: 'N → QFI01', busId: 'bus-n-bottom', toTerminal: { deviceId: 'demo-qfi01', pole: 2, side: 'top' } },
+    { id: 'demo-connection-living-pe', circuitId: 'demo-circuit-living', fromBus: 'PE', toDeviceId: 'demo-qfi01', color: '#4f9d3a', thickness: 2, label: 'PE → QFI01', busId: 'bus-pe-bottom', toTerminal: { deviceId: 'demo-qfi01', pole: 4, side: 'top' } },
+    { id: 'demo-jumper-01', circuitId: '', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#5a6672', thickness: 2, label: 'QF01 → QFI01', kind: 'jumper', fromTerminal: { deviceId: 'demo-qf01', pole: 1, side: 'bottom' }, toTerminal: { deviceId: 'demo-qfi01', pole: 1, side: 'top' } },
   ],
 }
