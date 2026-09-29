@@ -1,8 +1,8 @@
 import { PANEL_MM_TO_PX } from './panelGeometry'
 import type { PanelGeometry } from './panelGeometry'
-import { facePlacementMm, terminalAnchorMm, terminalLabel, terminalType, wireColor } from './terminals'
-import type { TerminalRef, TerminalSide } from './terminals'
-import type { BusAssembly, Connection, DeviceDefinition, PanelProject, PlacedDevice } from './types'
+import { deviceTerminals, facePlacementMm, terminalAnchorMm, terminalKey, terminalLabel, terminalType, wireColor } from './terminals'
+import type { TerminalRef, TerminalSide, TerminalType } from './terminals'
+import type { BusAssembly, Connection, DeviceDefinition, PanelProject, PlacedDevice, RowComb } from './types'
 
 /**
  * Orthogonal wire routing for the board drawing. Every decision is made in millimetres over a
@@ -58,6 +58,24 @@ export interface RoutedWire {
 export interface RoutedBoard {
   wires: RoutedWire[]
   buses: RoutedBus[]
+  combs: RoutedComb[]
+}
+
+/** A comb drawn above its row: the bar that bridges the run, and one tooth per pole. */
+export interface RoutedComb {
+  id: string
+  row: number
+  poles: 1 | 2 | 3 | 4
+  /** Bar body, in plate pixels. */
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Teeth dropping from the bar into the top clamps, in plate pixels. */
+  teeth: WirePoint[]
+  /** True when the comb covers fewer devices than it has poles to feed. */
+  starved: boolean
+  label: string
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -88,7 +106,10 @@ export const wireFrameFromGeometry = (geometry: PanelGeometry): WireFrame => ({
   railStartXMm: geometry.railStartXMm,
   railWidthMm: geometry.railWidthMm,
   rows: geometry.rowTopMm.length,
-  rowTopMm: (row) => geometry.rowTopMm[row] ?? 0,
+  // geometry.rowTopMm is measured from the cabinet top, while the overlay's viewBox starts at the
+  // plate. Every frame coordinate is plate-local, so the offset is taken off here once rather
+  // than at each use — a corridor left 24mm low runs a wire straight through the device row.
+  rowTopMm: (row) => (geometry.rowTopMm[row] ?? 0) - geometry.plateTopMm,
   rowHeightMm: (row) => geometry.rowHeightsMm[row] ?? 0,
   deviceLeftMm: (device) => geometry.railStartXMm + device.slot * (geometry.railWidthMm / Math.max(1, geometry.capacity)),
   deviceTopMm: (device) => geometry.deviceTopMm(device.row, device.productId) - geometry.plateTopMm,
@@ -164,6 +185,51 @@ export const busBarLayout = (frame: WireFrame, buses: BusAssembly[]): Map<string
   top.forEach((bus, index) => place(bus, index, top.length, 'top'))
   return result
 }
+
+/**
+ * A comb bridges the top clamps of a run of devices, so it is drawn in the corridor above its row
+ * with a tooth dropping into each clamp it feeds. The teeth land on the same anchors the wires use,
+ * which is what makes a comb and a hand-drawn jumper look like the same board.
+ */
+export const combLayout = (
+  frame: WireFrame,
+  combs: RowComb[],
+  devices: Map<string, PlacedDevice>,
+  definitions: Map<string, DeviceDefinition>,
+): RoutedComb[] =>
+  (combs ?? []).map((comb) => {
+    const from = Math.min(comb.fromSlot, comb.toSlot)
+    const to = Math.max(comb.fromSlot, comb.toSlot)
+    // The devices the comb actually spans, in rail order. A gap in the row leaves a hole in the
+    // run, so the teeth follow the devices rather than the slot numbers.
+    const covered = [...devices.values()]
+      .filter((device) => device.row === comb.row && device.slot >= from && device.slot <= to)
+      .sort((left, right) => left.slot - right.slot)
+    const teeth: WirePoint[] = []
+    for (const device of covered.slice(0, comb.poles)) {
+      const product = definitions.get(device.productId)
+      if (!product) continue
+      const anchor = anchorFor({ deviceId: device.instanceId, pole: 1, side: 'top' }, frame, definitions, devices)
+      if (anchor) teeth.push({ x: mm(anchor.x), y: mm(anchor.y) })
+    }
+    const barY = mm(corridorYMm(frame, comb.row, 'top') - CORRIDOR_MM * 0.55)
+    const barHeight = mm(2.2)
+    const left = teeth.length ? Math.min(...teeth.map((tooth) => tooth.x)) : 0
+    const right = teeth.length ? Math.max(...teeth.map((tooth) => tooth.x)) : 0
+    return {
+      id: comb.id,
+      row: comb.row,
+      poles: comb.poles,
+      x: left,
+      y: barY,
+      // A comb needs at least a tooth's width of bar to read as a bar rather than a dot.
+      width: Math.max(right - left, right ? mm(4) : 0),
+      height: barHeight,
+      teeth,
+      starved: covered.length < comb.poles,
+      label: comb.label || `Гребёнка ${comb.poles}P`,
+    }
+  })
 
 /** Appends a step only when it moves, so the generated path has no zero-length segments. */
 const walk = (points: WirePoint[], x: number, y: number): WirePoint[] => {
@@ -285,6 +351,7 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
 
   return {
     wires,
+    combs: combLayout(frame, project.combs ?? [], devices, definitions),
     buses: buses.map((bus) => ({
       ...bus,
       x: mm(bus.x),
@@ -293,6 +360,56 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       height: mm(bus.height),
     })),
   }
+}
+
+/** One clickable clamp on the board. The hit target and the conductor share these numbers. */
+export interface TerminalTarget {
+  key: string
+  deviceId: string
+  address: string
+  pole: number
+  side: TerminalSide
+  label: string
+  type: TerminalType
+  /** Clamp centre in plate pixels, exactly where a wire drawn to this terminal lands. */
+  x: number
+  y: number
+  occupied: boolean
+}
+
+/**
+ * Every clamp on the board, in plate pixels. The wire tool needs targets that agree with the
+ * drawing to the pixel, so they are read out of the same anchors the router uses rather than
+ * measured from the rendered face — a hit zone that drifts from its screw is worse than none.
+ */
+export const terminalTargets = (
+  project: PanelProject, definitions: Map<string, DeviceDefinition>, frame: WireFrame,
+): TerminalTarget[] => {
+  const devices = new Map(project.devices.map((device) => [device.instanceId, device]))
+  const targets: TerminalTarget[] = []
+  for (const device of project.devices) {
+    if (device.mount === 'busbar') continue
+    const product = definitions.get(device.productId)
+    if (!product) continue
+    for (const info of deviceTerminals(product)) {
+      const anchor = anchorFor({ deviceId: device.instanceId, pole: info.pole, side: info.side }, frame, definitions, devices)
+      if (!anchor) continue
+      const ref: TerminalRef = { deviceId: device.instanceId, pole: info.pole, side: info.side }
+      targets.push({
+        key: terminalKey(ref),
+        deviceId: device.instanceId,
+        address: device.address,
+        pole: info.pole,
+        side: info.side,
+        label: info.label,
+        type: info.type,
+        x: mm(anchor.x),
+        y: mm(anchor.y),
+        occupied: terminalOccupied(project, ref),
+      })
+    }
+  }
+  return targets
 }
 
 export const routeConnections = (

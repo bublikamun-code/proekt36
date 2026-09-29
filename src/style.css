@@ -1352,6 +1352,72 @@ kbd {
   color: var(--on-service);
   border-color: var(--service);
 }
+/* A two-position segment, the way a drawing tool announces which mode owns the board. */
+.tool-segment {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.tool-segment button {
+  min-height: 27px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  font-size: var(--text-micro);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tool-segment button + button { border-left: 1px solid var(--line); }
+.tool-segment button.active { background: var(--service); color: var(--on-service); }
+.tool-segment kbd {
+  font: 600 9px/1 var(--mono);
+  padding: 2px 3px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: .65;
+}
+/* The hit layer is invisible by default: a 0.8px conductor cannot be a pointer target, and a
+   visible fat line over the drawing would be a second, fainter wire pretending to be the first. */
+.wire-hits {
+  position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible;
+}
+.wire-hits .wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 9;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.wire-hits .wire-hit.selected { stroke: rgba(192, 57, 43, .22); }
+.wire-hits.active { cursor: crosshair; }
+.wire-port {
+  fill: rgba(251, 250, 242, .001);
+  stroke: var(--service);
+  stroke-width: .5;
+  pointer-events: all;
+  cursor: crosshair;
+}
+.wire-port:hover { fill: rgba(198, 92, 59, .35); }
+/* A clamp that already carries a conductor stays visible but refuses the click, so a dense row
+   still reads as fully wired instead of looking empty where the tool cannot be used. */
+.wire-port.taken {
+  stroke: var(--wire-jumper, #5a6672);
+  fill: rgba(90, 102, 114, .3);
+  cursor: not-allowed;
+}
+.wire-port.source { fill: var(--service); stroke-width: .9; }
+.wire-bus-port { fill: rgba(198, 92, 59, .001); pointer-events: all; cursor: crosshair; }
+.wire-bus-port:hover { fill: rgba(198, 92, 59, .22); }
+.wire-preview {
+  fill: none;
+  stroke: var(--service);
+  stroke-width: 1.4;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
 .view-caption {
   display: flex;
   align-items: center;
@@ -1531,6 +1597,36 @@ kbd {
   color: #7b857e;
   font:500 var(--text-micro) var(--mono);
   white-space: nowrap;
+}
+/* The comb button lives in the row gutter, which is the only strip of the board not covered by
+   devices — the comb itself has to be drawn over the row, and a control there would sit on a clamp. */
+.row-comb-add {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: #6d766f;
+  font:600 var(--text-micro) var(--mono);
+}
+.row-comb-add span { padding: 0 3px 0 1px; }
+.row-comb-add button {
+  min-height: 0;
+  padding: 1px 4px;
+  border: 1px solid rgba(109, 118, 111, .4);
+  border-radius: 2px;
+  background: rgba(251, 250, 242, .7);
+  color: #6d766f;
+  font:600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.row-comb-add button:hover:not(:disabled) {
+  border-color: var(--service);
+  color: var(--service);
+  background: var(--canvas);
+}
+.row-comb-add button:disabled {
+  opacity: .4;
+  cursor: default;
 }
 .din-rail {
   position: absolute;
@@ -2171,6 +2267,28 @@ kbd {
 .wires.labels-off .wire-label {
   display: none;
 }
+/* A comb bridges the top clamps of a run, so it borrows the copper of the busbars and adds a
+   tooth per pole. A comb with fewer devices than poles is drawn hollow: on a real board that
+   means an unfed fork, and the drawing should say so rather than look complete. */
+.comb-bar {
+  fill: #b9c2ba;
+  stroke: #6d776f;
+  stroke-width: .35;
+}
+.comb-tooth {
+  fill: none;
+  stroke: #7c867e;
+  stroke-width: 1.6;
+  stroke-linecap: butt;
+}
+.comb.starved .comb-bar {
+  fill: none;
+  stroke: var(--error);
+  stroke-dasharray: 1.6 1.2;
+}
+.comb.starved .comb-tooth {
+  stroke: var(--error);
+}
 .bus-bar {
   fill: var(--bus-bar-fill);
   stroke: rgba(28, 32, 30, .34);
@@ -2622,6 +2740,14 @@ kbd {
   color: var(--text-faint);
   font-size: var(--text-micro);
   text-align: center;
+}
+/* A comb that reaches fewer devices than it has poles is drawn hollow on the board, so the
+   inspector says the same thing in words rather than leaving the user to spot the dashes. */
+.connection-warn {
+  margin: 4px 0 0;
+  color: var(--error);
+  font-size: var(--text-micro);
+  font-weight: 600;
 }
 .compact-empty {
   min-height: 62px;

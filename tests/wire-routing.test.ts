@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { routeBoard, wireFrameFromGeometry } from '../src/domain/wireRouting'
+import { routeBoard, terminalTargets as terminalTargetsOf, wireFrameFromGeometry } from '../src/domain/wireRouting'
 import { getPanelGeometry } from '../src/domain/panelGeometry'
-import { facePlacementMm, faceSizeMm, terminalAnchorMm, terminalColumns } from '../src/domain/terminals'
+import { deviceTerminals, facePlacementMm, faceSizeMm, terminalAnchorMm, terminalColumns } from '../src/domain/terminals'
 import type { Connection, DeviceDefinition, PanelProject } from '../src/domain/types'
 
 const MM = 1.5
@@ -225,6 +225,93 @@ describe('wire routing', () => {
     expect(columnOf(3)).toBeCloseTo(columnOf(4), 6)
     expect(columnOf(5)).toBeCloseTo(columnOf(6), 6)
     expect(new Set([columnOf(1), columnOf(3), columnOf(5)]).size).toBe(3)
+  })
+
+  it('draws a comb above its row with one tooth per fed device', () => {
+    const source = project([], { combs: [{ id: 'c1', row: 0, poles: 2, fromSlot: 0, toSlot: 2 }] })
+    const [comb] = board(source).combs
+    expect(comb.poles).toBe(2)
+    // Three devices span the range but only two poles exist, so the comb feeds the first two.
+    expect(comb.teeth).toHaveLength(2)
+    expect(comb.starved).toBe(false)
+    // The bar sits above the row, and every tooth reaches down into a top clamp.
+    const geometry = getPanelGeometry(source, definitions)
+    const rowTop = geometry.rowTopMm[0] - geometry.plateTopMm
+    expect(comb.y).toBeLessThan(rowTop * MM)
+    for (const tooth of comb.teeth) {
+      expect(tooth.y).toBeGreaterThan(comb.y)
+    }
+  })
+
+  it('marks a comb starved when the row holds fewer devices than it has poles', () => {
+    const source = project([], { combs: [{ id: 'c1', row: 0, poles: 4, fromSlot: 0, toSlot: 3 }] })
+    const [comb] = board(source).combs
+    expect(comb.teeth).toHaveLength(3)
+    expect(comb.starved).toBe(true)
+  })
+
+  it('leaves a hole where the row is empty rather than bridging across it', () => {
+    const source = project([], { combs: [{ id: 'c1', row: 0, poles: 3, fromSlot: 0, toSlot: 8 }] })
+    const [comb] = board(source).combs
+    // Only the three placed devices carry a tooth; the empty slots get none.
+    expect(comb.teeth).toHaveLength(3)
+  })
+
+  it('orders the comb slot range so a reversed range still draws', () => {
+    const source = project([], { combs: [{ id: 'c1', row: 0, poles: 1, fromSlot: 2, toSlot: 0 }] })
+    const [comb] = board(source).combs
+    expect(comb.teeth).toHaveLength(1)
+  })
+
+  it('runs the corridor above the row it feeds, not through the devices', () => {
+    const source = project([
+      { id: 'a', circuitId: '', fromBus: 'L', toDeviceId: 'qf02', thickness: 2, color: '', label: 'a', toTerminal: { deviceId: 'qf02', pole: 1, side: 'top' } },
+    ])
+    const geometry = getPanelGeometry(source, definitions)
+    const device = source.devices.find((item) => item.instanceId === 'qf02')!
+    const deviceTopPx = (geometry.deviceTopMm(device.row, device.productId) - geometry.plateTopMm) * MM
+    const wire = board(source).wires[0]
+    // The horizontal run happens before the wire drops into the clamp, so every point above the
+    // drop must clear the top of the device it feeds.
+    const drop = wire.points.findIndex((point) => Math.abs(point.x - lastPoint(wire.d).x) < 0.01)
+    for (const point of wire.points.slice(0, drop)) {
+      expect(point.y).toBeLessThan(deviceTopPx)
+    }
+  })
+
+  it('offers a hit target on every clamp, at the point its wire would land', () => {
+    const source = project([], { devices: [placed('qf01', 'mcb-3p', 0), placed('qfi01', 'rcbo-1pn', 3)] })
+    const targets = terminalTargetsOf(source, definitions, wireFrameFromGeometry(getPanelGeometry(source, definitions)))
+    // One per clamp, and never a clamp the terminal model does not have: a 3P breaker numbers its
+    // poles in staggered rows (1/3/5 on top, 2/4/6 underneath), so listing sides by hand is a
+    // trap. Derive the expectation from the same source the drawing uses.
+    const expected = [
+      ...deviceTerminals(definitions.get('mcb-3p')!).map((info) => `qf01:${info.pole}:${info.side}`),
+      ...deviceTerminals(definitions.get('rcbo-1pn')!).map((info) => `qfi01:${info.pole}:${info.side}`),
+    ].sort()
+    expect(targets.map((target) => target.key).sort()).toEqual(expected)
+    // Spelled out, because a staggered pole number is exactly what a wrong anchor would hide.
+    expect(targets.filter((target) => target.deviceId === 'qf01').map((target) => target.key).sort()).toEqual([
+      'qf01:1:top', 'qf01:2:bottom', 'qf01:3:top', 'qf01:4:bottom', 'qf01:5:top', 'qf01:6:bottom',
+    ])
+    // The N clamp of a 1P+N RCBO is the second column, so its pole is 2 while its label is «N».
+    const neutral = targets.find((target) => target.key === 'qfi01:2:top')!
+    expect(neutral.label).toBe('N')
+    expect(neutral.type).toBe('neutral')
+    // The whole point of the helper: the target is the router's own endpoint, not a second
+    // measurement of the screw that could drift from it.
+    for (const target of targets) {
+      const source2 = project([{ id: 'c', circuitId: '', fromBus: 'L', toDeviceId: target.deviceId, thickness: 2, color: '', label: 'c', toTerminal: { deviceId: target.deviceId, pole: target.pole, side: target.side } }], { devices: source.devices })
+      const endpoint = lastPoint(board(source2).wires[0].d)
+      expect(target.x).toBeCloseTo(endpoint.x, 6)
+      expect(target.y).toBeCloseTo(endpoint.y, 6)
+    }
+  })
+
+  it('marks a clamp that already carries a conductor as taken', () => {
+    const busy = project([{ id: 'c', circuitId: '', fromBus: 'L', toDeviceId: 'qf01', thickness: 2, color: '', label: 'c', kind: 'jumper', fromTerminal: { deviceId: 'qf02', pole: 1, side: 'top' }, toTerminal: { deviceId: 'qf01', pole: 1, side: 'top' } }])
+    const targets = terminalTargetsOf(busy, definitions, wireFrameFromGeometry(getPanelGeometry(busy, definitions)))
+    expect(targets.filter((target) => target.occupied).map((target) => target.key).sort()).toEqual(['qf01:1:top', 'qf02:1:top'])
   })
 
   it('agrees with the face drawing about the face size, so the fit is exact', () => {

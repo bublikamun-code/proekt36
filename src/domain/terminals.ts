@@ -125,6 +125,17 @@ export const terminalDisplayName = (ref: TerminalRef, address: string): string =
   return `${address || ref.deviceId}:${label} ${side}`
 }
 
+/**
+ * The same text, but with the marking actually printed beside that clamp. A pole number is not
+ * always the marking: the N terminal of a 1P+N RCBO sits in column 2 and would otherwise be
+ * labelled «2», which is exactly the number the drawing puts on the neighbouring clamp.
+ */
+export const terminalMarkedName = (product: DeviceDefinition, ref: TerminalRef, address: string): string => {
+  const columns = terminalColumns(product)
+  const column = terminalColumnForPole(product, ref.pole)
+  return `${address || ref.deviceId}:${terminalLabel(product, column, columns, ref.side === 'bottom')} ${ref.side === 'top' ? 'верх' : 'низ'}`
+}
+
 /** Phase-coloured wires: the colours a Russian installer expects on a board drawing. */
 export const WIRE_COLORS = {
   phase1: '#c0392b',
@@ -282,11 +293,12 @@ export const terminalAnchorMm = (
   const column = terminalColumnForPole(product, pole)
   const { widthMm, heightMm } = faceSizeMm(product)
   if (usesChintPlatform(product)) {
-    // The CHINT drawings repeat one physical cell per pole, so a linked-lever device still has
-    // screws on the pole pitch rather than on the module pitch the generic chassis assumes.
-    const poles = Math.max(1, Math.round(product.poles || columns))
+    // The CHINT drawings repeat one physical cell per terminal column, so the screws sit on the
+    // same column pitch the rest of the module counts with. Dividing by the pole count instead
+    // throws every column past the last pole off the face: a linked-lever device has more
+    // columns than poles, and its wire would stop in mid-air beside the device.
     const screws = CHINT_TERMINAL_SCREWS[chintFaceKind(product)]
-    return { x: (widthMm / poles) * (column + 0.5), y: side === 'top' ? screws.topMm : screws.bottomMm }
+    return { x: (widthMm / columns) * (column + 0.5), y: side === 'top' ? screws.topMm : screws.bottomMm }
   }
   const pockets = genericTerminalPockets(widthMm, heightMm, columns)
   return {

@@ -1,6 +1,7 @@
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
 import { pricing } from './pricing'
 import { VALIDATION_REVISION } from './projectSchema'
+import { terminalKey } from './terminals'
 import type { DeviceDefinition, PanelProject, ValidationIssue } from './types'
 
 const issue = (id: string, level: ValidationIssue['level'], title: string, message: string, ruleCode: string, context: Record<string, unknown> = {}, deviceId?: string): ValidationIssue => ({
@@ -49,17 +50,35 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
   const circuitById = new Map<string, (typeof project.circuits)[number]>()
   for (const circuit of project.circuits ?? []) circuitById.set(circuit.id, circuit)
   const connectionKeys = new Set<string>()
+  const terminalOwners = new Map<string, string>()
   for (const connection of project.connections ?? []) {
     if (seenConnectionIds.has(connection.id)) issues.push(issue(`duplicate-connection-${connection.id}`, 'error', 'Повторяется идентификатор подключения', `Подключение «${connection.label || connection.id}» встречается несколько раз.`, 'project.ids.duplicate', { kind: 'connection', id: connection.id }))
     seenConnectionIds.add(connection.id)
-    const circuit = connection.kind === 'busbar' ? undefined : circuitById.get(connection.circuitId)
-    if (connection.kind !== 'busbar' && !circuit) issues.push(issue(`connection-circuit-${connection.id}`, 'error', 'Подключение без цепи', `Подключение «${connection.label || connection.id}» ссылается на несуществующую цепь. Выберите существующую цепь.`, 'connection.circuit.missing', { connectionId: connection.id, circuitId: connection.circuitId }))
+    const circuit = connection.kind === 'busbar' || connection.kind === 'jumper' ? undefined : circuitById.get(connection.circuitId)
+    if (connection.kind !== 'busbar' && connection.kind !== 'jumper' && !circuit) issues.push(issue(`connection-circuit-${connection.id}`, 'error', 'Подключение без цепи', `Подключение «${connection.label || connection.id}» ссылается на несуществующую цепь. Выберите существующую цепь.`, 'connection.circuit.missing', { connectionId: connection.id, circuitId: connection.circuitId }))
     if (connection.kind === 'busbar' && !connection.fromDeviceId) issues.push(issue(`connection-busbar-source-${connection.id}`, 'error', 'Нет источника шины', `Подключение «${connection.label || connection.id}» не указывает шину-источник.`, 'connection.busbar.source.missing', { connectionId: connection.id }))
     if (connection.kind === 'busbar' && connection.fromDeviceId && !project.devices.some((device) => device.instanceId === connection.fromDeviceId)) issues.push(issue(`connection-busbar-source-missing-${connection.id}`, 'error', 'Шина-источник удалена', `Подключение «${connection.label || connection.id}» ссылается на удалённую шину.`, 'connection.busbar.source.missing', { connectionId: connection.id, fromDeviceId: connection.fromDeviceId }, connection.fromDeviceId))
     if (!project.devices.some((device) => device.instanceId === connection.toDeviceId)) issues.push(issue(`connection-device-${connection.id}`, 'error', 'Подключение без устройства', `Подключение «${connection.label || connection.id}» ссылается на удалённое устройство.`, 'connection.device.missing', { connectionId: connection.id, toDeviceId: connection.toDeviceId }, connection.toDeviceId))
     if (!['L', 'N', 'PE'].includes(connection.fromBus)) issues.push(issue(`connection-bus-${connection.id}`, 'error', 'Неизвестная шина', `В подключении «${connection.label || connection.id}» указана неизвестная шина. Выберите L, N или PE.`, 'connection.bus.unknown', { connectionId: connection.id, fromBus: connection.fromBus }))
     if (!connection.label.trim()) issues.push(issue(`connection-label-${connection.id}`, 'warning', 'Подключение без подписи', 'Добавьте понятную подпись к линии на схеме.', 'connection.label.missing', { connectionId: connection.id }))
-    const connectionKey = connection.kind === 'busbar' ? `busbar:${connection.fromDeviceId ?? ''}:${connection.toDeviceId}` : `circuit:${connection.circuitId}:${connection.fromBus}:${connection.toDeviceId}`
+    // Two conductors clamped in the same hole is a real installation fault, and the wire
+    // drawing hides it: both lines simply overlap at the terminal.
+    for (const [side, ref] of [['from', connection.fromTerminal], ['to', connection.toTerminal]] as const) {
+      if (!ref) continue
+      const key = terminalKey(ref)
+      const owner = terminalOwners.get(key)
+      if (owner) issues.push(issue(`connection-terminal-busy-${connection.id}-${side}`, 'error', 'Клемма занята', `Клемма «${ref.deviceId}:${ref.pole} ${ref.side === 'top' ? 'верх' : 'низ'}» уже занята подключением «${owner}». Снимите одно из подключений или выберите другую клемму.`, 'connection.terminal.busy', { connectionId: connection.id, deviceId: ref.deviceId, pole: ref.pole, side: ref.side, otherConnectionId: owner }, ref.deviceId))
+      else terminalOwners.set(key, connection.label || connection.id)
+    }
+    if (connection.kind === 'jumper' && (!connection.fromTerminal || !connection.toTerminal)) issues.push(issue(`connection-jumper-anchors-${connection.id}`, 'error', 'Перемычка без клемм', `Перемычка «${connection.label || connection.id}» должна указывать клемму источника и клемму приёмника.`, 'connection.jumper.anchors.missing', { connectionId: connection.id }))
+    if (connection.kind === 'jumper' && connection.fromTerminal && connection.toTerminal && terminalKey(connection.fromTerminal) === terminalKey(connection.toTerminal)) issues.push(issue(`connection-jumper-loop-${connection.id}`, 'error', 'Перемычка в никуда', `Перемычка «${connection.label || connection.id}» соединяет клемму с самой собой. Выберите разные клеммы.`, 'connection.jumper.loop', { connectionId: connection.id }, connection.fromTerminal.deviceId))
+    const bus = connection.busId ? (project.busAssemblies ?? []).find((item) => item.id === connection.busId) : undefined
+    if (connection.busId && !bus) issues.push(issue(`connection-bus-missing-${connection.id}`, 'error', 'Шина удалена', `Подключение «${connection.label || connection.id}» ссылается на несуществующую шину.`, 'connection.bus.missing', { connectionId: connection.id, busId: connection.busId }))
+    // N and PE are the same shape of conductor and the drawing cannot tell them apart, so the
+    // bus a line claims has to carry what the line carries.
+    if (bus && bus.kind === 'PE' && connection.fromBus !== 'PE') issues.push(issue(`connection-bus-kind-${connection.id}`, 'error', 'Фаза на шине PE', `Подключение «${connection.label || connection.id}» идёт от шины PE, но помечено как ${connection.fromBus}. Уберите фазу с защитной шины.`, 'connection.bus.kind.mismatch', { connectionId: connection.id, busKind: bus.kind, fromBus: connection.fromBus }))
+    if (bus && (bus.kind === 'N' || bus.kind === 'L') && connection.fromBus === 'PE') issues.push(issue(`connection-bus-kind-${connection.id}`, 'error', 'PE на рабочей шине', `Подключение «${connection.label || connection.id}» идёт от шины ${bus.kind}, но помечено как PE. Заземляющий провод подключается только к шине PE.`, 'connection.bus.kind.mismatch', { connectionId: connection.id, busKind: bus.kind, fromBus: connection.fromBus }))
+    const connectionKey = connection.kind === 'busbar' ? `busbar:${connection.fromDeviceId ?? ''}:${connection.toDeviceId}` : connection.kind === 'jumper' ? `jumper:${connection.fromTerminal && terminalKey(connection.fromTerminal)}:${connection.toTerminal && terminalKey(connection.toTerminal)}` : `circuit:${connection.circuitId}:${connection.fromBus}:${connection.toDeviceId}`
     if (connectionKeys.has(connectionKey)) issues.push(issue(`connection-duplicate-${connection.id}`, 'warning', 'Повторяется подключение', `В цепи «${circuit?.name ?? connection.circuitId}» уже есть такая же линия.`, 'connection.duplicate', { connectionKey }))
     connectionKeys.add(connectionKey)
     if (connection.thickness <= 0) issues.push(issue(`connection-thickness-${connection.id}`, 'warning', 'Некорректная толщина линии', `В подключении «${connection.label || connection.id}» укажите толщину больше нуля.`, 'connection.thickness.invalid', { connectionId: connection.id }))

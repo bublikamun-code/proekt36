@@ -11,7 +11,7 @@ import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
 import AssistantPanel from '../assistant/AssistantPanel.vue'
 import { useConfirm } from '../../composables/useConfirm'
-import type { Category, RailDefinition } from '../../domain/types'
+import type { Category, RailDefinition, RowComb } from '../../domain/types'
 
 const emit = defineEmits<{ focusCategory: [Category] }>()
 
@@ -29,6 +29,7 @@ const BUS_OPTIONS: AppSelectOption[] = [
   { value: 'N', label: 'N · нейтраль' },
   { value: 'PE', label: 'PE · земля' },
 ]
+const COMB_POLE_OPTIONS: AppSelectOption[] = [1, 2, 3, 4].map((poles) => ({ value: String(poles), label: `${poles}P` }))
 
 const store = useProjectStore()
 const { confirm } = useConfirm()
@@ -131,6 +132,19 @@ const busbars = computed(() => currentProject.value.devices.filter((item) => ite
 const protectionTargets = computed(() => currentProject.value.devices.filter((item) => ['MCB', 'RCCB', 'RCBO'].includes(definitions.value.get(item.productId)?.category ?? '')))
 const busbarLinkExists = (busbarId: string, deviceId: string) =>
   currentProject.value.connections.some((connection) => connection.kind === 'busbar' && connection.fromDeviceId === busbarId && connection.toDeviceId === deviceId)
+/** How many devices a comb actually reaches, mirroring the renderer's own span test. */
+const combCovers = (comb: RowComb) => {
+  const from = Math.min(comb.fromSlot, comb.toSlot)
+  const to = Math.max(comb.fromSlot, comb.toSlot)
+  return currentProject.value.devices.filter((device) => device.row === comb.row && device.slot >= from && device.slot <= to)
+}
+/** Slot inputs are one-based on screen and zero-based in the model; the range is clamped to the rail. */
+const changeCombSpan = (id: string, key: 'fromSlot' | 'toSlot', event: Event) => {
+  const slot = Math.round(Number((event.target as HTMLInputElement).value)) - 1
+  if (!Number.isFinite(slot)) return
+  store.updateComb(id, { [key]: Math.min(metrics.value.capacity - 1, Math.max(0, slot)) })
+}
+const removeComb = (id: string) => store.removeComb(id)
 const removeCircuit = async (id: string, circuitName: string) => {
   if (await confirm({
     title: 'Удалить цепь?',
@@ -253,6 +267,22 @@ const migrationIssueLabel = (code: string) => ({
         </div>
       </div>
       <p v-if="!busbars.length" class="connection-empty">Добавьте FORK из каталога «Шины».</p>
+    </section>
+
+    <section class="inspector-section" aria-labelledby="comb-title">
+      <div class="section-title"><h3 id="comb-title">Гребёнки на рейке</h3><span class="mono">{{ currentProject.combs?.length ?? 0 }}</span></div>
+      <p class="microcopy">Гребёнка соединяет верхние клеммы аппаратов ряда между собой. Ширина задаётся охватом слотов: пустой слот оставляет разрыв в шине.</p>
+      <div v-for="comb in currentProject.combs ?? []" :key="comb.id" class="connection-card" :data-comb-card="comb.id">
+        <div class="connection-card-head"><strong>{{ comb.label || 'Гребёнка' }}</strong><button class="icon-button danger" :aria-label="`Удалить ${comb.label || 'гребёнку'}`" @click="removeComb(comb.id)">×</button></div>
+        <div class="form-grid compact-form">
+          <label>Подпись<input :value="comb.label" @change="store.updateComb(comb.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+          <label>Полюсов<AppSelect label="Полюсов" :model-value="String(comb.poles)" :options="COMB_POLE_OPTIONS" @update:model-value="store.updateComb(comb.id, { poles: Number($event) as 1 | 2 | 3 | 4 })" /></label>
+          <label>Слот от<input :value="comb.fromSlot + 1" type="number" min="1" :max="comb.toSlot + 1" step="1" @change="changeCombSpan(comb.id, 'fromSlot', $event)" /></label>
+          <label>Слот до<input :value="comb.toSlot + 1" type="number" min="1" :max="metrics.capacity" step="1" @change="changeCombSpan(comb.id, 'toSlot', $event)" /></label>
+        </div>
+        <p v-if="combCovers(comb).length < comb.poles" class="connection-warn">Ряду не хватает {{ comb.poles - combCovers(comb).length }} аппарат(а) — часть зубцов пустая.</p>
+      </div>
+      <p v-if="!(currentProject.combs ?? []).length" class="connection-empty">Кнопка «Гребёнка» в жёлобе ряда добавляет гребёнку на весь ряд.</p>
     </section>
 
     <section class="inspector-section circuits-section">

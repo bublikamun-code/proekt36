@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { builtinCatalog, enmasSeriesCatalog, sampleCatalog } from '../data/catalog'
+import { builtinCatalog, enmasSeriesCatalog } from '../data/catalog'
 import { embeddedModelById } from '../data/models'
 import {
   compactRow,
@@ -15,7 +15,10 @@ import { autoNumber, createProject, migrateProject, presetProducts, uid } from '
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
-import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, StoredModelAsset, StoredModelLibrary } from '../domain/types'
+import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, RowComb, StoredModelAsset, StoredModelLibrary } from '../domain/types'
+import { terminalOccupied } from '../domain/wireRouting'
+import { sameTerminal, terminalColumnForPole, terminalColumns, terminalDisplayName, terminalMarkedName, terminalType } from '../domain/terminals'
+import type { TerminalRef, TerminalType } from '../domain/terminals'
 import { clearModelAssets, deleteModelAsset, listModelAssetIds, putModelAsset } from '../storage/modelDb'
 import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { invalidateModelCaches } from '../services/modelRender'
@@ -121,7 +124,6 @@ export const useProjectStore = defineStore('project', () => {
     const map = new Map<string, DeviceDefinition>([
       ...builtinCatalog.map((item) => [item.id, item] as const),
       ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
-      ...sampleCatalog.map((item) => [item.id, item] as const),
       ...modelLibrary.value.products.map((item) => [item.id, item] as const),
     ])
     // Bindings attach a model to a built-in product without cloning it into the library.
@@ -310,9 +312,8 @@ export const useProjectStore = defineStore('project', () => {
     Object.assign(project.settings, config.settings)
     project.preset = preset
     const allowed = new Set(config.catalog)
-    // First product of the category wins, and templates/test samples never seed a board.
-    // Last-wins used to hand every preset the City9 demo breaker just because the sample
-    // catalog is appended after the real ones.
+    // First product of the category wins, and template entries never seed a board.
+    // Last-wins used to hand every preset the same late-catalogue breaker regardless of brand.
     const picked = new Map<string, DeviceDefinition>()
     for (const item of definitions.value.values()) {
       if (!allowed.has(item.category) || item.imported || item.verificationStatus === 'template') continue
@@ -529,12 +530,104 @@ export const useProjectStore = defineStore('project', () => {
 
   const autoNumberAll = () => commit((project) => { project.devices = autoNumber(project.devices, definitions.value) }, 'Адреса обновлены')
 
+  /** The slot span a new comb on this row should cover: every device already in the row. */
+  const addComb = (row: number, poles: 1 | 2 | 3 | 4 = 1) => {
+    const inRow = currentProject.value.devices.filter((item) => item.row === row).sort((a, b) => a.slot - b.slot)
+    if (!inRow.length) return notify('В ряду нет аппаратов — гребёнке нечего соединять', 'error')
+    // A comb is a physical part of a fixed length: its teeth span as many devices as it has
+    // poles, starting at the leftmost one. Covering the whole row would draw a one-tooth comb
+    // across nine devices, which no installer would recognise.
+    const fed = inRow.slice(0, poles)
+    const fromSlot = Math.min(...fed.map((item) => item.slot))
+    const toSlot = Math.max(...fed.map((item) => item.slot + getFootprintModules(item, definitions.value) - 1))
+    commit((project) => {
+      project.combs = [...(project.combs ?? []), { id: uid(), row, poles, fromSlot, toSlot, label: `Гребёнка ${poles}P` }]
+    }, `Гребёнка ${poles}P добавлена`)
+  }
+
+  const updateComb = (id: string, patch: Partial<RowComb>) => {
+    if (!currentProject.value.combs?.some((comb) => comb.id === id)) return
+    commit((project) => {
+      project.combs = (project.combs ?? []).map((comb) => {
+        if (comb.id !== id) return comb
+        const next = { ...comb, ...patch }
+        return { ...next, fromSlot: Math.min(next.fromSlot, next.toSlot), toSlot: Math.max(next.fromSlot, next.toSlot) }
+      })
+    }, 'Гребёнка обновлена', { coalesce: `comb:${id}` })
+  }
+
+  const removeComb = (id: string) => {
+    if (!currentProject.value.combs?.some((comb) => comb.id === id)) return
+    commit((project) => { project.combs = (project.combs ?? []).filter((comb) => comb.id !== id) }, 'Гребёнка удалена')
+  }
+
   const addBusbarConnection = (fromDeviceId: string, toDeviceId: string) => {
     const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
     const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
     if (!source || source.mount !== 'busbar' || !target) return notify('Выберите шину Fork и аппарат назначения', 'error')
     if (currentProject.value.connections.some((item) => item.kind === 'busbar' && item.fromDeviceId === fromDeviceId && item.toDeviceId === toDeviceId)) return notify('Такое подключение уже есть', 'error')
     commit((project) => project.connections.push({ id: uid(), circuitId: '', fromBus: 'L', toDeviceId, color: '#aeb8b4', thickness: 2, label: `FORK → ${target.address || 'аппарат'}`, kind: 'busbar', fromDeviceId }), 'Шина подключена')
+  }
+
+  const terminalDevice = (ref: TerminalRef) => currentProject.value.devices.find((item) => item.instanceId === ref.deviceId)
+
+  /** What a clamp is: the marking on the device, not the pole number, decides it. */
+  const terminalMarking = (ref: TerminalRef): TerminalType | null => {
+    const product = terminalProduct(ref)
+    if (!product) return null
+    const columns = terminalColumns(product)
+    return terminalType(product, terminalColumnForPole(product, ref.pole), columns, ref.side === 'bottom')
+  }
+
+  const terminalProduct = (ref: TerminalRef) => {
+    const device = terminalDevice(ref)
+    return device ? definitions.value.get(device.productId) : undefined
+  }
+
+  /** «QF01:N верх» rather than the pole number, which is not what is printed on the clamp. */
+  const terminalName = (ref: TerminalRef, address: string) => {
+    const product = terminalProduct(ref)
+    return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
+  }
+
+  /**
+   * A wire drawn by hand between two clamps. The pair decides the rest of the record: a terminal
+   * marked N makes the conductor a neutral, one marked PE an earth, and anything else takes the
+   * phase colour of the pole it leaves from — which is what an installer reads off the board.
+   */
+  const addWire = (from: TerminalRef, to: TerminalRef): boolean => {
+    const source = terminalDevice(from)
+    const target = terminalDevice(to)
+    if (!source || !target) return rejectCommand('Клемма не найдена: устройство удалено или не то, что нарисовано.')
+    if (sameTerminal(from, to)) return rejectCommand('Провод не может начинаться и заканчиваться на одной клемме.')
+    if (terminalOccupied(currentProject.value, from) || terminalOccupied(currentProject.value, to))
+      return rejectCommand('Клемма уже занята другим проводом.')
+    const marking = terminalMarking(from)
+    const connection: Connection = {
+      id: uid(), circuitId: '', fromBus: marking === 'neutral' ? 'N' : marking === 'pe' ? 'PE' : 'L',
+      toDeviceId: to.deviceId, color: '', thickness: 2, kind: 'jumper',
+      fromTerminal: from, toTerminal: to,
+      label: `${terminalName(from, source.address)} → ${terminalName(to, target.address)}`,
+    }
+    if (marking === 'phase') connection.phase = (((from.pole - 1) % 3) + 1) as 1 | 2 | 3
+    commit((project) => { project.connections.push(connection) }, 'Провод добавлен')
+    return true
+  }
+
+  /** Feeds a clamp from one of the visible board bars rather than from another device. */
+  const addBusWire = (busId: string, to: TerminalRef): boolean => {
+    const bus = currentProject.value.busAssemblies?.find((item) => item.id === busId)
+    const target = terminalDevice(to)
+    if (!bus || !target) return rejectCommand('Шина или клемма не найдена.')
+    if (terminalOccupied(currentProject.value, to)) return rejectCommand('Клемма уже занята другим проводом.')
+    const connection: Connection = {
+      id: uid(), circuitId: '', fromBus: bus.kind, toDeviceId: to.deviceId,
+      color: '', thickness: 2, kind: 'circuit', busId, toTerminal: to,
+      label: `${bus.label || bus.kind} → ${terminalName(to, target.address)}`,
+    }
+    if (bus.kind === 'L') connection.phase = 1
+    commit((project) => { project.connections.push(connection) }, 'Провод от шины добавлен')
+    return true
   }
 
   const isProtectionDevice = (device: PlacedDevice | undefined) => {
@@ -871,6 +964,7 @@ export const useProjectStore = defineStore('project', () => {
     applyPreset, updateSettings, selectCabinet, selectRail, stageCabinetMigration, stageRailMigration,
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
+    addComb, updateComb, removeComb, addWire, addBusWire,
     addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
     retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, replaceDeviceProduct, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
