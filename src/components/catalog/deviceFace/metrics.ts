@@ -1,3 +1,4 @@
+import { hasSharedToggle, terminalColumns, terminalLabel } from '../../../domain/terminals'
 import type { DeviceDefinition } from '../../../domain/types'
 
 /** Frontal face drawings live in millimetres so a 1P and a 4P keep their real proportions. */
@@ -5,9 +6,6 @@ export const FACE_MODULE_MM = 18
 export const FACE_DEFAULT_HEIGHT_MM = 82
 export const FACE_MIN_HEIGHT_MM = 45
 export const FACE_MIN_WIDTH_MM = 14
-/** City9 shells measure 17.7 mm per module and 85.5 mm tall, per the manufacturer drawing. */
-export const CITY9_MODULE_MM = 17.7
-export const CITY9_HEIGHT_MM = 85.5
 
 const EDGE_MM = 0.7
 const CLIP_MM = 1.9
@@ -100,41 +98,39 @@ export const faceDetailFor = (widthMm: number): FaceDetail => (widthMm < 24 ? 'm
 /** Neutral plastic shades keyed by device family, so the board does not look like one cloned sprite. */
 export const faceShellFamily = (product: DeviceDefinition): string => {
   const code = (product.series || product.sku || product.brand || '').trim().toUpperCase()
+  if (/CHINT/i.test(product.brand) && /^(NB1|NB2|NB3|NBH8|NL1)/.test(code)) return 'chint'
   if (/^(NB1|NB3|FI-10|AVO|VAO|BAO|A9F|5SL|5SY)/.test(code)) return 'light'
   if (/^(KM|RXM|RKM|CW|AF)/.test(code)) return 'warm'
   if (/^(NGU|NU6|NJVA|PR|SPD)/.test(code)) return 'graphite'
   if (/^(DRP|PRD|PHPS|HDR|NDR)/.test(code)) return 'psu'
   if (code === 'FORK' || product.category === 'busbar') return 'busbar'
-  if (code.startsWith('CITY9')) return 'city9'
   return 'generic'
 }
 
-/** Linked 1P+N devices carry one lever for both poles, exactly like the photographed RCCB. */
-export const faceSharedToggle = (product: DeviceDefinition): boolean => {
-  if (!['MCB', 'RCCB', 'RCBO'].includes(product.category)) return false
-  return Math.max(1, product.poles || 1) < Math.max(1, product.moduleWidth || 1)
+/** CHINT NB/NL face heights measured off the manufacturer front drawings, millimetres. */
+export type ChintKind = 'nb1' | 'nbh8' | 'nl1' | 'nb1l' | 'nb1l40' | 'nb2le' | 'nb310l' | 'nbh8le'
+export const CHINT_FACE_HEIGHTS: Record<ChintKind, number> = {
+  nb1: 86, nbh8: 86, nl1: 86, nb1l: 85, nb1l40: 88, nb2le: 95, nb310l: 85, nbh8le: 86,
 }
+
+/** Which drawing the face follows; the series code picks the family template. */
+export const chintFaceKind = (product: DeviceDefinition): ChintKind => {
+  const code = (product.series || product.sku || '').trim().toUpperCase()
+  if (/^NBH8LE/.test(code)) return 'nbh8le'
+  if (/^NBH8/.test(code)) return 'nbh8'
+  if (/^NB2/.test(code)) return 'nb2le'
+  if (/^NB1L-?(40|63)/.test(code)) return 'nb1l40'
+  if (/^NB1L/.test(code)) return 'nb1l'
+  if (/^NB310L/.test(code)) return 'nb310l'
+  if (/^NL1/.test(code)) return 'nl1'
+  return 'nb1'
+}
+
+/** Linked 1P+N devices carry one lever for both poles, exactly like the photographed RCCB. */
+export const faceSharedToggle = (product: DeviceDefinition): boolean => hasSharedToggle(product)
 
 /** How many terminal columns the chassis shows on top and bottom. */
-export const faceTerminalColumns = (product: DeviceDefinition): number => {
-  const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
-  const poles = Math.max(1, Math.round(product.poles || 1))
-  if (product.category === 'busbar' || product.category === 'terminals') return 0
-  if (product.category === 'relay') return Math.min(Math.max(poles, 1), 4)
-  if (product.category === 'PSU') return Math.min(moduleWidth, 4)
-  if (product.category === 'meter') return Math.min(moduleWidth, 6)
-  return faceSharedToggle(product) ? moduleWidth : Math.min(poles, moduleWidth)
-}
-
-const faceTerminalLabel = (product: DeviceDefinition, column: number, columns: number, bottom: boolean): string => {
-  if (product.category === 'PSU') return ['L', 'N', '+', '−'][column] ?? String(column + 1)
-  if ((product.category === 'RCCB' || product.category === 'RCBO') && columns === 2 && product.poles === 1) {
-    return bottom ? (column === 0 ? '3' : '4') : (column === 0 ? '1' : 'N')
-  }
-  if (columns <= 2) return String(column + 1 + (bottom ? columns : 0))
-  const top = column % 2 === 0 ? column + 1 : column + 2
-  return String(bottom ? top + 1 : top)
-}
+export const faceTerminalColumns = (product: DeviceDefinition): number => terminalColumns(product)
 
 const xAt = (from: FacePoint, to: FacePoint, y: number): number => {
   const span = to.y - from.y
@@ -201,12 +197,10 @@ const buildToggle = (rect: FaceRect, column: number, shared: boolean): FaceToggl
 export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetrics => {
   const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
   const poles = Math.max(1, Math.round(product.poles || 1))
-  const city9 = faceShellFamily(product) === 'city9'
-  const widthMm = city9
-    ? Math.max(FACE_MIN_WIDTH_MM, moduleWidth * CITY9_MODULE_MM)
-    : Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
-  const heightMm = city9
-    ? CITY9_HEIGHT_MM
+  const chint = faceShellFamily(product) === 'chint'
+  const widthMm = Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
+  const heightMm = chint
+    ? CHINT_FACE_HEIGHTS[chintFaceKind(product)]
     : clamp(product.height || FACE_DEFAULT_HEIGHT_MM, FACE_MIN_HEIGHT_MM, 260)
   const columns = faceTerminalColumns(product)
   const sharedToggle = faceSharedToggle(product)
@@ -247,8 +241,8 @@ export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetri
       pocketWidth,
       pocketHeight,
       column,
-      faceTerminalLabel(product, column, columns, false),
-      faceTerminalLabel(product, column, columns, true),
+      terminalLabel(product, column, columns, false),
+      terminalLabel(product, column, columns, true),
     )
   })
 
