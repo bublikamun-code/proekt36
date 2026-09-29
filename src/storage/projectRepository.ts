@@ -3,8 +3,10 @@ import { migrateProject } from '../domain/project'
 import { DEVICE_CATEGORIES } from '../domain/types'
 import type { DeviceDefinition, ModelFormat, PanelProject, StoredModelAsset, StoredModelLibrary } from '../domain/types'
 
-export const PROJECTS_KEY = 'panel36.projects.v2'
+export const PROJECTS_KEY = 'panel36.projects.v3'
 export const LEGACY_PROJECTS_KEY = 'panel36.projects.v1'
+/** Every superseded project key, newest first, so a v2 panel survives the v3 rewrite. */
+export const LEGACY_PROJECTS_KEYS = ['panel36.projects.v2', LEGACY_PROJECTS_KEY] as const
 export const MODELS_KEY = 'panel36.models.v2'
 export const LEGACY_MODELS_KEY = 'panel36.models.v1'
 export const CURRENT_PROJECT_KEY = 'panel36.currentProjectId.v1'
@@ -188,7 +190,7 @@ const normalizeProject = (value: unknown, strict: boolean): PanelProject => {
     }
     return assertValidProjectSchema(candidate)
   }
-  if (candidate.schemaVersion === 2) assertValidProjectSchema(candidate)
+  if (candidate.schemaVersion === PROJECT_SCHEMA_VERSION) assertValidProjectSchema(candidate)
   return assertValidProjectSchema(migrateProject(candidate as Partial<PanelProject>))
 }
 
@@ -342,9 +344,9 @@ export class WorkspaceRepository {
       const raw = this.readRaw(key)
       if (raw === null) continue
       try {
-        // Only the v1 key is allowed to be migrated; the current key holds records this
+        // Only a superseded key is allowed to be migrated; the current key holds records this
         // app wrote, so a mismatch there is damage and not an old format.
-        return this.parseProjects(raw, key !== LEGACY_PROJECTS_KEY)
+        return this.parseProjects(raw, !(LEGACY_PROJECTS_KEYS as readonly string[]).includes(key))
       } catch (error) {
         this.recordInvalid(key, raw, error instanceof Error ? error.message : String(error))
       }
@@ -439,7 +441,7 @@ export class WorkspaceRepository {
       return { projects: clone(fallbackProjects), models: clone(fallbackModels), currentProjectId: null, available: false, recovery: [], backup: this.backupData }
     }
     try {
-      const projects = this.readProjectsWithRecovery([PROJECTS_KEY, LEGACY_PROJECTS_KEY], fallbackProjects)
+      const projects = this.readProjectsWithRecovery([PROJECTS_KEY, ...LEGACY_PROJECTS_KEYS], fallbackProjects)
       const models = this.readModelsWithRecovery(fallbackModels)
       if (!this.backup.projects) {
         const backupRaw = this.readRaw(PROJECTS_BACKUP_KEY)
@@ -533,7 +535,7 @@ export class WorkspaceRepository {
 
   clear() {
     if (!this.storage) throw new Error('Локальное хранилище недоступно')
-    const keys = [PROJECTS_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, LEGACY_MODELS_KEY, LEGACY_MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY]
+    const keys = [PROJECTS_KEY, ...LEGACY_PROJECTS_KEYS, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, LEGACY_MODELS_KEY, LEGACY_MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY]
     const errors: unknown[] = []
     for (const key of keys) {
       try {

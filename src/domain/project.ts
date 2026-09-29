@@ -1,5 +1,6 @@
 import { cabinetById, railById } from '../data/enclosures'
-import type { Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings } from './types'
+import type { BusAssembly, Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings, RowComb } from './types'
+import type { TerminalRef } from './terminals'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
 export { PROJECT_SCHEMA_VERSION } from './projectSchema'
@@ -68,7 +69,7 @@ export const normalizeCircuit = (value: unknown): Circuit => {
 /** Normalize a connection, including old records that did not have kind. */
 export const normalizeConnection = (value: unknown): Connection => {
   const raw = asRecord(value)
-  const kind = raw.kind === 'busbar' || raw.fromDeviceId ? 'busbar' : 'circuit'
+  const kind = raw.kind === 'busbar' || raw.kind === 'jumper' || raw.fromDeviceId ? 'busbar' : 'circuit'
   return {
     id: asText(raw.id, uid()),
     circuitId: asText(raw.circuitId),
@@ -77,9 +78,60 @@ export const normalizeConnection = (value: unknown): Connection => {
     color: asText(raw.color, '#c65c3b'),
     thickness: asNumber(raw.thickness, 2, 0.5, 8),
     label: asText(raw.label),
-    kind,
+    kind: raw.kind === 'jumper' && raw.fromTerminal && raw.toTerminal ? 'jumper' : kind,
     fromDeviceId: asText(raw.fromDeviceId) || undefined,
+    fromTerminal: normalizeTerminalRef(raw.fromTerminal),
+    toTerminal: normalizeTerminalRef(raw.toTerminal),
+    phase: asPhase(raw.phase),
+    busId: asText(raw.busId) || undefined,
   }
+}
+
+/** A terminal reference is only meaningful with a device, a pole and a side. */
+const normalizeTerminalRef = (value: unknown): TerminalRef | undefined => {
+  const raw = asRecord(value)
+  const deviceId = asText(raw.deviceId)
+  if (!deviceId) return undefined
+  const pole = asInteger(raw.pole, 1, 0, 12)
+  const side = raw.side === 'bottom' ? 'bottom' : 'top'
+  return { deviceId, pole, side }
+}
+
+/** Normalize a board bus, dropping records without a known bus kind. */
+export const normalizeBusAssembly = (value: unknown): BusAssembly | null => {
+  const raw = asRecord(value)
+  const kind = raw.kind
+  if (kind !== 'L' && kind !== 'N' && kind !== 'PE') return null
+  return { id: asText(raw.id, uid()), kind, placement: raw.placement === 'top' ? 'top' : 'bottom', label: asText(raw.label) }
+}
+
+/** Normalize a comb busbar, keeping the slot range ordered and inside the rail. */
+export const normalizeRowComb = (value: unknown): RowComb | null => {
+  const raw = asRecord(value)
+  const row = asInteger(raw.row, 0, 0, 29)
+  const fromSlot = asInteger(raw.fromSlot, 0, 0, 999)
+  const toSlot = asInteger(raw.toSlot, fromSlot, 0, 999)
+  const poles = asInteger(raw.poles, 1, 1, 4)
+  return {
+    id: asText(raw.id, uid()),
+    row,
+    poles: (poles === 2 || poles === 3 || poles === 4 ? poles : 1) as 1 | 2 | 3 | 4,
+    fromSlot: Math.min(fromSlot, toSlot),
+    toSlot: Math.max(fromSlot, toSlot),
+    label: asText(raw.label),
+  }
+}
+
+/** The buses a v2 project gains: N and PE along the bottom plate, where they are drawn. */
+const migrateBusAssemblies = (value: unknown, connections: Connection[]): BusAssembly[] => {
+  const existing = Array.isArray(value) ? value.map(normalizeBusAssembly).filter((item): item is BusAssembly => Boolean(item)) : []
+  if (existing.length) return existing
+  const buses = new Set(connections.map((connection) => connection.fromBus))
+  const defaults: BusAssembly[] = [
+    { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+    { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+  ]
+  return defaults.filter((bus) => buses.has(bus.kind))
 }
 
 const normalizeSettings = (value: unknown): ProjectSettings => {
@@ -122,6 +174,14 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
     throw new Error(`Схема проекта версии ${String(sourceVersion)} новее поддерживаемой версии ${PROJECT_SCHEMA_VERSION}`)
   }
   const now = new Date().toISOString()
+  const connections = Array.isArray(source.connections) ? source.connections.map(normalizeConnection) : []
+  const busAssemblies = migrateBusAssemblies(source.busAssemblies, connections)
+  // A v2 line came out of the abstract left-hand column; a v3 line names the bus it is fed
+  // from, so the drawing can anchor it to a real bar instead of a decorative strip.
+  const knownBus = new Map(busAssemblies.map((bus) => [bus.kind, bus.id]))
+  for (const connection of connections) {
+    if (!connection.busId && connection.kind !== 'jumper') connection.busId = knownBus.get(connection.fromBus)
+  }
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     id: asText(source.id, uid()),
@@ -132,7 +192,9 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
     settings: normalizeSettings(source.settings),
     devices: Array.isArray(source.devices) ? source.devices.map(normalizeDevice).filter((item): item is PlacedDevice => Boolean(item)) : [],
     circuits: Array.isArray(source.circuits) ? source.circuits.map(normalizeCircuit) : [],
-    connections: Array.isArray(source.connections) ? source.connections.map(normalizeConnection) : [],
+    connections,
+    busAssemblies,
+    combs: Array.isArray(source.combs) ? source.combs.map(normalizeRowComb).filter((item): item is RowComb => Boolean(item)) : [],
   }
 }
 
@@ -159,8 +221,15 @@ export const createProject = (name = 'Демо-панель', preset = 'demo', s
     id: uid(), name, preset, createdAt: now, updatedAt: now,
     settings: { ...merged, enclosureWidth: cabinet.width, enclosureHeight: cabinet.height, enclosureDepth: cabinet.depth, rows: cabinet.rows, cabinetId: cabinet.id, railId: rail.id },
     devices: [], circuits: [], connections: [],
+    busAssemblies: DEFAULT_BUS_ASSEMBLIES(), combs: [],
   }
 }
+
+/** Every new board starts with the neutral and protective bars along its bottom edge. */
+export const DEFAULT_BUS_ASSEMBLIES = (): BusAssembly[] => [
+  { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+  { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+]
 
 export const autoNumber = (devices: PlacedDevice[], definitions: Map<string, DeviceDefinition>) => {
   const counters = new Map<string, number>()

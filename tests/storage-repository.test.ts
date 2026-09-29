@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createProject } from '../src/domain/project'
+import { PROJECT_SCHEMA_VERSION } from '../src/domain/projectSchema'
 import { CURRENT_PROJECT_KEY, LEGACY_MODELS_KEY, LEGACY_PROJECTS_KEY, MODELS_BACKUP_KEY, MODELS_KEY, PROJECTS_BACKUP_KEY, PROJECTS_KEY, RECOVERY_KEY, WorkspaceRepository } from '../src/storage/projectRepository'
 
 class MemoryStorage {
@@ -51,13 +52,13 @@ describe('workspace repository', () => {
     storage.set(PROJECTS_BACKUP_KEY, null as never)
     storage.set(LEGACY_PROJECTS_KEY, [legacy])
     const legacyResult = legacyRepository.load([project('Fallback')])
-    expect(legacyResult.projects[0]).toMatchObject({ name: 'Старый щит', schemaVersion: 2 })
+    expect(legacyResult.projects[0]).toMatchObject({ name: 'Старый щит', schemaVersion: PROJECT_SCHEMA_VERSION })
   })
 
   it('refuses to repair a damaged record found in the current storage key', () => {
     const storage = new MemoryStorage()
     const healthy = project('Рабочая панель')
-    // A record in panel36.projects.v2 that is not current-schema was never written by this
+    // A record in panel36.projects.v3 that is not current-schema was never written by this
     // build, so it is damage. Migrating it used to hand the user an empty project with a
     // fresh id and a new timestamp — the original content simply gone.
     storage.set(PROJECTS_KEY, [{ schemaVersion: 1, id: 'legacy-lookalike', name: 'Потеряется', devices: [{ instanceId: 'a', productId: 'ekf-mcb-1p-c6', row: 0, slot: 0 }] }, healthy])
@@ -83,7 +84,19 @@ describe('workspace repository', () => {
 
     const result = new WorkspaceRepository(storage).load([project('Fallback')])
 
-    expect(result.projects[0]).toMatchObject({ name: 'Старый щит', schemaVersion: 2 })
+    expect(result.projects[0]).toMatchObject({ name: 'Старый щит', schemaVersion: PROJECT_SCHEMA_VERSION })
+    expect(result.recovery).toHaveLength(0)
+  })
+
+  it('migrates a v2 panel out of the superseded key instead of calling it damage', () => {
+    const storage = new MemoryStorage()
+    const v2 = project('Щит до шин')
+    storage.setRaw('panel36.projects.v2', JSON.stringify([{ ...v2, schemaVersion: 2, busAssemblies: undefined, combs: undefined }]))
+
+    const result = new WorkspaceRepository(storage).load([project('Fallback')])
+
+    expect(result.projects[0]).toMatchObject({ name: 'Щит до шин', schemaVersion: PROJECT_SCHEMA_VERSION })
+    expect(result.projects[0]!.busAssemblies).toEqual([])
     expect(result.recovery).toHaveLength(0)
   })
 

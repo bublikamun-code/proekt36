@@ -100,7 +100,9 @@ test('arrow keys move the focused device and one undo returns the whole gesture'
   expect(await leftOf(page, 'c')).toBeCloseTo(before.a, -1)
 
   await page.keyboard.press('Control+z')
-  expect(await leftOf(page, 'a')).toBeCloseTo(before.a, -1)
+  // The undo commits to the store synchronously, but the board re-renders on the next
+  // tick, so a reading taken straight after the keypress can still see the shifted row.
+  await expect.poll(() => leftOf(page, 'a')).toBeCloseTo(before.a, -1)
   expect(await leftOf(page, 'c')).toBeCloseTo(before.c, -1)
 })
 

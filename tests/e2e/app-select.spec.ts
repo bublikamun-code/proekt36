@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { unlockWorkspace } from './helpers'
 
 const project = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'select-project',
   name: 'Списки',
   preset: 'test',
@@ -15,6 +15,8 @@ const project = {
   }],
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 }
 
 const openEditor = async (page: import('@playwright/test').Page) => {

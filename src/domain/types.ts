@@ -1,3 +1,5 @@
+import type { TerminalRef } from './terminals'
+
 export type Phase = 1 | 3
 
 export const DEVICE_CATEGORIES = [
@@ -60,8 +62,36 @@ export interface Connection {
   color: string
   thickness: number
   label: string
-  kind?: 'circuit' | 'busbar'
+  kind?: 'circuit' | 'busbar' | 'jumper'
   fromDeviceId?: string
+  /** Terminal the conductor leaves, for a device-to-device jumper. */
+  fromTerminal?: TerminalRef
+  /** Terminal the conductor enters; required for a jumper, absent for a bus-fed line. */
+  toTerminal?: TerminalRef
+  /** Phase the conductor carries, used for the wire colour when no explicit colour is set. */
+  phase?: 1 | 2 | 3
+  /** Board bus the conductor is fed from, instead of the abstract left-hand column. */
+  busId?: string
+}
+
+/** A visible bus running along the top or the bottom of the mounting plate. */
+export interface BusAssembly {
+  id: string
+  kind: BusType
+  placement: 'top' | 'bottom'
+  label?: string
+}
+
+/** A comb busbar bridging the top terminals of a run of devices in one row. */
+export interface RowComb {
+  id: string
+  row: number
+  /** 1, 2, 3 or 4 conductors: a single-phase or a three-phase fork. */
+  poles: 1 | 2 | 3 | 4
+  /** Inclusive slot range the comb covers. */
+  fromSlot: number
+  toSlot: number
+  label?: string
 }
 
 export interface DeviceDefinition {
@@ -180,6 +210,8 @@ export interface PanelProject {
   devices: PlacedDevice[]
   circuits: Circuit[]
   connections: Connection[]
+  busAssemblies?: BusAssembly[]
+  combs?: RowComb[]
 }
 
 export type IssueLevel = 'error' | 'warning' | 'info'

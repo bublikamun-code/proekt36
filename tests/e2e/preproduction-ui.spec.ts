@@ -4,7 +4,7 @@ import { APPLICATION_REVISION } from '../../src/domain/projectSchema'
 import { gotoEditor, pickOption, pickOptionByKeyboard, unlockWorkspace } from './helpers'
 
 const project = (id: string, name: string, preset: string, cabinetId: string, railId: 'rail-12' | 'rail-18', updatedAt: string) => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id,
   name,
   preset,
@@ -24,11 +24,13 @@ const project = (id: string, name: string, preset: string, cabinetId: string, ra
   devices: [],
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 })
 
 const seedProjects = async (page: Page) => {
   await page.addInitScript(({ first, second }) => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([first, second]))
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([first, second]))
     localStorage.setItem('panel36.currentProjectId.v1', first.id)
   }, {
     first: project('project-alpha', 'Alpha щит', 'apartment', 'enmas-nx8-12-embedded', 'rail-12', '2026-09-24T10:00:00.000Z'),

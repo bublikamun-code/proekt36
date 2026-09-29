@@ -62,8 +62,12 @@ export const dragWithPointer = async (page: Page, from: Locator, to: Locator, on
 /** Loads a known project so a drag test can assert on exact positions. */
 export const seedProject = async (page: Page, devices: Array<{ id: string; row: number; slot: number }>) => {
   await page.addInitScript((seed) => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([{
-      schemaVersion: 2,
+    // The one-time orientation card eats the center column and shrinks the auto-fit board
+    // until a module is smaller than the tests' pixel tolerance, so a position lab starts
+    // from the settled editor.
+    localStorage.setItem('panel36.hints.v1', 'dismissed')
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([{
+      schemaVersion: 3,
       id: 'drag-lab',
       name: 'Стенд перетаскивания',
       preset: 'demo',
@@ -88,6 +92,8 @@ export const seedProject = async (page: Page, devices: Array<{ id: string; row: 
       })),
       circuits: [],
       connections: [],
+      busAssemblies: [],
+      combs: [],
     }]))
   }, devices)
 }

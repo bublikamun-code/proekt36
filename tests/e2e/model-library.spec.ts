@@ -104,13 +104,13 @@ test('an asset can live without a product and then bind to a catalogue entry', a
 
 test('a device whose product left the catalogue can be re-bound to a real product', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([{
-      schemaVersion: 2,
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([{
+      schemaVersion: 3,
       id: 'orphan-rebind', name: 'Замена товара', preset: 'demo',
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
       settings: { inputCurrent: 63, phase: 1, rows: 2, reserveModules: 8, enclosureWidth: 310, enclosureHeight: 350, enclosureDepth: 105, cabinetId: 'enmas-nx8-24-embedded', railId: 'rail-12' },
       devices: [{ instanceId: 'orphan-1', productId: 'no-such-product', row: 0, slot: 0, address: 'Q1', quantity: 1, phase: 1, note: '', marking: 'Q1', mount: 'din' }],
-      circuits: [], connections: [],
+      circuits: [], connections: [], busAssemblies: [], combs: [],
     }]))
   })
   await gotoEditor(page)

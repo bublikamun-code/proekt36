@@ -57,7 +57,7 @@ describe('project store persistence and history', () => {
     const storage = new MemoryStorage()
     const first = createProject('Первый')
     const second = createProject('Второй')
-    storage.set('panel36.projects.v2', [first, second])
+    storage.set('panel36.projects.v3', [first, second])
     storage.setRaw(CURRENT_PROJECT_KEY, second.id)
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
@@ -91,7 +91,7 @@ describe('project store persistence and history', () => {
   it('debounces writes and keeps a failed write visible instead of claiming saved', async () => {
     vi.useFakeTimers()
     const storage = new MemoryStorage()
-    storage.failOn = 'panel36.projects.v2'
+    storage.failOn = 'panel36.projects.v3'
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -99,11 +99,11 @@ describe('project store persistence and history', () => {
     await nextTick()
     expect(store.storageStatus).toBe('saving')
     await vi.advanceTimersByTimeAsync(449)
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
     await vi.advanceTimersByTimeAsync(1)
     expect(store.storageStatus).toBe('save-failed')
     expect(store.storageError).toContain('переполнено')
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
     store.$dispose()
   })
 
@@ -120,10 +120,10 @@ describe('project store persistence and history', () => {
     await nextTick()
     await vi.advanceTimersByTimeAsync(400)
     // Still inside the 450 ms window, so nothing has been written yet.
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
 
     lifecycle.dispatch('pagehide')
-    expect(JSON.parse(storage.raw('panel36.projects.v2')!)[0].settings.reserveModules).toBe(reserve + 3)
+    expect(JSON.parse(storage.raw('panel36.projects.v3')!)[0].settings.reserveModules).toBe(reserve + 3)
     expect(store.storageStatus).toBe('saved')
     store.$dispose()
   })
@@ -142,7 +142,7 @@ describe('busbar wiring on insert', () => {
 
   it('links only the inserted device and leaves earlier unlinked apparatus untouched', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -167,7 +167,7 @@ describe('busbar wiring on insert', () => {
       instanceId: `mcb-${slot}`, productId: 'ekf-mcb-1p-c6', row: 0, slot, address: `QF${slot + 1}`,
       quantity: 1, phase: 1, marking: '', note: '', mount: 'din' as const,
     }))
-    storage.set('panel36.projects.v2', [project])
+    storage.set('panel36.projects.v3', [project])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -196,7 +196,7 @@ describe('busbar wiring on insert', () => {
       instanceId: `mcb-${slot}`, productId: 'ekf-mcb-1p-c6', row: 0, slot, address: `QF${slot + 1}`,
       quantity: 1, phase: 1, marking: '', note: '', mount: 'din' as const,
     }))
-    storage.set('panel36.projects.v2', [project])
+    storage.set('panel36.projects.v3', [project])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -215,7 +215,7 @@ describe('busbar wiring on insert', () => {
 
   it('undoes the placement and its busbar link in a single step', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -231,7 +231,7 @@ describe('busbar wiring on insert', () => {
 
   it('does not wire a non-protection device to the busbar', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()

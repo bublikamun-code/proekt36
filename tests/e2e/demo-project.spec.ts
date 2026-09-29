@@ -17,7 +17,7 @@ test.describe('separate read-only demo project', () => {
     await expect(page.locator('input[type="file"]')).toHaveCount(0)
 
     await expect.poll(() => page.evaluate(() => sessionStorage.getItem('panel36.demo-session.v1'))).toBeNull()
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('panel36.projects.v2'))).toBeNull()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('panel36.projects.v3'))).toBeNull()
     await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).some((database) => database.name === 'panel36-models'))).toBe(false)
   })
 

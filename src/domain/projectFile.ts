@@ -64,20 +64,24 @@ export const createProjectFileEnvelope = (project: PanelProject, exportedAt = ne
   }
 }
 
+const expectedEnvelopeSchema = () => `panel36.project.v${PROJECT_SCHEMA_VERSION}`
+
 const validateEnvelope = (value: unknown): string[] => {
   const errors: string[] = []
   if (!isRecord(value)) return ['ожидается объект конверта']
   const schema = text(value.schema)
   const expectedSchema = `panel36.project.v${PROJECT_SCHEMA_VERSION}`
   const schemaVersion = Number(schema.match(/v(\d+)$/)?.[1] ?? Number.NaN)
-  if (schema !== expectedSchema && schema !== 'panel36.project.v1') {
+  // v1 and v2 envelopes stay readable: both are migrated on import instead of being rejected.
+  const legacySchema = schema === 'panel36.project.v1' || schema === 'panel36.project.v2'
+  if (schema !== expectedSchema && !legacySchema) {
     if (Number.isFinite(schemaVersion) && schemaVersion > PROJECT_SCHEMA_VERSION) errors.push(`схема файла версии ${schemaVersion} новее поддерживаемой версии ${PROJECT_SCHEMA_VERSION}`)
     else errors.push(`ожидается schema «${expectedSchema}»`)
   }
   if (!isRecord(value.application) || text(value.application.name) !== APPLICATION_NAME || !isKnownRevision(value.application.revision)) errors.push('отсутствует или неверна ревизия приложения')
   else if (isFutureRevision(value.application.revision, APPLICATION_REVISION)) errors.push(`приложение в файле новее установленного (${text(value.application.revision)} > ${APPLICATION_REVISION})`)
   if (isFutureRevision(value.applicationRevision, APPLICATION_REVISION)) errors.push(`applicationRevision новее установленного (${text(value.applicationRevision)} > ${APPLICATION_REVISION})`)
-  if (value.schemaRevision !== (schemaVersion === 1 ? 1 : PROJECT_SCHEMA_VERSION)) errors.push(`ожидается schemaRevision ${schemaVersion === 1 ? 1 : PROJECT_SCHEMA_VERSION}`)
+  if (value.schemaRevision !== (legacySchema ? schemaVersion : PROJECT_SCHEMA_VERSION)) errors.push(`ожидается schemaRevision ${legacySchema ? schemaVersion : PROJECT_SCHEMA_VERSION}`)
   // A file written against an older catalogue is still readable; a newer or unreadable
   // revision is not. Comparing for plain equality would retire every export on each release.
   if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
@@ -142,17 +146,19 @@ export const readProjectFile = async (file: File): Promise<PanelProject> => {
   if (!isRecord(parsed)) throw new Error('В файле нет корректного проекта')
   const isEnvelope = 'project' in parsed
   if (isEnvelope) {
-    // v1 envelopes predate the revision manifest and remain readable, but are
+    // v1 and v2 envelopes predate the current project shape and remain readable, but are
     // migrated and checked before entering the application.
     const strictEnvelope = 'application' in parsed || 'catalogSnapshot' in parsed || 'catalogManifest' in parsed || 'cadModelManifest' in parsed
+    const envelopeSchema = text(parsed.schema)
+    const legacyEnvelope = envelopeSchema === 'panel36.project.v1' || envelopeSchema === 'panel36.project.v2'
     if (strictEnvelope) {
       const errors = validateEnvelope(parsed)
       if (errors.length) throw new Error(`Некорректный файл проекта: ${errors.join('; ')}`)
-      return text(parsed.schema) === 'panel36.project.v1'
+      return legacyEnvelope
         ? assertValidProjectSchema(migrateProject(parsed.project as Partial<PanelProject>))
         : assertValidProjectSchema(parsed.project)
     }
-    if (text(parsed.schema) === `panel36.project.v${PROJECT_SCHEMA_VERSION}` || text(parsed.schema) === 'panel36.project.v1') {
+    if (envelopeSchema === expectedEnvelopeSchema() || legacyEnvelope) {
       return assertValidProjectSchema(migrateProject(parsed.project as Partial<PanelProject>))
     }
     throw new Error('Некорректный файл проекта: неизвестный формат конверта')

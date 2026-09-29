@@ -114,20 +114,20 @@ test('2D DIN slots and the position pad use one-based labels', async ({ page }) 
   await expect(padSlots.nth(11)).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 12')
 })
 
-test('City9 2P sample renders the bundled CAD preview in the 2D editor', async ({ page }) => {
+test('a CHINT-bound ENMAS breaker renders the bundled CAD preview in the 2D editor', async ({ page }) => {
   await gotoEditor(page)
   await page.getByRole('button', { name: 'Показать боковые панели' }).click()
   const search = page.getByLabel('Поиск по каталогу')
-  await search.fill('City9 MCB 2P')
-  const item = page.locator('.catalog-item').filter({ hasText: 'City9 MCB 2P C16' })
+  await search.fill('NB1-63H 1P 16A C')
+  const item = page.locator('.catalog-item').filter({ hasText: 'NB1-63H 1P 16A C' })
   await expect(item).toHaveCount(1)
   await expect(item.locator('.cad-badge')).toHaveText('CAD')
-  await expect(item.locator('[data-model-preview="/models/city9-mcb-2p.glb"]')).toHaveCount(1)
+  await expect(item.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveCount(1)
   await item.click()
 
-  const placed = page.locator('.placed-device').filter({ hasText: 'CITY9-MCB' })
+  const placed = page.locator('.placed-device').filter({ hasText: 'NB1-63H' })
   await expect(placed).toHaveCount(1)
-  await expect(placed.locator('[data-model-preview="/models/city9-mcb-2p.glb"]')).toHaveAttribute('data-model-preview', '/models/city9-mcb-2p.glb')
+  await expect(placed.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveAttribute('data-model-preview', '/models/chint-nb1-63-1p.glb')
 })
 
 test('a project referencing a product outside the catalogue still renders', async ({ page }) => {
@@ -135,13 +135,13 @@ test('a project referencing a product outside the catalogue still renders', asyn
   // and connections, but not catalogue membership, so an unknown productId can reach
   // the editor. The board must degrade to a labelled placeholder, not unmount.
   await page.addInitScript(() => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([{
-      schemaVersion: 2,
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([{
+      schemaVersion: 3,
       id: 'orphan-product', name: 'Ссылка на отсутствующий товар', preset: 'demo',
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
       settings: { inputCurrent: 63, phase: 1, rows: 2, reserveModules: 8, enclosureWidth: 310, enclosureHeight: 350, enclosureDepth: 105, cabinetId: 'enmas-nx8-24-embedded', railId: 'rail-12' },
       devices: [{ instanceId: 'orphan-1', productId: 'no-such-product', row: 0, slot: 0, address: 'Q1', quantity: 1, phase: 1, note: '', marking: 'Q1', mount: 'din' }],
-      circuits: [], connections: [],
+      circuits: [], connections: [], busAssemblies: [], combs: [],
     }]))
   })
   await gotoEditor(page)

@@ -3,10 +3,10 @@ import type { PanelProject } from './types'
 import { APP_VERSION } from '../version'
 
 /** The only project schema understood by this application. */
-export const PROJECT_SCHEMA_VERSION = 2
+export const PROJECT_SCHEMA_VERSION = 3
 export const APPLICATION_REVISION = APP_VERSION
 export const CATALOG_REVISION = DATA_CATALOG_REVISION
-export const VALIDATION_REVISION = 2
+export const VALIDATION_REVISION = 3
 
 /**
  * Orders two revision strings and returns a negative number when `left` is older. Both
@@ -47,6 +47,8 @@ export const PROJECT_LIMITS = {
   devices: 500,
   circuits: 500,
   connections: 2000,
+  busAssemblies: 12,
+  combs: 60,
   quantity: 99,
   current: 10000,
   power: 10000000,
@@ -54,6 +56,9 @@ export const PROJECT_LIMITS = {
   slot: 999,
   rows: 30,
 } as const
+
+/** Schema versions this build can still read, oldest first. */
+export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, PROJECT_SCHEMA_VERSION] as const
 
 export interface ProjectSchemaValidationResult {
   valid: boolean
@@ -172,6 +177,32 @@ const validateCircuit = (errors: string[], value: unknown, path: string) => {
   if (value.phase !== 1 && value.phase !== 2 && value.phase !== 3) add(errors, `${path}.phase`, 'ожидается 1, 2 или 3')
 }
 
+const validateTerminalRef = (errors: string[], value: unknown, path: string) => {
+  if (value === undefined) return
+  if (!isRecord(value)) { add(errors, path, 'ожидается объект клеммы'); return }
+  string(errors, value.deviceId, `${path}.deviceId`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
+  finiteNumber(errors, value.pole, `${path}.pole`, { min: 0, max: 12, integer: true })
+  enumValue(errors, value.side, `${path}.side`, ['top', 'bottom'])
+}
+
+const validateBusAssembly = (errors: string[], value: unknown, path: string) => {
+  if (!isRecord(value)) { add(errors, path, 'ожидается объект шины'); return }
+  string(errors, value.id, `${path}.id`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
+  enumValue(errors, value.kind, `${path}.kind`, ['L', 'N', 'PE'])
+  enumValue(errors, value.placement, `${path}.placement`, ['top', 'bottom'])
+  string(errors, value.label, `${path}.label`, { max: 64 })
+}
+
+const validateRowComb = (errors: string[], value: unknown, path: string) => {
+  if (!isRecord(value)) { add(errors, path, 'ожидается объект гребёнки'); return }
+  string(errors, value.id, `${path}.id`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
+  finiteNumber(errors, value.row, `${path}.row`, { min: 0, max: PROJECT_LIMITS.row, integer: true })
+  finiteNumber(errors, value.poles, `${path}.poles`, { min: 1, max: 4, integer: true })
+  finiteNumber(errors, value.fromSlot, `${path}.fromSlot`, { min: 0, max: PROJECT_LIMITS.slot, integer: true })
+  finiteNumber(errors, value.toSlot, `${path}.toSlot`, { min: 0, max: PROJECT_LIMITS.slot, integer: true })
+  string(errors, value.label, `${path}.label`, { max: 64 })
+}
+
 const validateConnection = (errors: string[], value: unknown, path: string) => {
   if (!isRecord(value)) { add(errors, path, 'ожидается объект подключения'); return }
   string(errors, value.id, `${path}.id`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
@@ -181,30 +212,49 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: true })
   finiteNumber(errors, value.thickness, `${path}.thickness`, { min: 0.1, max: 100 })
   string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text })
-  enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar'], false)
+  enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar', 'jumper'], false)
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })
+  if (value.busId !== undefined) string(errors, value.busId, `${path}.busId`, { max: PROJECT_LIMITS.id })
+  validateTerminalRef(errors, value.fromTerminal, `${path}.fromTerminal`)
+  validateTerminalRef(errors, value.toTerminal, `${path}.toTerminal`)
+  if (value.phase !== undefined && value.phase !== 1 && value.phase !== 2 && value.phase !== 3) add(errors, `${path}.phase`, 'ожидается 1, 2 или 3')
+  // A jumper is a wire between two clamps. Without both ends it is not a connection, and a
+  // half-anchored one would silently render as a line that stops in mid-air.
+  if (value.kind === 'jumper') {
+    if (!isRecord(value.fromTerminal)) add(errors, `${path}.fromTerminal`, 'для перемычки укажите клемму источника')
+    if (!isRecord(value.toTerminal)) add(errors, `${path}.toTerminal`, 'для перемычки укажите клемму приёмника')
+  }
 }
 
 const validateReferences = (errors: string[], project: RecordValue) => {
   const devices = Array.isArray(project.devices) ? project.devices.filter(isRecord) : []
   const circuits = Array.isArray(project.circuits) ? project.circuits.filter(isRecord) : []
   const connections = Array.isArray(project.connections) ? project.connections.filter(isRecord) : []
+  const buses = Array.isArray(project.busAssemblies) ? project.busAssemblies.filter(isRecord) : []
   const deviceIds = new Set(devices.map((item) => typeof item.instanceId === 'string' ? item.instanceId : ''))
   const circuitIds = new Set(circuits.map((item) => typeof item.id === 'string' ? item.id : ''))
+  const busIds = new Set(buses.map((item) => typeof item.id === 'string' ? item.id : ''))
   for (const [index, circuit] of circuits.entries()) {
     if (typeof circuit.protectionDeviceId === 'string' && !deviceIds.has(circuit.protectionDeviceId)) add(errors, `circuits[${index}].protectionDeviceId`, `ссылается на несуществующее устройство «${circuit.protectionDeviceId}»`)
   }
   for (const [index, connection] of connections.entries()) {
     if (typeof connection.toDeviceId === 'string' && !deviceIds.has(connection.toDeviceId)) add(errors, `connections[${index}].toDeviceId`, `ссылается на несуществующее устройство «${connection.toDeviceId}»`)
+    if (typeof connection.busId === 'string' && !busIds.has(connection.busId)) add(errors, `connections[${index}].busId`, `ссылается на несуществующую шину «${connection.busId}»`)
+    for (const key of ['fromTerminal', 'toTerminal']) {
+      const terminal = connection[key]
+      if (!isRecord(terminal)) continue
+      const deviceId = terminal.deviceId
+      if (typeof deviceId === 'string' && !deviceIds.has(deviceId)) add(errors, `connections[${index}].${key}.deviceId`, `ссылается на несуществующее устройство «${deviceId}»`)
+    }
     if (connection.kind === 'busbar') {
       if (typeof connection.fromDeviceId !== 'string' || !deviceIds.has(connection.fromDeviceId)) add(errors, `connections[${index}].fromDeviceId`, 'для подключения к шине укажите существующее устройство-источник')
-    } else if (typeof connection.circuitId === 'string' && !circuitIds.has(connection.circuitId)) {
+    } else if (connection.kind !== 'jumper' && typeof connection.circuitId === 'string' && !circuitIds.has(connection.circuitId)) {
       add(errors, `connections[${index}].circuitId`, `ссылается на несуществующую цепь «${connection.circuitId}»`)
     }
   }
 }
 
-/** Validates a v1 or v2 payload without silently changing it. */
+/** Validates a v1, v2 or v3 payload without silently changing it. */
 export const validateProjectSchema = (value: unknown): ProjectSchemaValidationResult => {
   const errors: string[] = []
   if (!isRecord(value)) {
@@ -212,9 +262,9 @@ export const validateProjectSchema = (value: unknown): ProjectSchemaValidationRe
     return { valid: false, ok: false, errors, issues: errors }
   }
   const version = value.schemaVersion
-  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) add(errors, 'schemaVersion', 'ожидается целая версия схемы 1 или 2')
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) add(errors, 'schemaVersion', `ожидается целая версия схемы из ${SUPPORTED_SCHEMA_VERSIONS.join(', ')}`)
   else if (version > PROJECT_SCHEMA_VERSION) add(errors, 'schemaVersion', `схема версии ${version} новее поддерживаемой версии ${PROJECT_SCHEMA_VERSION}; обновите приложение`)
-  else if (![1, PROJECT_SCHEMA_VERSION].includes(version)) add(errors, 'schemaVersion', `версия схемы ${version} не поддерживается`)
+  else if (!SUPPORTED_SCHEMA_VERSIONS.includes(version as 1 | 2 | 3)) add(errors, 'schemaVersion', `версия схемы ${version} не поддерживается`)
   if (version === PROJECT_SCHEMA_VERSION) {
     string(errors, value.id, 'id', { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
     string(errors, value.name, 'name', { required: true, max: PROJECT_LIMITS.name, nonEmpty: true })
@@ -236,7 +286,17 @@ export const validateProjectSchema = (value: unknown): ProjectSchemaValidationRe
       connections.forEach((item, index) => validateConnection(errors, item, `connections[${index}]`))
       duplicate(errors, connections.filter(isRecord).map((item) => typeof item.id === 'string' ? item.id : ''), 'connections.id')
     }
-    if (!errors.some((item) => item.startsWith('devices') || item.startsWith('circuits') || item.startsWith('connections'))) validateReferences(errors, value)
+    if (array(errors, value.busAssemblies, 'busAssemblies', PROJECT_LIMITS.busAssemblies)) {
+      const buses = value.busAssemblies as unknown[]
+      buses.forEach((item, index) => validateBusAssembly(errors, item, `busAssemblies[${index}]`))
+      duplicate(errors, buses.filter(isRecord).map((item) => typeof item.id === 'string' ? item.id : ''), 'busAssemblies.id')
+    }
+    if (array(errors, value.combs, 'combs', PROJECT_LIMITS.combs)) {
+      const combs = value.combs as unknown[]
+      combs.forEach((item, index) => validateRowComb(errors, item, `combs[${index}]`))
+      duplicate(errors, combs.filter(isRecord).map((item) => typeof item.id === 'string' ? item.id : ''), 'combs.id')
+    }
+    if (!errors.some((item) => item.startsWith('devices') || item.startsWith('circuits') || item.startsWith('connections') || item.startsWith('busAssemblies') || item.startsWith('combs'))) validateReferences(errors, value)
   } else if (version === 1) {
     if (!Array.isArray(value.devices)) add(errors, 'devices', 'ожидается массив устройств')
     if (value.circuits !== undefined && !Array.isArray(value.circuits)) add(errors, 'circuits', 'ожидается массив цепей')

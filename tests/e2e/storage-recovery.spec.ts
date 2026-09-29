@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { unlockWorkspace } from './helpers'
 
-const PROJECTS_KEY = 'panel36.projects.v2'
+const PROJECTS_KEY = 'panel36.projects.v3'
 
 test('a damaged record in the current storage key is reported, not silently emptied', async ({ page }) => {
   await unlockWorkspace(page)

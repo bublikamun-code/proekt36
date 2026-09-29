@@ -18,7 +18,7 @@ const device = (productId: string, row: number, slot: number, quantity = 1) => (
 })
 
 const project = (name: string, settings: Record<string, unknown>, devices: ReturnType<typeof device>[]) => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: `geometry-${name}`,
   name,
   preset: 'test',
@@ -28,6 +28,8 @@ const project = (name: string, settings: Record<string, unknown>, devices: Retur
   devices,
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 })
 
 const openEditorWith = async (page: Page, value: unknown) => {

@@ -1,7 +1,7 @@
 import type { PanelProject } from '../domain/types'
 
 export const demoProject: PanelProject = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'demo-panel-36-project',
   name: 'Квартира · распределительный щит',
   preset: 'demo',
@@ -30,6 +30,8 @@ export const demoProject: PanelProject = {
     { instanceId: 'demo-xt02', productId: 'enmas-template-kbr', row: 1, slot: 1, address: 'XT02', marking: 'XT02', quantity: 1, phase: 1, note: 'Клемма КБР', mount: 'din' },
     { instanceId: 'demo-xt03', productId: 'enmas-template-ksv', row: 1, slot: 2, address: 'XT03', marking: 'XT03', quantity: 1, phase: 1, note: 'Клемма КСВ', mount: 'din' },
   ],
+  busAssemblies: [],
+  combs: [],
   circuits: [
     { id: 'demo-circuit-living', name: 'Розетки гостиной', loadName: 'Розетки гостиной', current: 16, power: 1500, phase: 1, protectionDeviceId: 'demo-qfi01', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
     { id: 'demo-circuit-kitchen', name: 'Кухня', loadName: 'Кухня', current: 16, power: 2200, phase: 1, protectionDeviceId: 'demo-qfi02', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
