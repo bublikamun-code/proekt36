@@ -8,7 +8,13 @@ import type { Category, RailDefinition } from '../domain/types'
  * browser and the local proxy, then reduces the answer back to something the app can act on.
  */
 
-const PROXY_BASE = 'http://127.0.0.1:8787'
+/**
+ * The proxy, the browser client and the production CSP all read VITE_AI_PROXY_PORT. It carries a
+ * `VITE_` prefix on purpose: that is what the build exposes to the client, and using it here keeps
+ * the three from drifting apart. It stays unset in almost every setup, in which case the default
+ * below is what every part uses.
+ */
+const PROXY_BASE = `http://127.0.0.1:${import.meta.env.VITE_AI_PROXY_PORT || 8787}`
 const HEALTH_TIMEOUT_MS = 2500
 const CHAT_TIMEOUT_MS = 130_000
 

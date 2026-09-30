@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { builtinCatalog } from '../src/data/catalog'
 import { compactRow, evaluateCabinetMigration, getFootprintModules } from '../src/domain/layout'
 import { createDevice, createProject } from '../src/domain/project'
-import type { DeviceDefinition, PlacedDevice } from '../src/domain/types'
+import type { PlacedDevice } from '../src/domain/types'
 import { useProjectStore } from '../src/stores/project'
 
 class MemoryStorage {

@@ -2,12 +2,15 @@
 import { computed } from 'vue'
 import type { DeviceDefinition } from '../../../domain/types'
 import type { DeviceFaceMetrics } from './metrics'
+import { closedPolylinePath } from './path'
 
 const props = defineProps<{ product: DeviceDefinition; metrics: DeviceFaceMetrics }>()
 
 const columnWidth = computed(() => props.metrics.widthMm / Math.max(1, props.metrics.columns || props.metrics.moduleWidth))
 const seams = computed(() => Array.from({ length: Math.max(0, props.metrics.columns - 1) }, (_, index) => columnWidth.value * (index + 1)))
-const outlinePath = computed(() => `${props.metrics.outline.map((point) => `${point.x} ${point.y}`).join(' L ')} Z`)
+// An SVG path has to start with a moveto command. Joining the points with " L " produced
+// "0.7 2.8 L ..." , which browsers reject outright, so the body outline never drew at all.
+const outlinePath = computed(() => closedPolylinePath(props.metrics.outline))
 const panel = computed(() => props.metrics.panel)
 const panelTopLight = computed(() => `M ${panel.value.x + 0.8} ${panel.value.y + 0.5} H ${panel.value.x + panel.value.width - 0.8}`)
 const panelBottomShade = computed(() => `M ${panel.value.x + 0.8} ${panel.value.y + panel.value.height - 0.4} H ${panel.value.x + panel.value.width - 0.8}`)

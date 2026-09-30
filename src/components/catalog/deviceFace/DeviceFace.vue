@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { DeviceDefinition } from '../../../domain/types'
 import { faceLabels, type DeviceFaceMetrics } from './metrics'
+import { closedPolylinePath, polylinePath } from './path'
 
 const props = defineProps<{ product: DeviceDefinition; metrics: DeviceFaceMetrics }>()
 
@@ -44,8 +45,9 @@ const nguSockets = computed(() => [0.34, 0.66].flatMap((ratioY) => [0.32, 0.68].
   cy: props.metrics.heightMm * ratioY,
   r: Math.min(2, props.metrics.body.width * 0.08),
 }))))
-const points = (values: { x: number; y: number }[]) => values.map((point) => `${point.x} ${point.y}`).join(' L ')
-const leverPath = (toggle: typeof props.metrics.toggles[number]) => `${points(toggle.points)} Z`
+/** An SVG path must open with a moveto command; without it the browser drops the path entirely. */
+const points = polylinePath
+const leverPath = (toggle: typeof props.metrics.toggles[number]) => closedPolylinePath(toggle.points)
 </script>
 
 <template>

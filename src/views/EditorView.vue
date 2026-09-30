@@ -65,18 +65,20 @@ const openProject = (id: string) => {
   if (!projects.value.some((project) => project.id === id)) return
   store.switchProject(id); projectOpen.value = false; void replaceEditorRoute(id)
 }
+/**
+ * The parameterless `/app/editor` link is canonicalised in the router guard, so by the time this
+ * view exists the route already carries a project id. What is left to handle is an id that points
+ * at a project which is no longer there.
+ */
 const syncProjectFromRoute = async () => {
   const routeProjectId = route.params.projectId
   const projectId = Array.isArray(routeProjectId) ? routeProjectId[0] : routeProjectId
-  if (typeof projectId === 'string') {
-    if (projects.value.some((project) => project.id === projectId)) {
-      if (currentProjectId.value !== projectId) store.switchProject(projectId)
-      return
-    }
-    store.notify('Проект не найден', 'error'); await router.replace({ name: 'projects' }); return
+  if (typeof projectId !== 'string') return
+  if (projects.value.some((project) => project.id === projectId)) {
+    if (currentProjectId.value !== projectId) store.switchProject(projectId)
+    return
   }
-  if (route.name !== 'current-editor') return
-  await replaceEditorRoute(currentProjectId.value)
+  store.notify('Проект не найден', 'error'); await router.replace({ name: 'projects' })
 }
 watch(() => route.params.projectId, () => { void syncProjectFromRoute() }, { immediate: true })
 

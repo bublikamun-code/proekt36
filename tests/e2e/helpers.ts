@@ -17,8 +17,14 @@ export const gotoEditor = async (page: Page) => {
   await page.goto('/app/editor')
 }
 
+/**
+ * A page or any element scope: both expose the role and label queries these helpers drive, and
+ * specs legitimately start from either.
+ */
+type QueryScope = Page | Locator
+
 /** Opens a styled AppSelect trigger and picks an option the way a user would. */
-export const pickOption = async (scope: Locator, label: string | RegExp, optionLabel: string) => {
+export const pickOption = async (scope: QueryScope, label: string | RegExp, optionLabel: string) => {
   const trigger = scope.getByLabel(label)
   await trigger.click()
   const listbox = scope.getByRole('listbox').first()
@@ -26,7 +32,7 @@ export const pickOption = async (scope: Locator, label: string | RegExp, optionL
 }
 
 /** Opens a styled AppSelect trigger and chooses an option with the keyboard. */
-export const pickOptionByKeyboard = async (scope: Locator, label: string | RegExp, optionLabel: string) => {
+export const pickOptionByKeyboard = async (scope: QueryScope, label: string | RegExp, optionLabel: string) => {
   const trigger = scope.getByLabel(label)
   await trigger.focus()
   await trigger.press('Enter')

@@ -86,8 +86,12 @@ const validateEnvelope = (value: unknown): string[] => {
   else if (isFutureRevision(value.application.revision, APPLICATION_REVISION)) errors.push(`приложение в файле новее установленного (${text(value.application.revision)} > ${APPLICATION_REVISION})`)
   if (isFutureRevision(value.applicationRevision, APPLICATION_REVISION)) errors.push(`applicationRevision новее установленного (${text(value.applicationRevision)} > ${APPLICATION_REVISION})`)
   if (value.schemaRevision !== (schemaVersion === 1 ? 1 : PROJECT_SCHEMA_VERSION)) errors.push(`ожидается schemaRevision ${schemaVersion === 1 ? 1 : PROJECT_SCHEMA_VERSION}`)
-  // A file written against an older catalogue is still readable; a newer or unreadable
-  // revision is not. Comparing for plain equality would retire every export on each release.
+  // A file whose catalogue revision differs from the installed one is refused outright, even when
+  // it is older. The envelope carries a `catalogSnapshot`, but import reads only `project` and
+  // resolves every product against the catalogue this build ships: a snapshot taken from another
+  // revision would be discarded anyway, and positions could then point at products that no longer
+  // exist. Refusing keeps the file intact for a build that can still read it. See also
+  // `projectBackup.ts`, which compares the same revision only for the "not from the future" side.
   if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
   else if (!isKnownRevision(value.catalogRevision) || text(value.catalogRevision) !== DOMAIN_CATALOG_REVISION) errors.push('неверна ревизия каталога')
   if (isFutureRevision(value.validationRevision, VALIDATION_REVISION)) errors.push(`validationRevision новее установленного (${String(value.validationRevision)} > ${VALIDATION_REVISION})`)

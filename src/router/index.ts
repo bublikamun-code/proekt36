@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { safeInternalPath } from '../domain/auth'
 import { useAuthStore } from '../stores/auth'
+import { useProjectStore } from '../stores/project'
 import PublicLayout from '../layouts/PublicLayout.vue'
 import { applyPageMetadata, pageMetadata } from './metadata'
 
@@ -54,6 +55,15 @@ router.beforeEach((to) => {
 
   if ((to.name === 'login' || to.name === 'register') && auth.isUnlocked) {
     return safeInternalPath(to.query.redirect)
+  }
+
+  // Canonicalise the parameterless editor link before the view exists. The editor component is
+  // loaded through a dynamic import, so doing this inside it left a window where the address bar
+  // read /app/editor and then changed under the user — a refresh appeared to move them.
+  if (to.name === 'current-editor') {
+    const projectId = useProjectStore().currentProjectId
+    if (projectId) return { name: 'editor', params: { projectId } }
+    return { name: 'projects' }
   }
 
   return true

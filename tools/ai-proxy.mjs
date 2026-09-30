@@ -17,6 +17,12 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:http'
 
 const HOST = '127.0.0.1'
+/**
+ * The port is named for the build as well: the browser half and the production CSP both read
+ * VITE_AI_PROXY_PORT, so moving the proxy moves all three at once. A variable only the proxy knew
+ * about used to break the assistant silently — the request left for the old port and the panel
+ * reported "прокси не отвечает".
+ */
 const DEFAULT_PORT = 8787
 const MAX_BODY_BYTES = 256 * 1024
 const MAX_TOKENS = 2000
@@ -205,7 +211,7 @@ const main = async () => {
     sendJson(response, 404, { error: 'not_found' })
   })
 
-  const port = Number(process.env.AI_PORT) || DEFAULT_PORT
+  const port = Number(process.env.VITE_AI_PROXY_PORT) || DEFAULT_PORT
   server.listen(port, HOST, () => {
     console.log(`[ai] Прокси слушает http://${HOST}:${port} (провайдер: ${config.providerId}, модель: ${config.model.id})`)
     if (!config.apiKey) console.log('[ai] ВНИМАНИЕ: ключ не найден. Скопируйте tools/ai-proxy.env.example в tools/ai-proxy.env и заполните AI_API_KEY.')

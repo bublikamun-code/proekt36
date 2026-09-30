@@ -13,6 +13,14 @@ import { defineConfig, type Plugin } from 'vite'
  * `frame-ancestors` and `form-action` are ignored inside a `<meta>` tag — they belong in response
  * headers, which this project does not control. Section 11 of the runbook lists them.
  */
+/**
+ * The local AI proxy address. The browser half reads the same variable through
+ * `import.meta.env.VITE_AI_PROXY_PORT`, so one setting moves the proxy, the client and this policy
+ * together. `localhost` is listed as well because the proxy accepts that origin: refusing it here
+ * would fail a request the proxy was willing to serve.
+ */
+const AI_PROXY_ORIGIN = `http://127.0.0.1:${process.env.VITE_AI_PROXY_PORT || 8787}`
+
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -22,8 +30,8 @@ const CONTENT_SECURITY_POLICY = [
   "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  // 127.0.0.1:8787 is the local AI proxy; blob: and data: carry glTF textures.
-  "connect-src 'self' http://127.0.0.1:8787 data: blob:",
+  // The local AI proxy; blob: and data: carry glTF textures.
+  `connect-src 'self' ${AI_PROXY_ORIGIN} http://localhost:${process.env.VITE_AI_PROXY_PORT || 8787} data: blob:`,
 ].join('; ')
 
 const contentSecurityPolicy = (): Plugin => ({

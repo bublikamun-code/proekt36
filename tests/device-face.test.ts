@@ -11,6 +11,7 @@ import {
   getDeviceFaceMetrics,
 } from '../src/components/catalog/deviceFace/metrics'
 import type { DeviceDefinition } from '../src/domain/types'
+import { closedPolylinePath, polylinePath } from '../src/components/catalog/deviceFace/path'
 
 const definitions = new Map(allCatalog.map((product) => [product.id, product]))
 const product = (id: string): DeviceDefinition => {
@@ -210,5 +211,46 @@ describe('2.5D face relief', () => {
     const families = new Set(allCatalog.map(faceShellFamily))
     expect(families.size).toBeGreaterThan(1)
     expect(families.size).toBeLessThanOrEqual(7)
+  })
+})
+
+/**
+ * A path that does not open with a moveto command is a parse error, and the browser drops it
+ * without drawing anything: the chassis outline, the lever and its grips simply vanish while the
+ * markup still looks complete. Nothing else in the suite could see that, because the markup was
+ * correct and only the value of `d` was not.
+ */
+describe('drawn device face paths', () => {
+  const startsWithMoveto = (path: string) => /^[Mm]/.test(path)
+
+  it('opens every polyline with a moveto command', () => {
+    expect(polylinePath([{ x: 1, y: 2 }, { x: 3, y: 4 }])).toBe('M 1 2 L 3 4')
+    expect(closedPolylinePath([{ x: 1, y: 2 }, { x: 3, y: 4 }])).toBe('M 1 2 L 3 4 Z')
+  })
+
+  it('returns an empty path rather than a bare moveto for no points', () => {
+    expect(polylinePath([])).toBe('')
+    expect(closedPolylinePath([])).toBe('')
+  })
+
+  it('produces a drawable path for the outline and levers of every catalog device', () => {
+    let checked = 0
+    for (const definition of allCatalog) {
+      const metrics = getDeviceFaceMetrics(definition)
+      const paths = [
+        closedPolylinePath(metrics.outline),
+        ...metrics.toggles.flatMap((toggle) => [
+          closedPolylinePath(toggle.points),
+          ...toggle.grips.map((grip) => polylinePath(grip)),
+          polylinePath(toggle.shine),
+        ]),
+      ]
+      for (const path of paths) {
+        expect(path, `устройство ${definition.id}`).not.toBe('')
+        expect(startsWithMoveto(path), `устройство ${definition.id}: ${path}`).toBe(true)
+        checked += 1
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
   })
 })

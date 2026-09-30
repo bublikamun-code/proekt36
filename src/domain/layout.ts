@@ -55,7 +55,7 @@ export const getEnclosureMinimum = (project: PanelProject, definitions: Map<stri
   // Width follows the widest row, not the total module count: a four-row cabinet
   // never needs to be as wide as everything it holds summed together.
   const widestRow = project.devices.reduce((max, item) => Math.max(max, item.slot + getFootprintModules(item, definitions)), 0)
-  const clearance = layout.legacy ? 30 : MODULE_SIDE_CLEARANCE_MM
+  const clearance = MODULE_SIDE_CLEARANCE_MM
   const width = Math.ceil(Math.max(layout.cabinet?.width ?? 0, widestRow * layout.modulePitchMm + clearance))
   const height = Math.max(layout.cabinet?.height ?? 250, project.settings.rows * 45 + 180)
   return { width, height }

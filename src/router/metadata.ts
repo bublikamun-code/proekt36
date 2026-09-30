@@ -102,7 +102,8 @@ export const applyPageMetadata = (metadata: PageMetadata) => {
   setMeta('meta[name="robots"]', 'name', 'robots', metadata.robots)
   setMeta('meta[property="og:title"]', 'property', 'og:title', metadata.title)
   setMeta('meta[property="og:description"]', 'property', 'og:description', metadata.description)
-  setMeta('meta[property="og:type"]', 'property', 'og:type', metadata.public ? 'website' : 'website')
+  // Every page in this app is a website page; nothing here is an article or a video.
+  setMeta('meta[property="og:type"]', 'property', 'og:type', 'website')
   setMeta('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary')
   setMeta('meta[name="twitter:title"]', 'name', 'twitter:title', metadata.title)
   setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', metadata.description)

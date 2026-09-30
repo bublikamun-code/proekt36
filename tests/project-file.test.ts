@@ -41,6 +41,29 @@ describe('project file import', () => {
     expect(envelope.cad.binaryIncluded).toBe(false)
   })
 
+  it('reads back a full export envelope', async () => {
+    const source = project()
+    const imported = await readProjectFile(jsonFile(createProjectFileEnvelope(source, '2026-09-24T12:00:00.000Z')))
+
+    expect(imported.id).toBe(source.id)
+    expect(imported.schemaVersion).toBe(source.schemaVersion)
+  })
+
+  /**
+   * Import resolves products against the catalogue of the running build and throws the envelope's
+   * own snapshot away, so an export from another catalogue revision would come back with positions
+   * pointing at products that no longer exist. The refusal is the safe half of that trade; it is
+   * pinned here so a future reader does not "fix" it into silent degradation.
+   */
+  it('refuses an export written against another catalogue revision', async () => {
+    const envelope = createProjectFileEnvelope(project(), '2026-09-24T12:00:00.000Z')
+
+    await expect(readProjectFile(jsonFile({ ...envelope, catalogRevision: '0' })))
+      .rejects.toThrow(/ревизия каталога/)
+    await expect(readProjectFile(jsonFile({ ...envelope, catalogRevision: '2999-01-01.1' })))
+      .rejects.toThrow(/новее установленного/)
+  })
+
   it('reports malformed JSON', async () => {
     await expect(readProjectFile(new File(['{broken'], 'broken.json'))).rejects.toThrow('Не удалось прочитать JSON проекта')
   })

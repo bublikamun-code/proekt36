@@ -114,41 +114,45 @@ describe('клиент прокси', () => {
       calls.push({ url, body: JSON.parse(String(init.body)) })
       return jsonResponse(200, { text: 'Ответ' })
     }))
-    const context = { revision: 'panel36.assistant-context.v1', panel: { rows: 4 } }
+    // The proxy takes the summary as the already formatted string `formatAssistantContext` produced,
+    // not as an object: an object here reached the proxy and was dropped without a word.
+    const summary = { revision: 'panel36.assistant-context.v1', panel: { rows: 4 } }
+    const context = JSON.stringify(summary)
     await expect(askAssistant({ system: 'система', context, question: 'вопрос' })).resolves.toBe('Ответ')
     expect(calls[0]?.url).toBe('http://127.0.0.1:8787/chat')
     expect(calls[0]?.body).toEqual({ system: 'система', context, question: 'вопрос' })
+    expect(JSON.parse(context)).toEqual(summary)
   })
 
   it('чат: ключ не задан — сообщение прокси доходит до пользователя', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(503, { error: 'no_api_key', message: 'Прокси запущен, но ключ не задан.' })))
-    await expect(askAssistant({ system: 's', context: {}, question: 'q' })).rejects.toThrow('ключ не задан')
+    await expect(askAssistant({ system: 's', context: '{}', question: 'q' })).rejects.toThrow('ключ не задан')
   })
 
   it('чат: прокси не запущен — подсказка с командой запуска', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { error: 'not_found' })))
-    await expect(askAssistant({ system: 's', context: {}, question: 'q' })).rejects.toThrow('npm run ai')
+    await expect(askAssistant({ system: 's', context: '{}', question: 'q' })).rejects.toThrow('npm run ai')
   })
 
   it('чат: чужой origin — объяснение без утечки деталей', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(403, { error: 'origin_not_allowed' })))
-    await expect(askAssistant({ system: 's', context: {}, question: 'q' })).rejects.toThrow('127.0.0.1')
+    await expect(askAssistant({ system: 's', context: '{}', question: 'q' })).rejects.toThrow('127.0.0.1')
   })
 
   it('чат: оборванное соединение читается как недоступный прокси', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
-    await expect(askAssistant({ system: 's', context: {}, question: 'q' })).rejects.toThrow('Прокси недоступен')
+    await expect(askAssistant({ system: 's', context: '{}', question: 'q' })).rejects.toThrow('Прокси недоступен')
   })
 
   it('чат: пустой ответ провайдера не показывается как пустая реплика', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { text: '   ' })))
-    await expect(askAssistant({ system: 's', context: {}, question: 'q' })).rejects.toThrow('пустой ответ')
+    await expect(askAssistant({ system: 's', context: '{}', question: 'q' })).rejects.toThrow('пустой ответ')
   })
 
   it('чат: отмена запроса пользователем не превращается в «прокси недоступен»', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('aborted', 'AbortError') }))
     const controller = new AbortController()
-    const pending = askAssistant({ system: 's', context: {}, question: 'q', signal: controller.signal })
+    const pending = askAssistant({ system: 's', context: '{}', question: 'q', signal: controller.signal })
     controller.abort()
     await expect(pending).rejects.toThrow('130 секунд')
   })

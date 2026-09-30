@@ -113,10 +113,20 @@ const normalizeSettings = (value: unknown): ProjectSettings => {
 }
 
 /**
+ * What migration is allowed to receive. A v1 payload predates `inputCurrent`, `phase` and
+ * `reserveModules`, so requiring a full `ProjectSettings` here would describe the one input this
+ * function exists to handle as impossible. `normalizeSettings` is the single place that fills the
+ * gaps.
+ */
+export type LegacyPanelProject = Omit<Partial<PanelProject>, 'settings'> & {
+  settings?: Partial<ProjectSettings>
+}
+
+/**
  * Migrate legacy payloads to the current schema. v1 is not merely cast: every
  * collection is normalized, and future schemas are rejected explicitly.
  */
-export const migrateProject = (input: Partial<PanelProject> | null | undefined): PanelProject => {
+export const migrateProject = (input: LegacyPanelProject | null | undefined): PanelProject => {
   const source = asRecord(input)
   const sourceVersion = source.schemaVersion === undefined ? 1 : source.schemaVersion
   if (typeof sourceVersion !== 'number' || !Number.isInteger(sourceVersion) || sourceVersion > PROJECT_SCHEMA_VERSION) {
@@ -137,12 +147,12 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
   }
 }
 
-export const migrateProjectV1ToV2 = (input: Partial<PanelProject> | null | undefined): PanelProject =>
-  migrateProject({ ...(asRecord(input) as Partial<PanelProject>), schemaVersion: 1 })
+export const migrateProjectV1ToV2 = (input: LegacyPanelProject | null | undefined): PanelProject =>
+  migrateProject({ ...(asRecord(input) as LegacyPanelProject), schemaVersion: 1 })
 
 export const migrateProjectList = (input: unknown): PanelProject[] => {
   if (!Array.isArray(input) || !input.length) return []
-  return input.map((project) => migrateProject(project as Partial<PanelProject>))
+  return input.map((project) => migrateProject(project as LegacyPanelProject))
 }
 
 export const createDevice = (product: DeviceDefinition, row: number, slot: number): PlacedDevice => ({
