@@ -17,6 +17,12 @@ export const gotoEditor = async (page: Page) => {
   await page.goto('/app/editor')
 }
 
+/** The same editor, opened on a project the test planted under a known id. */
+export const gotoProjectEditor = async (page: Page, projectId: string) => {
+  await unlockWorkspace(page)
+  await page.goto(`/app/projects/${projectId}/editor`)
+}
+
 /** Opens a styled AppSelect trigger and picks an option the way a user would. */
 export const pickOption = async (scope: Locator, label: string | RegExp, optionLabel: string) => {
   const trigger = scope.getByLabel(label)
@@ -92,8 +98,51 @@ export const seedProject = async (page: Page, devices: Array<{ id: string; row: 
       })),
       circuits: [],
       connections: [],
-      busAssemblies: [],
+      busAssemblies: [
+        { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+        { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+      ],
       combs: [],
     }]))
   }, devices)
+}
+
+/**
+ * A board with something on it to connect: two breakers on one row and the neutral and earth
+ * bars along the bottom. A wiring test needs terminals that are free and a bus to feed from, and
+ * an empty board would make the wire tool look like it draws nothing simply because there is
+ * nowhere to draw it.
+ */
+export const seedWiringProject = async (page: Page) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('panel36.hints.v1', 'dismissed')
+    const device = (instanceId: string, productId: string, row: number, slot: number, address: string) => ({
+      instanceId, productId, row, slot, address, quantity: 1, phase: 1, note: '', marking: address, mount: 'din',
+    })
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([{
+      schemaVersion: 3,
+      id: 'wiring-lab',
+      name: 'Стенд разводки',
+      preset: 'demo',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      settings: {
+        inputCurrent: 63, phase: 1, rows: 2, reserveModules: 4,
+        enclosureWidth: 283, enclosureHeight: 357, enclosureDepth: 106,
+        cabinetId: 'panel36-24-embedded', railId: 'rail-12',
+      },
+      devices: [
+        device('qf01', 'ekf-mcb-1p-c6', 0, 0, 'QF01'),
+        device('qf02', 'ekf-mcb-1p-c6', 0, 1, 'QF02'),
+        device('qf03', 'ekf-mcb-1p-c6', 0, 2, 'QF03'),
+      ],
+      circuits: [],
+      connections: [],
+      busAssemblies: [
+        { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+        { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+      ],
+      combs: [],
+    }]))
+  })
 }

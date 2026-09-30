@@ -1559,10 +1559,14 @@ kbd {
 }
 .din-rows {
   position: relative;
-  z-index: 2;
+  /* Above the wire hit layer, so a conductor running behind an appliance does not swallow the
+     click that was meant for the appliance. In the wire tool the order flips: there the whole
+     board is a terminal field, and the devices step out of the pointer's way entirely. */
+  z-index: 5;
   display: flex;
   flex-direction: column;
 }
+.editor-2d.wire-tool .din-rows { pointer-events: none; }
 .din-row {
   position: relative;
   min-height: 0;
@@ -1579,6 +1583,7 @@ kbd {
 }
 .row-label {
   position: absolute;
+  z-index: 1;
   top: 0;
   bottom: 0;
   display: flex;
@@ -1602,12 +1607,20 @@ kbd {
    devices — the comb itself has to be drawn over the row, and a control there would sit on a clamp. */
 .row-comb-add {
   margin-top: 4px;
-  display: flex;
-  align-items: center;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* The gutter is 62 px wide: a single row of four pole buttons runs under the rail and the
+     buttons stop being clickable, so the poles wrap into a square. */
   gap: 2px;
   color: #6d766f;
   font:600 var(--text-micro) var(--mono);
 }
+.row-comb-add > span {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+.row-comb-add button { width: 100%; }
 .row-comb-add span { padding: 0 3px 0 1px; }
 .row-comb-add button {
   min-height: 0;
