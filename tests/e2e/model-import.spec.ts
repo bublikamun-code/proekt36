@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { categoryLabels } from '../../src/data/catalog'
 import type { Category } from '../../src/domain/types'
 import { glb, standaloneGltf, zipModel } from './model-fixtures'
-import { dragWithPointer, gotoEditor, pickOption } from './helpers'
+import { dragWithPointer, gotoEditor, openSidePanels, pickOption } from './helpers'
 
 type ImportCase = {
   name: string
@@ -69,7 +69,7 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   // default budget, and more than a bare 180 s once the suite runs in parallel.
   test.setTimeout(300_000)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   for (const item of importCases) await importModel(page, item)
@@ -103,8 +103,7 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
 
   // The reload closes the side panels again, and a catalogue item that is not on
   // screen cannot be grabbed with a pointer.
-  const reopenPanels = page.getByRole('button', { name: 'Показать боковые панели' })
-  if (await reopenPanels.isVisible()) await reopenPanels.click()
+  await openSidePanels(page)
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   // The seed's first row is full, so every imported device is dragged into row two
@@ -133,9 +132,11 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   const connectionCard = circuitCard.locator('.connection-card').first()
   const connectionId = await connectionCard.getAttribute('data-connection-id')
   expect(connectionId).toBeTruthy()
-  const firstWire = page.locator('.wires path').first()
-  await expect(page.locator('.wires path')).toHaveCount(1)
-  await expect(firstWire).toHaveAttribute('data-connection-id', connectionId!)
+  // The board draws a conductor twice — a casing and a core — and the demo board now ships wired,
+  // so a count of every path in `.wires` says nothing about the connection this test just added.
+  // The core is the half that carries the connection id.
+  const firstWire = page.locator(`.wires .wire-core[data-connection-id="${connectionId}"]`)
+  await expect(firstWire).toHaveCount(1)
   await expect(firstWire).toHaveClass(/wire-l/)
 
   await pickOption(connectionCard, 'Шина', 'PE · земля')
@@ -150,20 +151,24 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   await connectionCard.getByLabel('Подпись').press('Tab')
 
   await expect(firstWire).toHaveClass(/wire-pe/)
-  await expect(firstWire).toHaveAttribute('stroke', '#2c7155')
-  await expect(firstWire).toHaveAttribute('style', /stroke-width: 4px/)
   await expect(firstWire.locator('title')).toHaveText('PE к QF01')
+  // The board paints a conductor by the bus it comes from, so choosing PE is what turns the
+  // wire green on the plate. The custom colour and thickness stay on the connection itself —
+  // they are what the print report quotes — and the inspector is where they are read back.
+  await expect(connectionCard.getByLabel('Цвет')).toHaveValue('#2c7155')
+  await expect(connectionCard.getByLabel('Толщина')).toHaveValue('4')
 
   await circuitCard.getByRole('button', { name: '＋ Подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(2)
-  await expect(page.locator('.wires path')).toHaveCount(2)
+  const secondId = await circuitCard.locator('.connection-card').nth(1).getAttribute('data-connection-id')
+  await expect(page.locator(`.wires .wire-core[data-connection-id="${secondId}"]`)).toHaveCount(1)
 
   await circuitCard.getByRole('button', { name: 'Удалить подключение 2 цепи Цепь 1' }).click()
   const connectionDialog = page.getByRole('dialog', { name: 'Удалить подключение?' })
   await expect(connectionDialog).toBeVisible()
   await connectionDialog.getByRole('button', { name: 'Удалить подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(1)
-  await expect(page.locator('.wires path')).toHaveCount(1)
+  await expect(page.locator(`.wires .wire-core[data-connection-id="${secondId}"]`)).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Удалить модель Импорт GLB' }).click()
   const removeDialog = page.getByRole('dialog', { name: 'Удалить модель?' })
