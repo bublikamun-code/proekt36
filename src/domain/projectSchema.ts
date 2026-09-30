@@ -209,9 +209,15 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   string(errors, value.circuitId, `${path}.circuitId`, { max: PROJECT_LIMITS.id })
   enumValue(errors, value.fromBus, `${path}.fromBus`, ['L', 'N', 'PE'])
   string(errors, value.toDeviceId, `${path}.toDeviceId`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
-  string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: true })
+  // An empty colour is how a conductor says «paint me the colour of the bus I come from»: wireColor
+  // falls back to the N/PE/phase colours, and addWire, addBusWire and the demo project all rely on
+  // it. Insisting on a value here would make the board the app just drew impossible to save.
+  string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: false })
   finiteNumber(errors, value.thickness, `${path}.thickness`, { min: 0.1, max: 100 })
-  string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text })
+  // The label is a caption drawn from the addresses of the two ends, not an identity: a wire to
+  // an unnumbered device simply has nothing to quote. autoConnectionLabel writes an empty string
+  // in exactly that case, and the board is still worth saving.
+  string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text, nonEmpty: false })
   enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar', 'jumper'], false)
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })
   if (value.busId !== undefined) string(errors, value.busId, `${path}.busId`, { max: PROJECT_LIMITS.id })
@@ -239,7 +245,7 @@ const validateReferences = (errors: string[], project: RecordValue) => {
   }
   for (const [index, connection] of connections.entries()) {
     if (typeof connection.toDeviceId === 'string' && !deviceIds.has(connection.toDeviceId)) add(errors, `connections[${index}].toDeviceId`, `ссылается на несуществующее устройство «${connection.toDeviceId}»`)
-    if (typeof connection.busId === 'string' && !busIds.has(connection.busId)) add(errors, `connections[${index}].busId`, `ссылается на несуществующую шину «${connection.busId}»`)
+    if (typeof connection.busId === 'string' && connection.busId && !busIds.has(connection.busId)) add(errors, `connections[${index}].busId`, `ссылается на несуществующую шину «${connection.busId}»`)
     for (const key of ['fromTerminal', 'toTerminal']) {
       const terminal = connection[key]
       if (!isRecord(terminal)) continue
@@ -248,7 +254,10 @@ const validateReferences = (errors: string[], project: RecordValue) => {
     }
     if (connection.kind === 'busbar') {
       if (typeof connection.fromDeviceId !== 'string' || !deviceIds.has(connection.fromDeviceId)) add(errors, `connections[${index}].fromDeviceId`, 'для подключения к шине укажите существующее устройство-источник')
-    } else if (connection.kind !== 'jumper' && typeof connection.circuitId === 'string' && !circuitIds.has(connection.circuitId)) {
+    } else if (connection.kind !== 'jumper' && typeof connection.circuitId === 'string' && connection.circuitId && !circuitIds.has(connection.circuitId)) {
+      // An empty circuitId is a wire drawn by hand between two clamps, which belongs to no
+      // circuit by definition — addWire and addBusWire both write it. Only a named circuit has
+      // to exist, otherwise the board could not be saved the moment a user drew a jumper.
       add(errors, `connections[${index}].circuitId`, `ссылается на несуществующую цепь «${connection.circuitId}»`)
     }
   }

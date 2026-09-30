@@ -65,7 +65,38 @@ const seedProject = () => {
     devices = result.devices
   }
   project.devices = autoNumber(devices, definitions)
+  wireDemo(project, definitions)
   return project
+}
+
+/**
+ * A distribution board is not a row of devices. The phase reaches the breakers through a comb, the
+ * earth through its own bar, and the main runs on to the RCCB as a drawn conductor. The demo is
+ * therefore shipped wired: an empty rail teaches nothing about what the board is for, and every
+ * screenshot of the editor would show an unfinished panel.
+ */
+const wireDemo = (project: PanelProject, definitions: Map<string, DeviceDefinition>) => {
+  const nth = (productId: string, index = 0) => project.devices.filter((item) => item.productId === productId)[index]
+  const main = nth('ekf-mcb-4p-b32')
+  const rccb = nth('ekf-rccb-4p-40')
+  const earth = nth('ekf-terminal-1p-gray')
+  project.combs = [{ id: 'demo-comb-3p', row: 1, poles: 3, fromSlot: 0, toSlot: 2, label: 'Гребёнка 3P' }]
+  const wires: Connection[] = []
+  // A 4P device numbers its poles in staggered rows, so the first clamp underneath is pole 2.
+  if (main && rccb) wires.push({
+    id: 'demo-main-rccb', circuitId: '', fromBus: 'L', toDeviceId: rccb.instanceId, color: '', thickness: 2,
+    kind: 'jumper', phase: 1,
+    fromTerminal: { deviceId: main.instanceId, pole: 2, side: 'bottom' },
+    toTerminal: { deviceId: rccb.instanceId, pole: 1, side: 'top' },
+    label: '',
+  })
+  if (earth) wires.push({
+    id: 'demo-earth', circuitId: '', fromBus: 'PE', toDeviceId: earth.instanceId, color: '', thickness: 2,
+    kind: 'circuit', busId: 'bus-pe-bottom',
+    toTerminal: { deviceId: earth.instanceId, pole: 1, side: 'top' },
+    label: '',
+  })
+  project.connections = autoNumberConnections(wires, project.devices, definitions)
 }
 
 export const useProjectStore = defineStore('project', () => {

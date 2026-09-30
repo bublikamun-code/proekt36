@@ -123,16 +123,15 @@ export const normalizeRowComb = (value: unknown): RowComb | null => {
   }
 }
 
-/** The buses a v2 project gains: N and PE along the bottom plate, where they are drawn. */
-const migrateBusAssemblies = (value: unknown, connections: Connection[]): BusAssembly[] => {
+/**
+ * The buses a v2 project gains: N and PE along the bottom plate, where they are drawn. A v2 board
+ * predates the bars, so it has none to inherit and takes the standard pair whole — deciding from
+ * the old lines which kinds were "in use" would leave a panel whose only line was fed from L with
+ * no bar at all, which is a drawing with nowhere to anchor anything.
+ */
+const migrateBusAssemblies = (value: unknown): BusAssembly[] => {
   const existing = Array.isArray(value) ? value.map(normalizeBusAssembly).filter((item): item is BusAssembly => Boolean(item)) : []
-  if (existing.length) return existing
-  const buses = new Set(connections.map((connection) => connection.fromBus))
-  const defaults: BusAssembly[] = [
-    { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
-    { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
-  ]
-  return defaults.filter((bus) => buses.has(bus.kind))
+  return existing.length ? existing : DEFAULT_BUS_ASSEMBLIES()
 }
 
 const normalizeSettings = (value: unknown): ProjectSettings => {
@@ -176,7 +175,7 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
   }
   const now = new Date().toISOString()
   const connections = Array.isArray(source.connections) ? source.connections.map(normalizeConnection) : []
-  const busAssemblies = migrateBusAssemblies(source.busAssemblies, connections)
+  const busAssemblies = migrateBusAssemblies(source.busAssemblies)
   // A v2 line came out of the abstract left-hand column; a v3 line names the bus it is fed
   // from, so the drawing can anchor it to a real bar instead of a decorative strip.
   const knownBus = new Map(busAssemblies.map((bus) => [bus.kind, bus.id]))

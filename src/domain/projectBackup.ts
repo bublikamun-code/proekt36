@@ -3,7 +3,7 @@ import { migrateProject } from './project'
 import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision } from './projectSchema'
 import type { PanelProject, StoredModelLibrary } from './types'
 
-const BACKUP_SCHEMA = 'panel36.backup.v1'
+export const BACKUP_SCHEMA = 'panel36.backup.v1'
 const MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -104,10 +104,10 @@ export const readWorkspaceBackup = async (file: File): Promise<RestoredWorkspace
 
   const projects = parsed.projects.map((value, index) => {
     try {
-      const candidate = isRecord(value) && value.schemaVersion === 2
-        ? assertValidProjectSchema(value)
-        : assertValidProjectSchema(migrateProject(value as Partial<PanelProject>))
-      return clone(candidate)
+      // Every payload goes through migration, whatever version it claims: a v2 project read as
+      // a current one is missing the fields the present schema asks for, so validating it in
+      // place would throw away exactly the old archive the backup exists to rescue.
+      return clone(assertValidProjectSchema(migrateProject(value as Partial<PanelProject>)))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'неизвестная ошибка схемы'
       throw new Error(`projects[${index}]: ${message}`)

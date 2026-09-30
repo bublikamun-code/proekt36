@@ -96,7 +96,10 @@ describe('workspace repository', () => {
     const result = new WorkspaceRepository(storage).load([project('Fallback')])
 
     expect(result.projects[0]).toMatchObject({ name: 'Щит до шин', schemaVersion: PROJECT_SCHEMA_VERSION })
-    expect(result.projects[0]!.busAssemblies).toEqual([])
+    expect(result.projects[0]!.busAssemblies).toEqual([
+      { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+      { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+    ])
     expect(result.recovery).toHaveLength(0)
   })
 
