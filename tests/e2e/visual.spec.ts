@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor, seedProject } from './helpers'
+import { gotoEditor, openSidePanels, seedProject } from './helpers'
 
 /**
  * Visual regression for the board and the public shell.
@@ -55,9 +55,11 @@ test.describe('visual', () => {
       { id: 'qf02', row: 0, slot: 1 },
       { id: 'xt01', row: 0, slot: 2 },
     ])
+    // The one-time orientation card is transient; the reference image shows the settled editor.
+    await page.addInitScript(() => localStorage.setItem('panel36.hints.v1', 'dismissed'))
     await gotoEditor(page)
     await expect(page.locator('.placed-device').first()).toBeVisible()
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     await freeze(page)
     await expect(page).toHaveScreenshot('editor-board.png', { animations: 'disabled' })
   })
