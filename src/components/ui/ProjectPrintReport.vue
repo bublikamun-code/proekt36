@@ -16,6 +16,8 @@ const props = defineProps<{
 const printedAt = computed(() => props.generatedAt || new Date().toISOString())
 const layout = computed(() => resolveLayout(props.project))
 const lines = computed(() => buildBom(props.project.devices, props.definitions))
+/** Address lookup for the connection list, so a large report does not rescan the board per wire. */
+const addressByInstanceId = computed(() => new Map(props.project.devices.map((device) => [device.instanceId, device.address])))
 const issues = computed(() => validateProject(props.project, props.definitions))
 // The summary must count modules exactly the way the per-row table does, so a
 // missing product or a fractional import width cannot make the two disagree.
@@ -87,7 +89,7 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
       <ol>
         <li v-for="connection in project.connections" :key="connection.id">
           <strong>{{ connection.label || 'Без подписи' }}</strong>
-          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${project.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
+          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${addressByInstanceId.get(connection.toDeviceId) || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
         </li>
       </ol>
     </section>

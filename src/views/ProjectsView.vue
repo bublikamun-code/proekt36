@@ -8,8 +8,8 @@ import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { downloadProject, readProjectFile } from '../domain/projectFile'
-import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { useConfirm } from '../composables/useConfirm'
+import { useWorkspaceBackup } from '../composables/useWorkspaceBackup'
 import { cabinetById, railById } from '../data/enclosures'
 import AppSelect, { type AppSelectOption } from '../components/ui/AppSelect.vue'
 import type { PanelProject } from '../domain/types'
@@ -24,7 +24,6 @@ const wizardOpen = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const backupInput = ref<HTMLInputElement | null>(null)
 const importError = ref('')
-const pendingBackup = ref<RestoredWorkspaceBackup | null>(null)
 const query = ref('')
 const presetFilter = ref('all')
 const cabinetFilter = ref('all')
@@ -62,14 +61,6 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('ru-RU', { dateSty
 const cabinetName = (project: PanelProject) => project.settings.cabinetId ? cabinetById.get(project.settings.cabinetId)?.name || 'Legacy-параметры' : 'Legacy-параметры'
 const railName = (project: PanelProject) => project.settings.railId ? railById.get(project.settings.railId)?.name || '17,5 мм legacy' : '17,5 мм legacy'
 const phaseName = (project: PanelProject) => project.settings.phase === 3 ? '3 фазы' : '1 фаза'
-const projectWord = (count: number) => {
-  const mod100 = count % 100
-  const mod10 = count % 10
-  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
-  if (mod10 === 1) return 'проект'
-  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
-  return 'проектов'
-}
 const projectAge = (project: PanelProject) => {
   const days = Math.floor((Date.now() - (Date.parse(project.updatedAt) || 0)) / 86_400_000)
   if (days <= 0) return 'today'
@@ -149,66 +140,25 @@ const importProject = async (event: Event) => {
   finally { input.value = '' }
 }
 const exportProject = (project: PanelProject) => { downloadProject(project); liveMessage.value = `Экспорт проекта «${project.name}» начат.` }
-const exportBackup = async () => {
-  const pending = backupNeedsLocalCad(projects.value)
-  if (pending.length) {
-    const sample = pending.slice(0, 3).join(', ') + (pending.length > 3 ? ` и ещё ${pending.length - 3}` : '')
-    const proceed = await confirm({
-      title: 'Копия не включает CAD-модели?',
-      description: `Эти проекты используют локально импортированные модели (${sample}). Их файлы в копию не попадают: после восстановления такие аппараты появятся как «нет в каталоге», пока модель не будет импортирована заново. Продолжить выгрузку копии?`,
-      confirmLabel: 'Выгрузить копию',
-      danger: true,
-    })
-    if (!proceed) return
-  }
-  downloadWorkspaceBackup(projects.value, store.importedModels, currentProjectId.value)
-  liveMessage.value = 'Экспорт резервной копии начат.'
-}
-const chooseBackupRestore = () => { importError.value = ''; backupInput.value?.click() }
-const prepareBackupRestore = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  try {
-    importError.value = ''
-    pendingBackup.value = await readWorkspaceBackup(file)
-  } catch (error) {
-    pendingBackup.value = null
-    importError.value = error instanceof Error ? error.message : 'Не удалось прочитать резервную копию'
-  } finally {
-    input.value = ''
-  }
-}
-const confirmBackupRestore = async () => {
-  if (!pendingBackup.value) return
-  const restored = pendingBackup.value
-  pendingBackup.value = null
-  await store.restoreWorkspaceBackup(restored)
-  liveMessage.value = restored.pendingLocalCad.length
-    ? `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}. ${restored.pendingLocalCad.length} позиций ждут повторного импорта CAD-модели.`
-    : `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}.`
-}
-const backupDescription = computed(() => {
-  const backup = pendingBackup.value
-  if (!backup) return ''
-  const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
-  if (!backup.pendingLocalCad.length) return base
-  const sample = backup.pendingLocalCad.slice(0, 3).join(', ') + (backup.pendingLocalCad.length > 3 ? ` и ещё ${backup.pendingLocalCad.length - 3}` : '')
-  return `${base} В копии ${backup.pendingLocalCad.length} ${backup.pendingLocalCad.length === 1 ? 'позиция опирается' : 'позиций опираются'} на локально импортированные CAD-модели (${sample}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
+const {
+  pendingBackup,
+  exportBackup,
+  chooseBackupRestore,
+  prepareBackupRestore,
+  confirmBackupRestore,
+  backupDescription,
+  downloadRecoverySnapshot,
+  rollbackToSnapshot,
+} = useWorkspaceBackup({
+  projects,
+  importedModels: computed(() => store.importedModels),
+  currentProjectId,
+  backupInput,
+  confirm,
+  announce: (text) => { liveMessage.value = text },
+  reportError: (text) => { importError.value = text },
+  beforeChoose: () => { importError.value = '' },
 })
-const downloadRecoverySnapshot = () => {
-  if (store.downloadStorageSnapshot()) liveMessage.value = 'Снимок повреждённых данных сохранён в файл.'
-}
-const rollbackToSnapshot = async () => {
-  const ok = await confirm({
-    title: 'Откатиться к предыдущему снимку?',
-    description: 'Текущие проекты будут заменены снимком, сохранённым перед последней удачной записью. Действие можно отменить через Ctrl+Z.',
-    confirmLabel: 'Откатиться',
-    danger: true,
-  })
-  if (!ok) return
-  if (await store.restoreStorageBackup()) liveMessage.value = 'Восстановлен предыдущий снимок локального хранилища.'
-}
 const signOut = async () => { await auth.signOut(); await router.push('/') }
 </script>
 

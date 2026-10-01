@@ -352,8 +352,12 @@ const onBoardKeydown = (event: KeyboardEvent) => {
 const wirePaths = computed(() => {
   const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string }> = []
   const busX: Record<'L' | 'N' | 'PE', number> = { L: 3, N: 7, PE: 11 }
+  // One lookup table per recomputation instead of a scan per wire. The schema allows 2000
+  // connections over 500 devices, and a drag re-runs this on every frame, so the nested scan was
+  // a million comparisons per frame on a large board.
+  const devicesById = new Map(currentProject.value.devices.map((device) => [device.instanceId, device]))
   for (const connection of currentProject.value.connections ?? []) {
-    const target = currentProject.value.devices.find((device) => device.instanceId === connection.toDeviceId)
+    const target = devicesById.get(connection.toDeviceId)
     if (!target) continue
     const width = geometry.value.deviceWidthPx(target.productId)
     const targetX = geometry.value.railStartXPx + (target.slot * geometry.value.moduleWidthPx) + width / 2

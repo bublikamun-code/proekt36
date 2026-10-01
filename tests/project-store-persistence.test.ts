@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import { createProject } from '../src/domain/project'
 import { CURRENT_PROJECT_KEY } from '../src/storage/projectRepository'
-import { useProjectStore } from '../src/stores/project'
+import { PERSIST_DELAY_MS, useProjectStore } from '../src/stores/project'
 
 class MemoryStorage {
   private readonly values = new Map<string, string>()
@@ -118,8 +118,9 @@ describe('project store persistence and history', () => {
 
     store.updateSettings({ reserveModules: reserve + 3 })
     await nextTick()
-    await vi.advanceTimersByTimeAsync(400)
-    // Still inside the 450 ms window, so nothing has been written yet.
+    await vi.advanceTimersByTimeAsync(PERSIST_DELAY_MS - 1)
+    // Still inside the debounce window, so nothing has been written yet. Deriving the step from
+    // the constant keeps this true whatever the delay is tuned to, rather than restating 450 here.
     expect(storage.raw('panel36.projects.v2')).toBeNull()
 
     lifecycle.dispatch('pagehide')

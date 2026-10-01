@@ -1,7 +1,8 @@
+import { PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import type { PanelProject } from '../domain/types'
 
 export const demoProject: PanelProject = {
-  schemaVersion: 2,
+  schemaVersion: PROJECT_SCHEMA_VERSION,
   id: 'demo-panel-36-project',
   name: 'Квартира · распределительный щит',
   preset: 'demo',

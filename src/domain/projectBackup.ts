@@ -1,6 +1,6 @@
 import { allCatalog, CATALOG_REVISION } from '../data/catalog'
 import { migrateProject } from './project'
-import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision } from './projectSchema'
+import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision, PROJECT_SCHEMA_VERSION } from './projectSchema'
 import type { ModelMetadata, PanelProject } from './types'
 
 const BACKUP_SCHEMA = 'panel36.backup.v1'
@@ -104,7 +104,7 @@ export const readWorkspaceBackup = async (file: File): Promise<RestoredWorkspace
 
   const projects = parsed.projects.map((value, index) => {
     try {
-      const candidate = isRecord(value) && value.schemaVersion === 2
+      const candidate = isRecord(value) && value.schemaVersion === PROJECT_SCHEMA_VERSION
         ? assertValidProjectSchema(value)
         : assertValidProjectSchema(migrateProject(value as Partial<PanelProject>))
       return clone(candidate)

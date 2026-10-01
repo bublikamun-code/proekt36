@@ -12,9 +12,20 @@ export const unlockWorkspace = async (page: Page) => {
   }, DEMO_SESSION)
 }
 
+/**
+ * The board's readiness signal. Every spec that opens the editor starts from it, so start-up cost
+ * is paid once, here, instead of being charged to whichever assertion happens to run first.
+ */
+const boardRegion = (page: Page) => page.getByRole('region', { name: 'Схема электрощита' })
+
 export const gotoEditor = async (page: Page) => {
   await unlockWorkspace(page)
   await page.goto('/app/editor')
+  // The editor mounts only after the store has read the workspace, laid out the cabinet and drawn
+  // the board. Returning before that left the first assertion of a spec racing start-up, and on a
+  // loaded machine the board sometimes needed longer than the default assertion timeout. This waits
+  // on the same element the specs check, so nothing is asserted twice and nothing is skipped.
+  await boardRegion(page).waitFor({ state: 'visible', timeout: 60_000 })
 }
 
 /**

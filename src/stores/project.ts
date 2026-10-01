@@ -16,12 +16,17 @@ import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import type { Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
 import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
+import { CONNECTION_THICKNESS_MM } from '../domain/connectionSpec'
 import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { usePreferencesStore } from './preferences'
 
 const HISTORY_LIMIT = 50
 const COALESCE_WINDOW_MS = 800
-const PERSIST_DELAY_MS = 450
+/**
+ * Autosave debounce. Kept short on purpose: this is the longest a single edit can exist only in
+ * memory, and the store flushes the pending write on `pagehide` and on tab hiding anyway.
+ */
+export const PERSIST_DELAY_MS = 200
 type ProjectHistory = { undo: PanelProject[]; redo: PanelProject[] }
 type StorageStatus = 'saving' | 'saved' | 'save-failed' | 'storage-unavailable'
 
@@ -186,7 +191,20 @@ export const useProjectStore = defineStore('project', () => {
   // closed inside the debounce window used to drop the last edit. `pagehide` is the one
   // event a browser still delivers on close and on bfcache navigation, and the write it
   // triggers is synchronous, so it completes before the document goes away.
-  if (typeof window !== 'undefined') window.addEventListener('pagehide', () => { void flushPersistence() })
+  //
+  // `visibilitychange` covers the case `pagehide` misses: a phone that backgrounds the tab and
+  // then reclaims its memory sends no close event at all, and there the debounced write was the
+  // only thing standing between the user and their last edit.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', () => { void flushPersistence() })
+    // Guarded rather than assumed: the store is also built in headless tests, where `window`
+    // exists as a stub without a document to listen on.
+    if (typeof document?.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') void flushPersistence()
+      })
+    }
+  }
 
   watch([projects, importedModels], schedulePersistence, { deep: true })
 
@@ -590,7 +608,7 @@ export const useProjectStore = defineStore('project', () => {
     if ('fromBus' in values && !['L', 'N', 'PE'].includes(values.fromBus as string)) return rejectCommand('Шина должна быть L, N или PE.')
     if ('toDeviceId' in values && !currentProject.value.devices.some((item) => item.instanceId === values.toDeviceId)) return rejectCommand('Подключаемое устройство не найдено.')
     if ('color' in values && !validText(values.color, 64, true)) return rejectCommand('Цвет подключения должен быть непустой строкой.')
-    if ('thickness' in values && !finiteInRange(values.thickness, 0.5, 8)) return rejectCommand('Толщина подключения должна быть конечным числом от 0,5 до 8 мм.')
+    if ('thickness' in values && !finiteInRange(values.thickness, CONNECTION_THICKNESS_MM.min, CONNECTION_THICKNESS_MM.max)) return rejectCommand(`Толщина подключения должна быть конечным числом от ${CONNECTION_THICKNESS_MM.min} до ${CONNECTION_THICKNESS_MM.max} мм.`)
     if ('label' in values && !validText(values.label, PROJECT_LIMITS.text)) return rejectCommand('Подпись подключения слишком длинная.')
     if ('circuitId' in values && !currentProject.value.circuits.some((item) => item.id === values.circuitId)) return rejectCommand('Цепь подключения не найдена.')
     const candidate = { ...connection, ...patch }

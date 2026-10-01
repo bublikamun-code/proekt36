@@ -91,8 +91,11 @@ test.describe('public site and workspace shell', () => {
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'index,follow')
     await expect(page.locator('link[rel="canonical"]')).toHaveCount(1)
 
+    // A canonical link on a private page advertises that page as the real address of itself,
+    // which is the opposite of what noindex asks for. The element has to go, not just change.
     await page.goto('/login')
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex,nofollow')
+    await expect(page.locator('link[rel="canonical"]')).toHaveCount(0)
   })
 
   test('desktop public header stays visible while the page scrolls', async ({ page }) => {

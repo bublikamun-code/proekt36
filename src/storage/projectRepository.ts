@@ -9,6 +9,8 @@ export const CURRENT_PROJECT_KEY = 'panel36.currentProjectId.v1'
 export const PROJECTS_BACKUP_KEY = 'panel36.projects.backup.v1'
 export const MODELS_BACKUP_KEY = 'panel36.models.backup.v1'
 export const RECOVERY_KEY = 'panel36.storage.recovery.v1'
+/** Holds the bytes a batch is about to overwrite, so an interrupted batch can be undone. */
+export const JOURNAL_KEY = 'panel36.storage.journal.v1'
 
 export interface StorageRecovery {
   sourceKey: string
@@ -81,7 +83,9 @@ const normalizeProject = (value: unknown, strict: boolean): PanelProject => {
     }
     return assertValidProjectSchema(candidate)
   }
-  if (candidate.schemaVersion === 2) assertValidProjectSchema(candidate)
+  // Compared against the constant rather than a literal: a hardcoded 2 would keep matching v2
+  // records after the schema moves to 3, and they would be migrated as if they were current.
+  if (candidate.schemaVersion === PROJECT_SCHEMA_VERSION) assertValidProjectSchema(candidate)
   return assertValidProjectSchema(migrateProject(candidate as Partial<PanelProject>))
 }
 
@@ -143,6 +147,80 @@ export class WorkspaceRepository {
   constructor(storage: LocalStorageLike | null = getDefaultStorage()) {
     this.storage = storage
     this.storageAvailable = Boolean(storage)
+    this.replayWriteJournal()
+  }
+
+  /**
+   * localStorage has no multi-key transaction. A snapshot spans three keys, so a failure halfway
+   * through left `panel36.projects.v2` updated while `panel36.currentProjectId.v1` still named the
+   * previous project — a set of keys that no write of this app ever produces.
+   *
+   * Each batch therefore stores the bytes it is about to overwrite in `JOURNAL_KEY` before touching
+   * anything. A failure inside the batch restores them right away; a tab that dies mid-write leaves
+   * the journal behind, and the next start replays it here. Without the journal a half-written
+   * snapshot is discovered only when the stored data turns out to be inconsistent, by which point
+   * the previous generation is already gone.
+   */
+  private replayWriteJournal() {
+    if (!this.storage) return
+    let raw: string | null
+    try {
+      raw = this.storage.getItem(JOURNAL_KEY)
+    } catch {
+      return
+    }
+    if (!raw) return
+    try {
+      const entries = JSON.parse(raw) as Array<{ key: string; value: string | null }>
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (!entry || typeof entry.key !== 'string') continue
+          if (entry.value === null) this.storage.removeItem(entry.key)
+          else this.storage.setItem(entry.key, entry.value)
+        }
+      }
+    } catch {
+      // A journal we cannot read is worse than none: it only ever holds bytes this app wrote, so
+      // dropping it leaves the current state in place instead of guessing at the previous one.
+    }
+    try {
+      this.storage.removeItem(JOURNAL_KEY)
+    } catch {
+      // Nothing more to try; the next start will meet the same journal and skip it again.
+    }
+  }
+
+  /** Runs `write` as one unit: journal first, roll back on any failure. */
+  private writeAtomically(write: () => void) {
+    if (!this.storage) throw new Error('Локальное хранилище недоступно')
+    const previous: Array<{ key: string; value: string | null }> = []
+    let journalled = false
+    try {
+      for (const key of [PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY]) {
+        previous.push({ key, value: this.readRaw(key) })
+      }
+      this.writeRaw(JOURNAL_KEY, JSON.stringify(previous))
+      journalled = true
+      write()
+      this.removeRaw(JOURNAL_KEY)
+    } catch (error) {
+      if (journalled) {
+        for (const entry of previous) {
+          try {
+            if (entry.value === null) this.removeRaw(entry.key)
+            else this.writeRaw(entry.key, entry.value)
+          } catch {
+            // Keep rolling back the rest: one unrecoverable key must not strand the others.
+          }
+        }
+        try {
+          this.removeRaw(JOURNAL_KEY)
+        } catch {
+          // The journal stays and the next start replays it, which is the same restoration.
+        }
+      }
+      throw error
+    }
   }
 
   get available() {
@@ -357,9 +435,11 @@ export class WorkspaceRepository {
     for (const project of snapshot.projects) assertValidProjectSchema(project)
     if (snapshot.models.some((model) => !isModelMetadata(model))) throw new Error('Некорректные метаданные модели')
     this.persistRecovery()
-    this.writeWithBackup(PROJECTS_KEY, PROJECTS_BACKUP_KEY, JSON.stringify(snapshot.projects), !this.recovery.some((item) => item.sourceKey === PROJECTS_KEY))
-    this.writeWithBackup(MODELS_KEY, MODELS_BACKUP_KEY, JSON.stringify(snapshot.models), !this.recovery.some((item) => item.sourceKey === MODELS_KEY))
-    this.writeRaw(CURRENT_PROJECT_KEY, snapshot.currentProjectId)
+    this.writeAtomically(() => {
+      this.writeWithBackup(PROJECTS_KEY, PROJECTS_BACKUP_KEY, JSON.stringify(snapshot.projects), !this.recovery.some((item) => item.sourceKey === PROJECTS_KEY))
+      this.writeWithBackup(MODELS_KEY, MODELS_BACKUP_KEY, JSON.stringify(snapshot.models), !this.recovery.some((item) => item.sourceKey === MODELS_KEY))
+      this.writeRaw(CURRENT_PROJECT_KEY, snapshot.currentProjectId)
+    })
     this.backup.projects = clone(snapshot.projects)
     this.backup.models = clone(snapshot.models)
     this.backup.currentProjectId = snapshot.currentProjectId
@@ -376,7 +456,7 @@ export class WorkspaceRepository {
 
   clear() {
     if (!this.storage) throw new Error('Локальное хранилище недоступно')
-    const keys = [PROJECTS_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY]
+    const keys = [PROJECTS_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, MODELS_KEY, MODELS_BACKUP_KEY, CURRENT_PROJECT_KEY, RECOVERY_KEY, JOURNAL_KEY]
     const errors: unknown[] = []
     for (const key of keys) {
       try {

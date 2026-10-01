@@ -1,6 +1,7 @@
 import { builtinCatalog } from '../data/catalog'
 import { cabinetById, railById } from '../data/enclosures'
 import type { Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings } from './types'
+import { CONNECTION_THICKNESS_MM } from './connectionSpec'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
 export { PROJECT_SCHEMA_VERSION } from './projectSchema'
@@ -76,7 +77,7 @@ export const normalizeConnection = (value: unknown): Connection => {
     fromBus: raw.fromBus === 'N' || raw.fromBus === 'PE' ? raw.fromBus : 'L',
     toDeviceId: asText(raw.toDeviceId),
     color: asText(raw.color, '#c65c3b'),
-    thickness: asNumber(raw.thickness, 2, 0.5, 8),
+    thickness: asNumber(raw.thickness, CONNECTION_THICKNESS_MM.default, CONNECTION_THICKNESS_MM.min, CONNECTION_THICKNESS_MM.max),
     label: asText(raw.label),
     kind,
     fromDeviceId: asText(raw.fromDeviceId) || undefined,

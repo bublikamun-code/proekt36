@@ -95,6 +95,25 @@ describe('разбор ответа помощника', () => {
     const answer = parseAssistantAnswer(block(Array.from({ length: 9 }, () => ({ code: 'rows.compact' }))), state())
     expect(answer.actions).toHaveLength(6)
   })
+
+  it('читает все блоки ответа, а не только последний', () => {
+    // A model that splits its plan across two fences used to lose the first one without a word:
+    // the user saw a suggestion they could not apply and no message said anything was dropped.
+    const split = parseAssistantAnswer(
+      'Сначала одно, потом другое.\n\n```panel36\n{"actions":[{"code":"settings.reserve","reserveModules":12}]}\n```\n\nи второе\n\n```panel36\n{"actions":[{"code":"rows.compact"}]}\n```',
+      state(),
+    )
+
+    expect(split.actions.map((action) => action.code)).toEqual(['settings.reserve', 'rows.compact'])
+    expect(split.rejected).toHaveLength(0)
+    expect(split.text).toContain('Сначала одно')
+  })
+
+  it('ограничивает число предложений по всем блокам сразу', () => {
+    const many = Array.from({ length: 9 }, () => ({ code: 'rows.compact' }))
+    const answer = parseAssistantAnswer(block(many) + '\n\n' + block(many), state())
+    expect(answer.actions).toHaveLength(6)
+  })
 })
 
 describe('клиент прокси', () => {

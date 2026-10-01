@@ -11,9 +11,15 @@ import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
 import AssistantPanel from '../assistant/AssistantPanel.vue'
 import { useConfirm } from '../../composables/useConfirm'
+import { CONNECTION_THICKNESS_MM } from '../../domain/connectionSpec'
 import type { Category, RailDefinition } from '../../domain/types'
 
 const emit = defineEmits<{ focusCategory: [Category] }>()
+
+/** The number input hands over `NaN` for an empty field; the range comes from the domain, not from here. */
+const clampThickness = (value: number) => Number.isFinite(value)
+  ? Math.min(CONNECTION_THICKNESS_MM.max, Math.max(CONNECTION_THICKNESS_MM.min, value))
+  : CONNECTION_THICKNESS_MM.default
 
 const PHASE_OPTIONS: AppSelectOption[] = [
   { value: '1', label: 'L1' },
@@ -244,7 +250,7 @@ const migrationIssueLabel = (code: string) => ({
             <label>Шина<AppSelect label="Шина" :model-value="connection.fromBus" :options="BUS_OPTIONS" @update:model-value="store.updateConnection(connection.id, { fromBus: $event as 'L' | 'N' | 'PE' })" /></label>
             <label>Устройство<AppSelect label="Устройство" :model-value="connection.toDeviceId" :options="deviceOptions" placeholder="Выберите аппарат" @update:model-value="store.updateConnection(connection.id, { toDeviceId: $event })" /></label>
             <label>Цвет<input :value="connection.color" type="color" @change="store.updateConnection(connection.id, { color: ($event.target as HTMLInputElement).value })" /></label>
-            <label>Толщина<input :value="connection.thickness" type="number" min="0.5" max="8" step="0.5" @change="store.updateConnection(connection.id, { thickness: Math.min(8, Math.max(0.5, Number(($event.target as HTMLInputElement).value))) })" /></label>
+            <label>Толщина<input :value="connection.thickness" type="number" :min="CONNECTION_THICKNESS_MM.min" :max="CONNECTION_THICKNESS_MM.max" :step="CONNECTION_THICKNESS_MM.step" @change="store.updateConnection(connection.id, { thickness: clampThickness(Number(($event.target as HTMLInputElement).value)) })" /></label>
             <label class="wide">Подпись<input :value="connection.label" placeholder="Например, L1 → QF01" @change="store.updateConnection(connection.id, { label: ($event.target as HTMLInputElement).value })" /></label>
           </div>
         </div>

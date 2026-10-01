@@ -14,8 +14,8 @@ import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
 import { usePreferencesStore } from '../stores/preferences'
 import { downloadProject, readProjectFile } from '../domain/projectFile'
-import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { useConfirm } from '../composables/useConfirm'
+import { useWorkspaceBackup } from '../composables/useWorkspaceBackup'
 import type { Category, PanelProject } from '../domain/types'
 
 const route = useRoute()
@@ -40,7 +40,6 @@ const mobilePanel = ref<'catalog' | 'inspector' | null>(null)
 const projectOpen = ref(false)
 const jsonInput = ref<HTMLInputElement | null>(null)
 const backupInput = ref<HTMLInputElement | null>(null)
-const pendingBackup = ref<RestoredWorkspaceBackup | null>(null)
 const renameTarget = ref<PanelProject | null>(null)
 const renameValue = ref('')
 const deleteTarget = ref<PanelProject | null>(null)
@@ -51,14 +50,6 @@ const projectSwitcherWrap = ref<HTMLElement | null>(null)
 const projectMenu = ref<HTMLElement | null>(null)
 
 const autosaveLabel = computed(() => ({ saving: 'Сохранение…', saved: 'Сохранено', 'save-failed': 'Не сохранено', 'storage-unavailable': 'Хранилище недоступно' }[storageStatus.value]))
-const projectWord = (count: number) => {
-  const mod100 = count % 100
-  const mod10 = count % 10
-  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
-  if (mod10 === 1) return 'проект'
-  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
-  return 'проектов'
-}
 const autosaveTime = computed(() => storageStatus.value === 'saved' && lastSavedAt.value ? new Date(lastSavedAt.value).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '')
 const replaceEditorRoute = (id: string) => router.replace({ name: 'editor', params: { projectId: id } })
 const openProject = (id: string) => {
@@ -88,67 +79,27 @@ const createFromMaster = ({ name, preset }: { name: string; preset: string }) =>
 const exportProject = () => { downloadProject(currentProject.value); liveMessage.value = `Экспорт проекта «${currentProject.value.name}» начат.` }
 /**
  * The archive never carries CAD binaries, so a project that uses a locally imported model
- * only comes back as a placeholder. Saying so before the download beats letting the user
- * discover it after wiping the browser.
+ * only comes back as a placeholder. The composable says so before the download, which beats
+ * letting the user discover it after wiping the browser. The list view and the editor share it;
+ * only the route fix-up after a restore is the editor's own.
  */
-const exportBackup = async () => {
-  const pending = backupNeedsLocalCad(projects.value)
-  if (pending.length) {
-    const sample = pending.slice(0, 3).join(', ') + (pending.length > 3 ? ` и ещё ${pending.length - 3}` : '')
-    const proceed = await confirm({
-      title: 'Копия не включает CAD-модели?',
-      description: `Эти проекты используют локально импортированные модели (${sample}). Их файлы в копию не попадают: после восстановления такие аппараты появятся как «нет в каталоге», пока модель не будет импортирована заново. Продолжить выгрузку копии?`,
-      confirmLabel: 'Выгрузить копию',
-      danger: true,
-    })
-    if (!proceed) return
-  }
-  downloadWorkspaceBackup(projects.value, importedModels.value, currentProjectId.value)
-  liveMessage.value = 'Экспорт резервной копии начат.'
-}
-const chooseBackupRestore = () => { backupInput.value?.click() }
-const prepareBackupRestore = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  try {
-    pendingBackup.value = await readWorkspaceBackup(file)
-  } catch (error) {
-    store.notify(error instanceof Error ? error.message : 'Не удалось прочитать резервную копию', 'error')
-  } finally {
-    input.value = ''
-  }
-}
-const confirmBackupRestore = async () => {
-  if (!pendingBackup.value) return
-  const restored = pendingBackup.value
-  pendingBackup.value = null
-  await store.restoreWorkspaceBackup(restored)
-  void replaceEditorRoute(currentProjectId.value)
-  liveMessage.value = restored.pendingLocalCad.length
-    ? `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}. ${restored.pendingLocalCad.length} позиций ждут повторного импорта CAD-модели.`
-    : `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}.`
-}
-const downloadRecoverySnapshot = () => {
-  if (store.downloadStorageSnapshot()) liveMessage.value = 'Снимок повреждённых данных сохранён в файл.'
-}
-const rollbackToSnapshot = async () => {
-  const ok = await confirm({
-    title: 'Откатиться к предыдущему снимку?',
-    description: 'Текущие проекты будут заменены снимком, сохранённым перед последней удачной записью. Действие можно отменить через Ctrl+Z.',
-    confirmLabel: 'Откатиться',
-    danger: true,
-  })
-  if (!ok) return
-  if (await store.restoreStorageBackup()) liveMessage.value = 'Восстановлен предыдущий снимок локального хранилища.'
-}
-const backupDescription = computed(() => {
-  const backup = pendingBackup.value
-  if (!backup) return ''
-  const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
-  if (!backup.pendingLocalCad.length) return base
-  const sample = backup.pendingLocalCad.slice(0, 3).join(', ') + (backup.pendingLocalCad.length > 3 ? ` и ещё ${backup.pendingLocalCad.length - 3}` : '')
-  return `${base} В копии ${backup.pendingLocalCad.length} ${backup.pendingLocalCad.length === 1 ? 'позиция опирается' : 'позиций опираются'} на локально импортированные CAD-модели (${sample}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
+const {
+  pendingBackup,
+  exportBackup,
+  chooseBackupRestore,
+  prepareBackupRestore,
+  confirmBackupRestore,
+  backupDescription,
+  downloadRecoverySnapshot,
+  rollbackToSnapshot,
+} = useWorkspaceBackup({
+  projects,
+  importedModels,
+  currentProjectId,
+  backupInput,
+  confirm,
+  announce: (text) => { liveMessage.value = text },
+  onRestored: () => replaceEditorRoute(currentProjectId.value),
 })
 
 const removeSelected = async () => {

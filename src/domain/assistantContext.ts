@@ -14,7 +14,12 @@ import type { Category, DeviceDefinition, PanelProject, ValidationIssue } from '
  * human-readable message and the context object interpolate device ids and product
  * names and would carry exactly the data the user did not agree to send.
  */
-export const ASSISTANT_CONTEXT_REVISION = 'panel36.assistant-context.v1'
+/**
+ * The summary payload the assistant receives. Bumped to v2 for `occupancy.devicesTotal`, which
+ * separates placed positions from physical apparatus — the field is additive, but a model that
+ * read `devices` as a count of apparatus would still be wrong, so the revision is the honest marker.
+ */
+export const ASSISTANT_CONTEXT_REVISION = 'panel36.assistant-context.v2'
 
 export interface AssistantCategoryCount {
   category: Category
@@ -54,7 +59,10 @@ export interface AssistantContext {
     enclosure: { widthMm: number; heightMm: number; depthMm: number }
   }
   occupancy: {
+    /** Placed positions on the board: one per record, regardless of how many poles it carries. */
     devices: number
+    /** Physical apparatus behind those positions, counting `quantity` on each. */
+    devicesTotal: number
     usedModules: number
     capacityModules: number
     freeModules: number
@@ -98,10 +106,15 @@ export const buildAssistantContext = (
   const byRow: AssistantRowUsage[] = Array.from({ length: rows }, (_, row) => ({ row, devices: 0, usedModules: 0, freeModules: 0 }))
   let usedModules = 0
   let devices = 0
+  let devicesTotal = 0
 
   for (const item of project.devices) {
     const product = definitions.get(item.productId)
     devices += 1
+    // A record stands for one position but may stand for several apparatus: a four-pole breaker
+    // with `quantity: 3` is three devices on the board, and telling the assistant "1" is how a
+    // question about the number of devices gets a confidently wrong answer.
+    devicesTotal += item.quantity > 1 ? item.quantity : 1
     const width = isDinDevice(item) ? getFootprintModules(item, definitions) : 0
     usedModules += width
     const category = product?.category
@@ -124,7 +137,11 @@ export const buildAssistantContext = (
   const perPhaseA = project.settings.phase === 3 ? [totals[0] ?? 0, totals[1] ?? 0, totals[2] ?? 0] : [totals[0] ?? 0]
   const cabinet = project.settings.cabinetId ? cabinetById.get(project.settings.cabinetId) : undefined
   const connected = new Set((project.connections ?? []).filter((item) => item.circuitId).map((item) => item.circuitId))
-  const protectionIds = new Set((project.circuits ?? []).map((item) => item.protectionDeviceId))
+  // Empty protection ids are dropped before they reach the set. Left in, an unprotected circuit
+  // carrying `protectionDeviceId: ''` would find another unprotected circuit's empty id in the set
+  // and count itself as protected — every unprotected circuit after the first one hides behind it,
+  // and the assistant is then told the board needs nothing.
+  const protectionIds = new Set((project.circuits ?? []).map((item) => item.protectionDeviceId).filter(Boolean))
 
   return {
     revision: ASSISTANT_CONTEXT_REVISION,
@@ -149,6 +166,7 @@ export const buildAssistantContext = (
     },
     occupancy: {
       devices,
+      devicesTotal,
       usedModules,
       capacityModules: railModules * rows,
       freeModules: Math.max(0, getFreeSlots(project, definitions)),
@@ -171,7 +189,7 @@ export const buildAssistantContext = (
 export const assistantContextDisclosure = (context: AssistantContext): string[] => [
   `пресет: ${context.preset}`,
   `сеть: ${context.panel.phase} ф., ввод ${context.panel.inputCurrentA} А, ${context.panel.rows} ряд(ов) по ${context.panel.railModules} мод.`,
-  `занято ${context.occupancy.usedModules} из ${context.occupancy.capacityModules} модулей, устройств: ${context.occupancy.devices}`,
+  `занято ${context.occupancy.usedModules} из ${context.occupancy.capacityModules} модулей, позиций: ${context.occupancy.devices}, аппаратов: ${context.occupancy.devicesTotal}`,
   `цепи: ${context.load.circuits}, суммарный ток ${context.load.totalCurrentA} А, разброс фаз ${context.load.spreadPercent}%`,
   `состав по категориям: ${context.occupancy.byCategory.map((item) => `${item.label} — ${item.devices}`).join(', ') || 'пусто'}`,
   `замечания проверок: ${context.issues.map((item) => `${item.title} (${item.count})`).join('; ') || 'нет'}`,

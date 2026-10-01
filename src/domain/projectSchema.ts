@@ -1,4 +1,5 @@
 import { CATALOG_REVISION as DATA_CATALOG_REVISION } from '../data/catalog'
+import { CONNECTION_THICKNESS_MM } from './connectionSpec'
 import type { PanelProject } from './types'
 import { APP_VERSION } from '../version'
 
@@ -53,6 +54,16 @@ export const PROJECT_LIMITS = {
   row: 29,
   slot: 999,
   rows: 30,
+  /**
+   * Enclosure dimensions in millimetres. These three used to be checked against 1–10000, which
+   * accepts a ten-metre cabinet: a bound that no real enclosure can satisfy is not a bound, it is
+   * a gap. The numbers below are far above anything in the catalogue (the widest body there is
+   * 392 mm) and far below nonsense, so a damaged record is refused while a future, larger
+   * cabinet is not refused for being larger.
+   */
+  enclosureWidth: { min: 50, max: 2000 },
+  enclosureHeight: { min: 50, max: 2000 },
+  enclosureDepth: { min: 10, max: 1000 },
 } as const
 
 export interface ProjectSchemaValidationResult {
@@ -140,9 +151,9 @@ const validateSettings = (errors: string[], value: unknown) => {
   if (!isRecord(value)) { add(errors, 'settings', 'ожидается объект настроек'); return }
   finiteNumber(errors, value.inputCurrent, 'settings.inputCurrent', { min: 1, max: 1000 })
   if (value.phase !== 1 && value.phase !== 3) add(errors, 'settings.phase', 'ожидается 1 или 3')
-  finiteNumber(errors, value.enclosureWidth, 'settings.enclosureWidth', { min: 1, max: 10000 })
-  finiteNumber(errors, value.enclosureHeight, 'settings.enclosureHeight', { min: 1, max: 10000 })
-  finiteNumber(errors, value.enclosureDepth, 'settings.enclosureDepth', { min: 1, max: 10000 })
+  finiteNumber(errors, value.enclosureWidth, 'settings.enclosureWidth', { min: PROJECT_LIMITS.enclosureWidth.min, max: PROJECT_LIMITS.enclosureWidth.max })
+  finiteNumber(errors, value.enclosureHeight, 'settings.enclosureHeight', { min: PROJECT_LIMITS.enclosureHeight.min, max: PROJECT_LIMITS.enclosureHeight.max })
+  finiteNumber(errors, value.enclosureDepth, 'settings.enclosureDepth', { min: PROJECT_LIMITS.enclosureDepth.min, max: PROJECT_LIMITS.enclosureDepth.max })
   finiteNumber(errors, value.rows, 'settings.rows', { min: 1, max: PROJECT_LIMITS.rows, integer: true })
   finiteNumber(errors, value.reserveModules, 'settings.reserveModules', { min: 0, max: 1000, integer: true })
   if (value.cabinetId !== undefined) string(errors, value.cabinetId, 'settings.cabinetId', { max: PROJECT_LIMITS.id, nonEmpty: true })
@@ -179,7 +190,7 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   enumValue(errors, value.fromBus, `${path}.fromBus`, ['L', 'N', 'PE'])
   string(errors, value.toDeviceId, `${path}.toDeviceId`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
   string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: true })
-  finiteNumber(errors, value.thickness, `${path}.thickness`, { min: 0.1, max: 100 })
+  finiteNumber(errors, value.thickness, `${path}.thickness`, { min: CONNECTION_THICKNESS_MM.min, max: CONNECTION_THICKNESS_MM.max })
   string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text })
   enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar'], false)
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })

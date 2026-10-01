@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { allCatalog, builtinCatalog } from '../src/data/catalog'
-import { buildAssistantContext, assistantContextDisclosure, formatAssistantContext } from '../src/domain/assistantContext'
+import { ASSISTANT_CONTEXT_REVISION, buildAssistantContext, assistantContextDisclosure, formatAssistantContext } from '../src/domain/assistantContext'
 import { createProject } from '../src/domain/project'
 import { validateProject } from '../src/domain/validation'
 import type { PanelProject } from '../src/domain/types'
@@ -61,8 +61,10 @@ describe('assistant context', () => {
     const project = seeded()
     const context = buildAssistantContext(project, definitions, validateProject(project, definitions))
 
-    expect(context.revision).toBe('panel36.assistant-context.v1')
+    expect(context.revision).toBe(ASSISTANT_CONTEXT_REVISION)
     expect(context.occupancy.devices).toBe(4)
+    // Four positions, but the first record carries quantity 2, so five apparatus are on the board.
+    expect(context.occupancy.devicesTotal).toBe(5)
     expect(context.occupancy.usedModules).toBe(10)
     expect(context.occupancy.capacityModules).toBe(24)
     expect(context.occupancy.byCategory.find((item) => item.category === 'MCB')?.devices).toBe(2)
@@ -87,5 +89,24 @@ describe('assistant context', () => {
     const overlapIssue = issues.find((item) => item.ruleCode === 'layout.overlap')
     expect(overlapIssue?.message).toContain('AVO-10')
     expect(JSON.stringify(context)).not.toContain('AVO-10')
+  })
+
+  /**
+   * An unprotected circuit keeps `protectionDeviceId: ''`. With that empty id left in the set of
+   * known protection devices, every later unprotected circuit found it there and counted itself
+   * as protected, so a board missing protection on every line was reported as fully protected.
+   */
+  it('counts every circuit without a protection device, not only the first', () => {
+    const project = seeded()
+    project.circuits = [
+      { id: 'a', name: 'Без защиты 1', loadName: 'A', current: 16, power: 1000, phase: 1, protectionDeviceId: '', color: '#c65c3b', wireCrossSection: 1.5, note: '' },
+      { id: 'b', name: 'Без защиты 2', loadName: 'B', current: 16, power: 1000, phase: 1, protectionDeviceId: '', color: '#c65c3b', wireCrossSection: 1.5, note: '' },
+      { id: 'c', name: 'С защитой', loadName: 'C', current: 16, power: 1000, phase: 1, protectionDeviceId: 'inst-2', color: '#c65c3b', wireCrossSection: 1.5, note: '' },
+    ]
+
+    const context = buildAssistantContext(project, definitions, validateProject(project, definitions))
+
+    expect(context.load.circuits).toBe(3)
+    expect(context.load.circuitsWithoutProtection).toBe(2)
   })
 })

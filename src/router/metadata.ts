@@ -109,13 +109,22 @@ export const applyPageMetadata = (metadata: PageMetadata) => {
   setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', metadata.description)
 
   const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin
+  // A canonical link tells a crawler which URL is the real one for this page, including on
+  // pages that must not be indexed at all — which is the case for everything behind the
+  // workspace. Pointing those pages at themselves would advertise a private board to a search
+  // engine, so a page that is not public gets no canonical reference; its `noindex` tag and
+  // robots.txt are what keep it out.
   let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
-  if (!canonical) {
-    canonical = document.createElement('link')
-    canonical.rel = 'canonical'
-    document.head.append(canonical)
+  if (metadata.public) {
+    if (!canonical) {
+      canonical = document.createElement('link')
+      canonical.rel = 'canonical'
+      document.head.append(canonical)
+    }
+    canonical.href = new URL(window.location.pathname, siteUrl).toString()
+  } else {
+    canonical?.remove()
   }
-  canonical.href = new URL(window.location.pathname, siteUrl).toString()
 
   const script = document.head.querySelector<HTMLScriptElement>('script[data-panel36-schema]')
   if (metadata.public) {

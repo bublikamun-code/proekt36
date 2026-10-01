@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createProject } from '../src/domain/project'
-import { CURRENT_PROJECT_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, PROJECTS_KEY, RECOVERY_KEY, WorkspaceRepository } from '../src/storage/projectRepository'
+import { CURRENT_PROJECT_KEY, JOURNAL_KEY, LEGACY_PROJECTS_KEY, PROJECTS_BACKUP_KEY, PROJECTS_KEY, RECOVERY_KEY, WorkspaceRepository } from '../src/storage/projectRepository'
 
 class MemoryStorage {
   private readonly values = new Map<string, string>()
@@ -98,5 +98,55 @@ describe('workspace repository', () => {
     storage.failOn = PROJECTS_KEY
     expect(() => repository.save({ projects: [first], models: [], currentProjectId: first.id })).toThrow('quota reached')
     expect(JSON.parse(storage.raw(PROJECTS_KEY)!)[0].id).toBe(second.id)
+  })
+
+  /**
+   * A snapshot spans three keys and localStorage has no transaction across them. Failing on the
+   * first key never proved much, because nothing had been written yet; failing on the last one used
+   * to leave new projects next to a currentProjectId that named a project which was no longer there.
+   */
+  it('rolls the whole snapshot back when a late key fails', () => {
+    const storage = new MemoryStorage()
+    const first = project('Первый')
+    const second = project('Второй')
+    const repository = new WorkspaceRepository(storage)
+    repository.save({ projects: [first], models: [], currentProjectId: first.id })
+
+    storage.failOn = CURRENT_PROJECT_KEY
+    expect(() => repository.save({ projects: [second], models: [], currentProjectId: second.id })).toThrow('quota reached')
+
+    expect(JSON.parse(storage.raw(PROJECTS_KEY)!)[0].id).toBe(first.id)
+    expect(storage.raw(CURRENT_PROJECT_KEY)).toBe(first.id)
+    expect(storage.raw(JOURNAL_KEY)).toBeNull()
+  })
+
+  it('replays the journal a killed tab left behind', () => {
+    const storage = new MemoryStorage()
+    const first = project('Первый')
+    const repository = new WorkspaceRepository(storage)
+    repository.save({ projects: [first], models: [], currentProjectId: first.id })
+
+    // The tab died between the first and the last write: projects already carry the new snapshot,
+    // the current id still names the old project, and the journal holds what was overwritten.
+    storage.setRaw(PROJECTS_KEY, JSON.stringify([project('Новый')]))
+    storage.setRaw(JOURNAL_KEY, JSON.stringify([{ key: PROJECTS_KEY, value: JSON.stringify([first]) }]))
+
+    const recovered = new WorkspaceRepository(storage).load([project('Fallback')])
+
+    expect(recovered.projects.map((item) => item.id)).toEqual([first.id])
+    expect(recovered.currentProjectId).toBe(first.id)
+    expect(storage.raw(JOURNAL_KEY)).toBeNull()
+  })
+
+  it('drops an unreadable journal instead of guessing the previous state', () => {
+    const storage = new MemoryStorage()
+    const kept = project('Целый')
+    storage.setRaw(PROJECTS_KEY, JSON.stringify([kept]))
+    storage.setRaw(JOURNAL_KEY, '{ не json')
+
+    const recovered = new WorkspaceRepository(storage).load([project('Fallback')])
+
+    expect(recovered.projects.map((item) => item.id)).toEqual([kept.id])
+    expect(storage.raw(JOURNAL_KEY)).toBeNull()
   })
 })
