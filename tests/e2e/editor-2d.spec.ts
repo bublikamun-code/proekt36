@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { dragWithPointer, gotoEditor } from './helpers'
+import { dragWithPointer, gotoEditor, openSidePanels } from './helpers'
 
 test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) => {
   await gotoEditor(page)
@@ -126,6 +126,35 @@ test('the print report module total matches the per-row table', async ({ page })
   const cells = await report.locator('.print-rack-summary tbody tr td:nth-child(2)').allTextContents()
   const rowsTotal = cells.reduce((sum, cell) => sum + Number(/\d+/.exec(cell ?? '')?.[0] ?? 0), 0)
   expect(total).toBe(rowsTotal)
+})
+
+test('the print report carries a single-line diagram of the supply path', async ({ page }) => {
+  await gotoEditor(page)
+  const report = page.locator('.print-report')
+  const diagram = report.locator('[data-single-line]')
+  await expect(diagram).toBeAttached()
+  // The seed project has no circuits, so the diagram has to say that instead of drawing an
+  // empty frame that reads like a finished drawing of nothing.
+  await expect(diagram.locator('.single-line-empty')).toContainText('Цепи не заданы')
+  await expect(diagram.locator('svg')).toHaveCount(0)
+
+  // Add a protection device and a circuit, and the drawing has to appear with that circuit on it.
+  await openSidePanels(page)
+  // Page-level locators, the way the rest of this file does it: the search box is not inside the
+  // element the panel is filtered by, so scoping it there waits for something that never matches.
+  await page.getByLabel('Поиск по каталогу').fill('AVO-10 1P C6')
+  await page.locator('.catalog-item').first().click()
+  // The seed project starts with no circuits at all, so the chain has to appear before the
+  // drawing has anything to draw: place a device, then add a circuit for it.
+  await page.getByRole('button', { name: '＋ Цепь' }).first().click()
+  await expect(page.locator('.circuit-card').first()).toBeVisible()
+
+  await expect(diagram.locator('svg')).toHaveCount(1)
+  await expect(diagram.locator('.sl-load-label').first()).toContainText('Цепь')
+  // Every load carries its current and its cross-section, which is what the drawing is for. The
+  // load caption has a class of its own: `.sl-caption` also covers the caption under a protection
+  // device, and that one carries the device name instead.
+  await expect(diagram.locator('.sl-load-caption').first()).toContainText('мм²')
 })
 
 test('deleting a device from the editor toolbar asks first', async ({ page }) => {

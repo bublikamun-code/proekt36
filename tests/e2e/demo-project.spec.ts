@@ -41,7 +41,8 @@ test.describe('separate read-only demo project', () => {
 
     await page.getByRole('tab', { name: 'BOM', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'BOM проекта' })).toBeVisible()
-    await expect(page.getByText(/ENMAS \/ CHINT/).first()).toBeVisible()
+    // Brands come from the working catalogue now; the demo names positions it can actually resolve.
+    await expect(page.getByText(/EKF|IEK/).first()).toBeVisible()
     await expect(page.getByText('«уточняется»', { exact: true }).first()).toBeVisible()
 
     await page.getByRole('tab', { name: 'Проверки', exact: true }).click()
@@ -52,7 +53,7 @@ test.describe('separate read-only demo project', () => {
 
     await page.getByRole('tab', { name: 'Цепи', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Цепи и фазовый баланс' })).toBeVisible()
-    await expect(page.getByText('Розетки гостиной', { exact: true })).toBeVisible()
+    await expect(page.locator('#demo-panel-circuits').getByText('Розетки гостиной', { exact: true })).toBeVisible()
     await expect(page.getByText('38 А', { exact: true })).toBeVisible()
   })
 

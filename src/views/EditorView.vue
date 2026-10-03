@@ -13,9 +13,11 @@ import ProjectPrintReport from '../components/ui/ProjectPrintReport.vue'
 import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
 import { usePreferencesStore } from '../stores/preferences'
-import { downloadProject, readProjectFile } from '../domain/projectFile'
+import { downloadProject } from '../domain/projectFile'
 import { useConfirm } from '../composables/useConfirm'
 import { useWorkspaceBackup } from '../composables/useWorkspaceBackup'
+import { modelWord } from '../domain/plural'
+import { modelsUsedBy, useProjectArchive } from '../composables/useProjectArchive'
 import type { Category, PanelProject } from '../domain/types'
 
 const route = useRoute()
@@ -77,6 +79,18 @@ const createFromMaster = ({ name, preset }: { name: string; preset: string }) =>
   store.newProject(name, preset); store.applyPreset(preset); wizardOpen.value = false; mobilePanel.value = null; void replaceEditorRoute(currentProjectId.value)
 }
 const exportProject = () => { downloadProject(currentProject.value); liveMessage.value = `Экспорт проекта «${currentProject.value.name}» начат.` }
+/** Local models this project actually reaches; the archive carries these and no more. */
+const projectCad = computed(() => modelsUsedBy([currentProject.value], importedModels.value).map((model) => model.name || model.fileName))
+const { importProjectFile, exportProjectArchive, busy: archiveBusy } = useProjectArchive()
+const exportProjectWithCad = async () => {
+  const result = await exportProjectArchive(currentProject.value)
+  // An archive is written in both cases, so the two branches must not promise a JSON file.
+  liveMessage.value = result.missing
+    ? `Архив проекта выгружен: ${result.archive} ${modelWord(result.archive)}, но ${result.missing} ${modelWord(result.missing)} в библиотеке не найдено и в архив не попало.`
+    : result.archive
+      ? `Архив проекта выгружен вместе с моделями: ${result.archive} ${modelWord(result.archive)}.`
+      : 'Архив проекта выгружен: локальных CAD-моделей у проекта нет, поэтому в нём только проект.'
+}
 /**
  * The archive never carries CAD binaries, so a project that uses a locally imported model
  * only comes back as a placeholder. The composable says so before the download, which beats
@@ -119,7 +133,14 @@ const saveNow = async () => {
 }
 const importProject = async (event: Event) => {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
-  try { store.importProject(await readProjectFile(file)); void replaceEditorRoute(currentProjectId.value) }
+  try {
+    // A JSON envelope or an archive that also carries the CAD models; the reader tells them apart.
+    const result = await importProjectFile(file)
+    void replaceEditorRoute(currentProjectId.value)
+    liveMessage.value = result.models
+      ? `Проект «${result.project.name}» импортирован вместе с моделями: ${result.models}.`
+      : `Проект «${result.project.name}» импортирован.`
+  }
   catch (error) { store.notify(error instanceof Error ? error.message : 'Не удалось импортировать проект', 'error') }
   input.value = ''
 }
@@ -249,10 +270,11 @@ onUnmounted(() => {
       </div>
       <div class="header-status" :class="{ 'status-error': storageStatus === 'save-failed', 'status-warning': storageStatus === 'storage-unavailable' }" role="status" aria-live="polite" :title="storageError || autosaveLabel"><i></i><span>{{ autosaveLabel }}</span><b v-if="autosaveTime" class="mono">{{ autosaveTime }}</b></div>
       <div class="header-actions">
-        <input ref="jsonInput" class="sr-only" tabindex="-1" aria-label="Файл проекта JSON" type="file" accept=".json,application/json" @change="importProject" />
-        <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии" type="file" accept=".json,application/json" @change="prepareBackupRestore" />
-        <button class="toolbar-button" @click="jsonInput?.click()">Импорт JSON</button>
+        <input ref="jsonInput" class="sr-only" tabindex="-1" aria-label="Файл проекта: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="importProject" />
+        <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="prepareBackupRestore" />
+        <button class="toolbar-button" @click="jsonInput?.click()">Импорт файла</button>
         <button class="toolbar-button" @click="exportProject">Экспорт</button>
+        <button v-if="projectCad.length" class="toolbar-button" :disabled="archiveBusy" @click="exportProjectWithCad">Экспорт с моделями</button>
         <button class="toolbar-button" @click="exportBackup">Создать копию</button>
         <button class="toolbar-button" @click="chooseBackupRestore">Восстановить</button>
         <button class="toolbar-button" :disabled="storageStatus === 'saved'" @click="saveNow">Сохранить</button>

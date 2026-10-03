@@ -7,7 +7,12 @@ import { APP_VERSION } from '../version'
 export const PROJECT_SCHEMA_VERSION = 2
 export const APPLICATION_REVISION = APP_VERSION
 export const CATALOG_REVISION = DATA_CATALOG_REVISION
-export const VALIDATION_REVISION = 2
+/**
+ * The rule set, bumped whenever a check is added, removed or reworded. A project saved under an
+ * older revision keeps reading, but the report says which rules produced it, so a change here is
+ * visible in the printed output instead of silently changing what "no issues" means.
+ */
+export const VALIDATION_REVISION = 3
 
 /**
  * Orders two revision strings and returns a negative number when `left` is older. Both

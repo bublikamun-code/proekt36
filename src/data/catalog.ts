@@ -1,8 +1,16 @@
 import type { Category, DeviceDefinition } from '../domain/types'
 
 /** Bump when the catalog shape or product set changes. */
-export const CATALOG_REVISION = '2026-09-24.1'
+export const CATALOG_REVISION = '2026-10-01.1'
 
+/**
+ * Built-in positions are real products with real prices, but their parameters were carried over
+ * from the first slice of the project and never compared against a manufacturer datasheet. They
+ * are marked `unverified` for that reason, and deliberately carry no `sourceUrl`: the catalogue
+ * tells the reader how far each position has been checked, and claiming a source for one nobody
+ * read would make the whole list read as better sourced than it is. The `enmasDevice` and
+ * `sampleDevice` builders below mark their rows from the series they were generated from.
+ */
 const device = (
   id: string, name: string, brand: string, sku: string, category: Category,
   moduleWidth: number, poles: number, ratedCurrent: number, price: number,
@@ -11,19 +19,17 @@ const device = (
   id, name, brand, sku, category, moduleWidth, poles, ratedCurrent, voltage, bus,
   price, weight, height: 82, depth: 70,
   color: category === 'MCB' ? '#f3f4ef' : category === 'SPD' ? '#e7b957' : '#f7f5ef',
+  verificationStatus: 'unverified',
 })
 
-export const categoryLabels: Record<Category, string> = {
-  MCB: 'Автоматы', RCCB: 'УЗО', RCBO: 'Дифавтоматы', SPD: 'УЗИП',
-  relay: 'Реле и контакторы', terminals: 'Клеммы', busbar: 'Шины', meter: 'Счётчики', PSU: 'Блоки питания',
-}
-
-export const builtinCatalog: DeviceDefinition[] = [
-  device('ekf-mcb-1p-c6', 'AVO-10 1P C6', 'EKF', 'AVO-10-1P-C06', 'MCB', 1, 1, 6, 248, 0.12, 230),
-  device('ekf-mcb-1p-b16', 'AVO-10 1P B16', 'EKF', 'AVO-10-1P-B16', 'MCB', 1, 1, 16, 254, 0.12, 230),
-  device('ekf-mcb-2p-c16', 'AVO-10 2P C16', 'EKF', 'AVO-10-2P-C16', 'MCB', 2, 2, 16, 492, 0.24),
-  device('ekf-mcb-3p-c25', 'AVO-10 3P C25', 'EKF', 'AVO-10-3P-C25', 'MCB', 3, 3, 25, 714, 0.37),
-  device('ekf-mcb-4p-b32', 'AVO-10 4P B32', 'EKF', 'AVO-10-4P-B32', 'MCB', 4, 4, 32, 936, 0.48),
+/**
+ * Positions that stay out of the working catalogue but are still recognised when a project names
+ * them. An imported file may reference a device this build does not stock; the importer has to
+ * recognise the id rather than report the file as broken, and the workspace shows it as a missing
+ * position the user can replace. They are kept here so that promise does not depend on this list
+ * staying short.
+ */
+export const referenceCatalog: DeviceDefinition[] = [
   device('iek-mcb-1p-c10', 'BAO-10 1P C10', 'IEK', 'BAO-10-1P-C10', 'MCB', 1, 1, 10, 286, 0.13, 230),
   device('iek-mcb-1p-c32', 'BAO-10 1P C32', 'IEK', 'BAO-10-1P-C32', 'MCB', 1, 1, 32, 305, 0.14, 230),
   device('iek-mcb-2p-b20', 'VAO-10 2P B20', 'IEK', 'VAO-10-2P-B20', 'MCB', 2, 2, 20, 524, 0.25),
@@ -34,31 +40,59 @@ export const builtinCatalog: DeviceDefinition[] = [
   device('abb-mcb-3p-b25', 'S200 3P B25', 'ABB', '2CDS253001R0254', 'MCB', 3, 3, 25, 1980, 0.41),
   device('dkc-mcb-1p-c16', 'DNM-10 1P C16', 'DKC', 'DNM10-1P-C16', 'MCB', 1, 1, 16, 240, 0.11, 230),
   device('dekraft-mcb-2p-c25', 'АВТ 2P C25', 'DEKraft', 'AVT-2P-C25', 'MCB', 2, 2, 25, 470, 0.23),
-  device('ekf-rccb-2p-25', 'FI-10 2P 25A 30mA', 'EKF', 'FI-10-2P-25-30', 'RCCB', 2, 2, 25, 1820, 0.25),
-  device('ekf-rccb-4p-40', 'FI-10 4P 40A 30mA', 'EKF', 'FI-10-4P-40-30', 'RCCB', 4, 4, 40, 2740, 0.44),
   device('iek-rccb-2p-40', 'FI-10 2P 40A 30mA', 'IEK', 'FI-10-2P-40-30', 'RCCB', 2, 2, 40, 1640, 0.25),
   device('schneider-rccb-2p-25', 'ID RCCB 2P 25A 30mA', 'Schneider Electric', 'A9D71225', 'RCCB', 2, 2, 25, 4380, 0.25),
   device('abb-rccb-4p-63', 'F202 AC-63/0.03', 'ABB', '2CSF202001R0630', 'RCCB', 4, 4, 63, 6120, 0.48),
-  device('ekf-rcbo-1p-c16', 'DI-10 1P C16 6kA 30mA', 'EKF', 'DI-10-1P-C16-30', 'RCBO', 2, 1, 16, 1490, 0.23, 230),
   device('iek-rcbo-1p-b16', 'DI-10 1P B16 6kA 30mA', 'IEK', 'DI-10-1P-B16-30', 'RCBO', 2, 1, 16, 1510, 0.23, 230),
   device('schneider-rcbo-1p-c20', 'iID 1P C20 30mA', 'Schneider Electric', 'A9D64120', 'RCBO', 2, 1, 20, 5120, 0.24, 230),
-  device('ekf-spd-t1-3p-n-pe', 'DV-T1 3P+N+PE 25kA', 'EKF', 'DV-T1-3PNPE-25', 'SPD', 4, 4, 63, 7480, 0.72),
   device('schneider-spd-t2-4p', 'PRD 4P 15kA T2', 'Schneider Electric', 'PRD4P15NPE', 'SPD', 4, 4, 63, 11900, 0.63),
   device('abb-spd-t2-3p-n-pe', 'T2-T3 3P+N+PE 20kA', 'ABB', '2CDE653011R0100', 'SPD', 4, 4, 63, 9800, 0.66),
-  device('iek-relay-4c', 'RKM-1 4CO 16A', 'IEK', 'RKM-1-4CO-16', 'relay', 1, 4, 16, 1320, 0.14, 230, 'N'),
   device('ekf-contactor-2p-25', 'KM-10 2P 25A 230В', 'EKF', 'KM10-2P-25-AC', 'relay', 2, 2, 25, 2240, 0.29, 230, 'N'),
   device('abb-contactor-3p-50', 'AF09-30-10-13', 'ABB', '1SBL171001R1310', 'relay', 3, 3, 50, 4290, 0.38),
   device('schneider-relay-2c', 'RXM 2CO 10A', 'Schneider Electric', 'RXMAB2AB', 'relay', 1, 2, 10, 2860, 0.17, 230, 'N'),
+  device('dekraft-terminal-1p', 'Клемма ПБ 4 мм²', 'DEKraft', 'ПБ-4', 'terminals', 1, 1, 41, 105, 0.04, 400, 'N'),
+  device('iek-meter-1p', 'СЭТ 1P 230В', 'IEK', 'СЭТ-1П', 'meter', 3, 1, 32, 2480, 0.32, 230),
+  device('abb-meter-3p', 'EQM-B 3P 65A', 'ABB', 'EQMB-3P-65', 'meter', 6, 3, 65, 14200, 0.52),
+  device('meanwell-psu-24v-10a', 'DRP-24V10W', 'MEAN WELL', 'DRP-24V10W', 'PSU', 5, 2, 10, 9200, 0.61, 230, 'N'),
+]
+
+export const categoryLabels: Record<Category, string> = {
+  MCB: 'Автоматы', RCCB: 'УЗО', RCBO: 'Дифавтоматы', SPD: 'УЗИП',
+  relay: 'Реле и контакторы', terminals: 'Клеммы', busbar: 'Шины', meter: 'Счётчики', PSU: 'Блоки питания',
+}
+
+/**
+ * The working catalogue: one position per kind, plus the pole variants that change how the device
+ * is wired.
+ *
+ * The full built-in list and the generated ENMAS/CHINT series stay in this file, because a project
+ * imported from elsewhere may name any of them and the importer has to recognise those ids. What
+ * the workspace *loads* is this short list — see `workspaceCatalog`. Listing several hundred
+ * positions that differ only in a rating nobody chooses on purpose is a list nobody reads, and it
+ * was the reason the catalogue panel and the demo drifted apart.
+ */
+export const builtinCatalog: DeviceDefinition[] = [
+  device('ekf-mcb-1p-c6', 'AVO-10 1P C6', 'EKF', 'AVO-10-1P-C06', 'MCB', 1, 1, 6, 248, 0.12, 230),
+  device('ekf-mcb-1p-b16', 'AVO-10 1P B16', 'EKF', 'AVO-10-1P-B16', 'MCB', 1, 1, 16, 254, 0.12, 230),
+  device('ekf-mcb-2p-c16', 'AVO-10 2P C16', 'EKF', 'AVO-10-2P-C16', 'MCB', 2, 2, 16, 492, 0.24),
+  device('ekf-mcb-3p-c25', 'AVO-10 3P C25', 'EKF', 'AVO-10-3P-C25', 'MCB', 3, 3, 25, 714, 0.37),
+  device('ekf-mcb-4p-b32', 'AVO-10 4P B32', 'EKF', 'AVO-10-4P-B32', 'MCB', 4, 4, 32, 936, 0.48),
+  device('ekf-rccb-2p-25', 'FI-10 2P 25A 30mA', 'EKF', 'FI-10-2P-25-30', 'RCCB', 2, 2, 25, 1820, 0.25),
+  device('ekf-rccb-4p-40', 'FI-10 4P 40A 30mA', 'EKF', 'FI-10-4P-40-30', 'RCCB', 4, 4, 40, 2740, 0.44),
+  device('ekf-rcbo-1p-c16', 'DI-10 1P C16 6kA 30mA', 'EKF', 'DI-10-1P-C16-30', 'RCBO', 2, 1, 16, 1490, 0.23, 230),
+  device('ekf-spd-t1-3p-n-pe', 'DV-T1 3P+N+PE 25kA', 'EKF', 'DV-T1-3PNPE-25', 'SPD', 4, 4, 63, 7480, 0.72),
+  // Single-phase board, single-phase surge protection. The price is deliberately zero: this row was
+  // added to make the demo board electrically right, and a number nobody checked is exactly what
+  // the catalogue is not allowed to show. Zero reads as «уточняется» and never as free.
+  device('ekf-spd-t1-2p', 'DV-T1 1P+N 25kA', 'EKF', 'DV-T1-1PN-25', 'SPD', 2, 2, 40, 0, 0.44, 230),
+  device('iek-relay-4c', 'RKM-1 4CO 16A', 'IEK', 'RKM-1-4CO-16', 'relay', 1, 4, 16, 1320, 0.14, 230, 'N'),
   device('iek-terminal-1p-gray', 'Клемма ПВ 1,5 мм²', 'IEK', 'ПВ-1.5', 'terminals', 1, 1, 16, 82, 0.03, 400, 'N'),
   device('iek-terminal-1p-blue', 'Клемма ЗБИ 1,5 мм²', 'IEK', 'ЗБИ-1.5', 'terminals', 1, 1, 16, 98, 0.03, 400, 'PE'),
   device('ekf-terminal-1p-gray', 'Клемма КВ 2,5 мм²', 'EKF', 'КВ-2.5', 'terminals', 1, 1, 32, 92, 0.04, 400, 'L'),
-  device('dekraft-terminal-1p', 'Клемма ПБ 4 мм²', 'DEKraft', 'ПБ-4', 'terminals', 1, 1, 41, 105, 0.04, 400, 'N'),
   device('ekf-meter-3p', 'СЭТ-р 3x220/380', 'EKF', 'СЭТ-Р-МАСТЕР', 'meter', 6, 3, 100, 4850, 0.45),
-  device('iek-meter-1p', 'СЭТ 1P 230В', 'IEK', 'СЭТ-1П', 'meter', 3, 1, 32, 2480, 0.32, 230),
-  device('abb-meter-3p', 'EQM-B 3P 65A', 'ABB', 'EQMB-3P-65', 'meter', 6, 3, 65, 14200, 0.52),
   device('schneider-psu-24v-5a', 'Phaseo 24V 5A', 'Schneider Electric', 'PHPS0124AC', 'PSU', 4, 2, 5, 12600, 0.56, 230, 'N'),
-  device('meanwell-psu-24v-10a', 'DRP-24V10W', 'MEAN WELL', 'DRP-24V10W', 'PSU', 5, 2, 10, 9200, 0.61, 230, 'N'),
 ]
+
 
 const enmasDevice = (
   id: string,
@@ -259,5 +293,7 @@ export const sampleCatalog: DeviceDefinition[] = [
 ]
 
 export const enmasSeriesCatalog = enmasCatalog
-export const allCatalog = [...builtinCatalog, ...enmasCatalog, ...sampleCatalog]
+export const allCatalog = [...builtinCatalog, ...referenceCatalog, ...enmasCatalog, ...sampleCatalog]
+/** What the workspace loads: the short list, the City9 model samples, and whatever the user imported. */
+export const workspaceCatalog = [...builtinCatalog, ...sampleCatalog]
 export const catalogCategories = Object.keys(categoryLabels) as Category[]

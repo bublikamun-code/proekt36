@@ -4,14 +4,16 @@ import { storeToRefs } from 'pinia'
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from '../../domain/layout'
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { cabinetDefinitions, cabinetSpecLabel, railDefinitions } from '../../data/enclosures'
-import { phaseBalance, validateProject } from '../../domain/validation'
+import { phaseBalance } from '../../domain/electrical'
+import { validateProject } from '../../domain/validation'
 import { useProjectStore } from '../../stores/project'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
-import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
+import { getDeviceFaceMetrics } from '../../domain/faceMetrics'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
 import AssistantPanel from '../assistant/AssistantPanel.vue'
 import { useConfirm } from '../../composables/useConfirm'
 import { CONNECTION_THICKNESS_MM } from '../../domain/connectionSpec'
+import { CONDUCTOR_SECTIONS_MM2 } from '../../domain/conductorSpec'
 import type { Category, RailDefinition } from '../../domain/types'
 
 const emit = defineEmits<{ focusCategory: [Category] }>()
@@ -35,6 +37,12 @@ const BUS_OPTIONS: AppSelectOption[] = [
   { value: 'N', label: 'N · нейтраль' },
   { value: 'PE', label: 'PE · земля' },
 ]
+/**
+ * The list of real cross-sections, taken from the domain rather than written out here. A free
+ * number field used to offer any half-millimetre step, so 3.5 mm² — which does not exist — was
+ * one keystroke away, and the conductor check had nothing sensible to say about it.
+ */
+const CONDUCTOR_OPTIONS: AppSelectOption[] = CONDUCTOR_SECTIONS_MM2.map((value) => ({ value: String(value), label: String(value) }))
 
 const store = useProjectStore()
 const { confirm } = useConfirm()
@@ -141,7 +149,7 @@ const changeSelectedQuantity = (event: Event) => {
   const input = event.target as HTMLInputElement
   if (!store.updateSelected({ quantity: input.valueAsNumber })) input.value = String(selectedDevice.value?.quantity ?? 1)
 }
-const changeCircuitNumber = (id: string, key: 'current' | 'power' | 'wireCrossSection', event: Event) => {
+const changeCircuitNumber = (id: string, key: 'current' | 'power', event: Event) => {
   const input = event.target as HTMLInputElement
   if (!store.updateCircuit(id, { [key]: input.valueAsNumber })) {
     const circuit = currentProject.value.circuits.find((item) => item.id === id)
@@ -240,7 +248,7 @@ const migrationIssueLabel = (code: string) => ({
           <label>Мощность, Вт<input :value="circuit.power" type="number" min="0" step="1" @change="changeCircuitNumber(circuit.id, 'power', $event)" /></label>
           <label>Фаза<AppSelect label="Фаза" :model-value="String(circuit.phase)" :options="PHASE_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { phase: Number($event) as 1 | 2 | 3 })" /></label>
           <label>Защита<AppSelect label="Защита" :model-value="circuit.protectionDeviceId" :options="protectionOptions()" placeholder="Выберите аппарат" @update:model-value="store.updateCircuit(circuit.id, { protectionDeviceId: $event })" /></label>
-          <label>Провод, мм²<input :value="circuit.wireCrossSection" type="number" min="0.5" step="0.5" @change="changeCircuitNumber(circuit.id, 'wireCrossSection', $event)" /></label>
+          <label>Провод, мм²<AppSelect label="Провод, мм²" :model-value="String(circuit.wireCrossSection)" :options="CONDUCTOR_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { wireCrossSection: Number($event) })" /></label>
           <label>Цвет<input :value="circuit.color" type="color" @change="store.updateCircuit(circuit.id, { color: ($event.target as HTMLInputElement).value })" /></label>
         </div>
         <div class="connection-heading"><span>Подключения <b>{{ connectionsFor(circuit.id).length }}</b></span><button class="text-button" :disabled="!currentProject.devices.length" @click="store.addConnection(circuit.id)">＋ Подключение</button></div>

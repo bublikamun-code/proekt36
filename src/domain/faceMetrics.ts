@@ -1,4 +1,4 @@
-import type { DeviceDefinition } from '../../../domain/types'
+import type { DeviceDefinition } from './types'
 
 /** Frontal face drawings live in millimetres so a 1P and a 4P keep their real proportions. */
 export const FACE_MODULE_MM = 18
@@ -110,6 +110,35 @@ export const faceShellFamily = (product: DeviceDefinition): string => {
 export const faceSharedToggle = (product: DeviceDefinition): boolean => {
   if (!['MCB', 'RCCB', 'RCBO'].includes(product.category)) return false
   return Math.max(1, product.poles || 1) < Math.max(1, product.moduleWidth || 1)
+}
+
+/**
+ * The screws of a terminal block, in face millimetres.
+ *
+ * They used to be computed inside DeviceFace, which meant the drawing knew where its connection
+ * points were and the domain did not: a wire tool had no way to aim at a screw it could see. The
+ * geometry now lives here and the component reads it, so the picture and the wire cannot drift
+ * apart — the drawing is unchanged, but it is now the same fact both read.
+ */
+export interface FaceSocket { cx: number; cy: number; r: number }
+
+export const faceSocketGrid = (product: DeviceDefinition, metrics: DeviceFaceMetrics): FaceSocket[] => {
+  const isNgu = product.series === 'NGU'
+  if (isNgu) {
+    return [0.34, 0.66].flatMap((ratioY) => [0.32, 0.68].map((ratioX) => ({
+      cx: metrics.widthMm * ratioX,
+      cy: metrics.heightMm * ratioY,
+      r: Math.min(2, metrics.body.width * 0.08),
+    })))
+  }
+  const total = Math.max(2, Math.min(product.terminalCount || 6, 10))
+  const rows = Math.max(2, Math.min(Math.round(total / 2), 4))
+  const { body, heightMm } = metrics
+  return Array.from({ length: rows }, (_, row) => [0.28, 0.72].map((ratio) => ({
+    cx: body.x + body.width * ratio,
+    cy: heightMm * (0.24 + (row * 0.48) / Math.max(1, rows - 1)),
+    r: Math.min(1.9, body.width * 0.13),
+  }))).flat()
 }
 
 /** How many terminal columns the chassis shows on top and bottom. */

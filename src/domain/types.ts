@@ -15,7 +15,16 @@ export type BusType = 'L' | 'N' | 'PE'
 
 export type RailSlotCount = 12 | 18
 export type EnclosureMountingType = 'embedded' | 'surface'
-export type VerificationStatus = 'verified' | 'template' | 'legacy'
+/**
+ * How far a catalogue position has been checked.
+ *
+ * `unverified` is the state most of the built-in catalogue is in: the position names a real
+ * product, but its parameters were never compared against a manufacturer datasheet, and no
+ * `sourceUrl` is claimed for it. It used to have no status at all and the UI said «Статус не
+ * указан», which reads like unfinished data rather than a deliberate statement — the field is
+ * now required on `DeviceDefinition`, so a new producer cannot forget it again.
+ */
+export type VerificationStatus = 'verified' | 'unverified' | 'template' | 'legacy'
 
 export interface RailDefinition {
   id: 'rail-12' | 'rail-18'
@@ -94,7 +103,11 @@ export interface DeviceDefinition {
   residualCurrentMa?: number
   terminalCount?: number
   sourceUrl?: string
-  verificationStatus?: VerificationStatus
+  /**
+   * Required: a position without a status is indistinguishable from a position nobody looked at.
+   * Producers outside the catalogue set it to `unverified` (see `VerificationStatus`).
+   */
+  verificationStatus: VerificationStatus
 }
 
 export interface PlacedDevice {

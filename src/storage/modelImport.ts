@@ -56,7 +56,13 @@ async function validateGltfJson(data: ArrayBuffer, file: File): Promise<Prepared
   return { metadata: baseMetadata(file, 'gltf'), data, mimeType: 'model/gltf+json', fileName: file.name }
 }
 
-const assertSafeZipDirectory = (data: ArrayBuffer) => {
+/**
+ * Checks the archive's central directory before anything is unpacked: entry count, total
+ * uncompressed size, and the compression ratio. Exported because the project archive unpacks a ZIP
+ * too, and unpacking first is how a 123 KB file turns into 120 MB of memory before the size check
+ * gets a chance to run.
+ */
+export const assertSafeZipDirectory = (data: ArrayBuffer) => {
   const view = new DataView(data)
   const eocd = findEocd(view)
   if (eocd < 0) throw new Error('Не удалось открыть ZIP-архив')

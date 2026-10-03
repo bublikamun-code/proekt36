@@ -137,11 +137,15 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
   })
 
   await page.getByRole('button', { name: 'Показать боковые панели' }).click()
-  await page.getByRole('button', { name: /NB1-63H 1P 6A C/ }).click()
+  // The one working-catalogue position with no confirmed price. The test needs a line that reads
+  // «уточняется», and inventing a price to get one would defeat the thing it checks.
+  await page.getByRole('button', { name: /DV-T1 1P\+N 25kA/ }).click()
   const bom = page.getByRole('region', { name: 'Сводная ведомость' })
   await expect(bom).toContainText('«уточняется»')
   await expect(bom).toContainText('Коммерческая сумма не рассчитана')
-  await expect(bom).toContainText('Источник указан')
+  // No position in the short working catalogue carries a source URL, so the report must not claim
+  // one. The wording that would have been a lie is the assertion.
+  expect(await bom.getByText('Источник указан').count()).toBe(0)
 
   await page.getByRole('button', { name: 'Печать', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as Window & { __panel36Printed?: boolean }).__panel36Printed)).toBe(true)
@@ -152,6 +156,7 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
   await expect(report).toContainText('Освещение квартиры')
   await expect(report).toContainText('Сводка 2D-компоновки')
   await expect(report).toContainText('«уточняется»')
+  expect(await report.getByText('Источник указан').count()).toBe(0)
   await expect(report).toContainText('Коммерческая сумма не рассчитана')
   await expect(report).toContainText('Диагностика и проверки')
   await expect(report).toContainText('Редакции:')

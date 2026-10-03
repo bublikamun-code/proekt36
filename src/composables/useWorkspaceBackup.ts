@@ -1,17 +1,10 @@
 import { computed, ref, type Ref } from 'vue'
-import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
+import { backupNeedsLocalCad, describeBackupRestore, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
+import { modelWord, projectWord } from '../domain/plural'
 import { useProjectStore } from '../stores/project'
+import { useProjectArchive } from './useProjectArchive'
+import { BACKUP_ENTRY, jsonFileFor, type ArchivedModel } from '../domain/cadArchive'
 import type { ModelMetadata, PanelProject } from '../domain/types'
-
-/** Russian plural for "проект", which has three forms and is easy to get wrong by hand. */
-export const projectWord = (count: number) => {
-  const mod100 = count % 100
-  const mod10 = count % 10
-  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
-  if (mod10 === 1) return 'проект'
-  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
-  return 'проектов'
-}
 
 /** Joins the first few names and counts the rest, so a long list does not fill the dialog. */
 const sampleNames = (names: string[]) => `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` и ещё ${names.length - 3}` : ''}`
@@ -57,7 +50,10 @@ export interface WorkspaceBackupOptions {
  */
 export const useWorkspaceBackup = (options: WorkspaceBackupOptions) => {
   const store = useProjectStore()
+  const archive = useProjectArchive()
   const pendingBackup = ref<RestoredWorkspaceBackup | null>(null)
+  /** Models carried by the picked archive, restored only after the user confirms. */
+  const pendingCad = ref<ArchivedModel[]>([])
   const { backupInput } = options
 
   const reportError = options.reportError ?? ((text: string) => store.notify(text, 'error'))
@@ -77,6 +73,24 @@ export const useWorkspaceBackup = (options: WorkspaceBackupOptions) => {
     options.announce('Экспорт резервной копии начат.')
   }
 
+  /**
+   * The archive variant. It asks the same question as the JSON copy and then does what the copy
+   * cannot: carry the models themselves, so a restore after clearing the browser does not come
+   * back full of "нет в каталоге".
+   */
+  const exportBackupWithCad = async () => {
+    const result = await archive.exportWorkspaceArchive()
+    if (!result.archive && !result.missing) {
+      // Nothing in the projects reaches outside the catalogue, so there is nothing to carry and
+      // the plain copy is the better file. No archive is left behind and no success is announced.
+      await exportBackup()
+      return
+    }
+    options.announce(result.missing
+      ? `Архив выгружен: ${result.archive} ${modelWord(result.archive)}, но ${result.missing} ${modelWord(result.missing)} в локальной библиотеке не найдено и в архив не попала.`
+      : `Архив с моделями выгружен: ${result.archive} ${modelWord(result.archive)}.`)
+  }
+
   const chooseBackupRestore = () => {
     options.beforeChoose?.()
     backupInput.value?.click()
@@ -87,9 +101,14 @@ export const useWorkspaceBackup = (options: WorkspaceBackupOptions) => {
     const file = input.files?.[0]
     if (!file) return
     try {
-      pendingBackup.value = await readWorkspaceBackup(file)
+      const opened = await archive.openArchive(file)
+      pendingCad.value = opened?.models ?? []
+      pendingBackup.value = opened
+        ? await readWorkspaceBackup(jsonFileFor(BACKUP_ENTRY, opened.json))
+        : await readWorkspaceBackup(file)
     } catch (error) {
       pendingBackup.value = null
+      pendingCad.value = []
       reportError(error instanceof Error ? error.message : RESTORE_READ_FAILED)
     } finally {
       // Cleared so re-picking the same file fires `change` again.
@@ -100,20 +119,36 @@ export const useWorkspaceBackup = (options: WorkspaceBackupOptions) => {
   const confirmBackupRestore = async () => {
     if (!pendingBackup.value) return
     const restored = pendingBackup.value
-    pendingBackup.value = null
-    await store.restoreWorkspaceBackup(restored)
-    await options.onRestored?.()
-    options.announce(RESTORED_MESSAGE(restored.projects.length, restored.pendingLocalCad.length))
+    const models = pendingCad.value
+    // The picked file is only forgotten once the restore actually happened. A storage failure in
+    // between used to discard the user's choice and leave the promise unhandled.
+    try {
+      await store.restoreWorkspaceBackup(restored)
+      pendingBackup.value = null
+      pendingCad.value = []
+      // Models go in after the projects, so a project that references one finds it already there.
+      const carried = models.length ? await archive.restoreModels(models) : { models: 0, skipped: 0 }
+      await options.onRestored?.()
+      options.announce(`${RESTORED_MESSAGE(restored.projects.length, restored.pendingLocalCad.length)}${carried.models ? ` Возвращено моделей: ${carried.models}.` : ''}`)
+    } catch (error) {
+      reportError(error instanceof Error ? error.message : 'Не удалось восстановить копию')
+    }
   }
 
+  /**
+   * The archive carries the models, so the two files have to be described differently: a JSON copy
+   * says the geometry is not in it and will have to be imported again, an archive says what it does
+   * bring back. Telling an archive "the files are not in the copy" was the wrong thing in both
+   * directions — it lost the point of the archive and contradicted the message shown afterwards.
+   */
   const backupDescription = computed(() => {
     const backup = pendingBackup.value
     if (!backup) return ''
-    const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
-    if (!backup.pendingLocalCad.length) return base
-    const pending = backup.pendingLocalCad.length
-    const plural = pending === 1 ? 'позиция опирается' : 'позиций опираются'
-    return `${base} В копии ${pending} ${plural} на локально импортированные CAD-модели (${sampleNames(backup.pendingLocalCad)}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
+    // The description is a pure function of the copy and what the archive carries, so it lives in
+    // the domain and is tested directly. Its earlier version lived in this computed, which is how a
+    // branch became unreachable: the condition could never be false, and nobody noticed because
+    // reading a computed is not a test.
+    return describeBackupRestore(backup, pendingCad.value.map((item) => item.metadata.id))
   })
 
   const downloadRecoverySnapshot = () => {
@@ -131,5 +166,5 @@ export const useWorkspaceBackup = (options: WorkspaceBackupOptions) => {
     if (await store.restoreStorageBackup()) options.announce('Восстановлен предыдущий снимок локального хранилища.')
   }
 
-  return { pendingBackup, exportBackup, chooseBackupRestore, prepareBackupRestore, confirmBackupRestore, backupDescription, downloadRecoverySnapshot, rollbackToSnapshot }
+  return { pendingBackup, archiveBusy: archive.busy, exportBackup, exportBackupWithCad, chooseBackupRestore, prepareBackupRestore, confirmBackupRestore, backupDescription, downloadRecoverySnapshot, rollbackToSnapshot, archive }
 }

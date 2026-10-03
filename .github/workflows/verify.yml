@@ -1,0 +1,47 @@
+name: verify
+
+# `npm run verify` is the gate this project already uses locally: typecheck, unit tests, e2e
+# against the dev server, and e2e against a production build. Running the same command here is the
+# point — a CI that runs a different set of checks is a second, quietly diverging definition of
+# "works".
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The e2e suite is the slow part and the one that needs a browser, so the fast checks run
+      # first: a type error should not cost a Chromium download.
+      - name: Типы
+        run: npm run typecheck
+
+      - name: Модульные тесты
+        run: npm test
+
+      - name: Установка браузера
+        run: npx playwright install --with-deps chromium
+
+      - name: Проверки целиком
+        run: npm run verify
+        env:
+          # Chromium in CI has no sandbox namespaces; the browser tests are the only thing running
+          # and they drive a local dev server, so the sandbox is the part that has to go.
+          PLAYWRIGHT_CHROMIUM_DISABLE_SANDBOX: '1'

@@ -80,7 +80,7 @@ test.describe('public site and workspace shell', () => {
   test('dashboard imports a raw project and routes to the editor', async ({ page }) => {
     await unlockWorkspace(page)
     await page.goto('/app/projects')
-    await page.getByLabel('Файл проекта JSON').setInputFiles({ name: 'project.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(rawProject)) })
+    await page.getByLabel('Файл проекта: JSON или архив').setInputFiles({ name: 'project.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(rawProject)) })
     await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/editor/)
     await expect(page.getByRole('button', { name: /Текущий проект/ })).toContainText('Импорт из workspace')
   })

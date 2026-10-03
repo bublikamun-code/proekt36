@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
+import { workspaceCatalog } from '../../src/data/catalog'
 import { gotoEditor } from './helpers'
+
+const workspaceCatalogSize = workspaceCatalog.length
 
 /**
  * The catalogue is mostly generated from a series template, so "confirmed" is the exception.
@@ -22,11 +25,18 @@ test.describe('catalogue provenance', () => {
     const items = page.locator('.catalog-list .catalog-item')
     const flagged = page.locator('.catalog-list .verify-flag')
 
-    expect(await items.count()).toBeGreaterThan(100)
+    // The working catalogue is a short list on purpose — one position per kind, plus the pole
+    // variants that change the wiring. The size assertion that used to demand more than a hundred
+    // rows was defending a list nobody chose from.
+    expect(await items.count()).toBeGreaterThanOrEqual(workspaceCatalogSize)
     expect(await flagged.count()).toBeGreaterThan(0)
-    // A missing status is its own case: the built-in catalogue has no `verificationStatus`
-    // at all, and those are real products, not historical data.
-    await expect(page.locator('.catalog-list .verify-flag', { hasText: 'Статус не указан' }).first()).toBeAttached()
+    // No position may be left without a status. The built-in catalogue used to have no
+    // `verificationStatus` at all, which the list rendered as "Статус не указан" — a wording
+    // that reads like unfinished data rather than the deliberate statement it is.
+    expect(await page.locator('.catalog-list .verify-flag', { hasText: 'Статус не указан' }).count()).toBe(0)
+    // Those positions are real products whose parameters nobody checked, which is not the same
+    // claim as "historical data" and must not borrow its wording.
+    await expect(page.locator('.catalog-list .verify-flag', { hasText: 'Параметры не подтверждены' }).first()).toBeAttached()
     expect(await page.locator('.catalog-list .verify-flag', { hasText: 'Исторические данные' }).count()).toBe(0)
   })
 
@@ -39,19 +49,30 @@ test.describe('catalogue provenance', () => {
     await toggle.click()
 
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    // No position in the working catalogue claims to have been checked against a datasheet, so
+    // the honest result of this filter today is an empty list — and an empty list that says so is
+    // a correct answer, not a broken control. Marking a row confirmed to make a test green would
+    // be the exact claim this catalogue refuses to make.
     const after = await items.count()
-    expect(after).toBeGreaterThan(0)
     expect(after).toBeLessThan(before)
-    // Nothing unconfirmed may survive the filter.
+    if (after === 0) {
+      await expect(page.locator('.catalog-list .empty-list')).toBeVisible()
+    }
+    // Nothing unconfirmed may survive the filter either way.
     expect(await page.locator('.catalog-list .verify-flag').count()).toBe(0)
   })
 
   test('the filter combines with a search', async ({ page }) => {
     await page.getByRole('button', { name: 'Только проверенные' }).click()
-    await page.getByLabel('Поиск по каталогу').fill('NB1-63H')
+    await page.getByLabel('Поиск по каталогу').fill('AVO-10')
 
     const items = page.locator('.catalog-list .catalog-item')
-    await expect.poll(() => items.count()).toBeGreaterThan(0)
+    await expect.poll(() => items.count()).toBe(0)
     expect(await page.locator('.catalog-list .verify-flag').count()).toBe(0)
+
+    // The same search without the filter finds its rows, so the empty result above is the filter
+    // working rather than the search being broken.
+    await page.getByRole('button', { name: 'Только проверенные' }).click()
+    await expect.poll(() => items.count()).toBeGreaterThan(0)
   })
 })

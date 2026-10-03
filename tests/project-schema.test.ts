@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { allCatalog } from '../src/data/catalog'
 import { createProjectFileEnvelope, readProjectFile } from '../src/domain/projectFile'
 import { createDevice, createProject, migrateProject } from '../src/domain/project'
-import { assertValidProjectSchema, validateProjectSchema } from '../src/domain/projectSchema'
+import { assertValidProjectSchema, VALIDATION_REVISION, validateProjectSchema } from '../src/domain/projectSchema'
 import { buildBom, pricing } from '../src/domain/pricing'
 import { getFootprintModules, getRequiredModules } from '../src/domain/layout'
 import { validateProject } from '../src/domain/validation'
@@ -72,7 +72,11 @@ describe('project file envelope and domain diagnostics', () => {
     const issues = validateProject(project, definitions)
     const preliminary = issues.find((item) => item.id === 'preliminary')!
     expect(preliminary.ruleCode).toBe('calculation.preliminary')
-    expect(preliminary.version).toBe(2)
+    // The revision moves when a rule is added, so it is asserted against the constant rather than
+    // a number that would have to be edited on every rule change — and it is a constant, so the
+    // assertion still fails if the two ever drift apart.
+    expect(preliminary.version).toBe(VALIDATION_REVISION)
+    expect(VALIDATION_REVISION).toBeGreaterThan(1)
     expect(preliminary.context).toEqual(expect.objectContaining({ knownTotal: expect.any(Number) }))
   })
 

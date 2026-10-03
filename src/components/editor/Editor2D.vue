@@ -2,11 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { getRowUsage, isDinDevice, placeProduct, resolveDeviceMove, resolveLayout } from '../../domain/layout'
-import { getPanelGeometry } from '../../domain/panelGeometry'
+import { getPanelGeometry, PANEL_MM_TO_PX } from '../../domain/panelGeometry'
 import { useProjectStore } from '../../stores/project'
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, usePreferencesStore } from '../../stores/preferences'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
+import { faceTerminals, routeWire, terminalForBus, wireColor } from '../../domain/wiring'
 import type { PlacedDevice } from '../../domain/types'
 
 const props = defineProps<{ focused: boolean }>()
@@ -73,6 +74,10 @@ onUnmounted(() => {
 })
 
 const geometry = computed(() => getPanelGeometry(currentProject.value, definitions.value))
+
+/** Wire colours live in one place: the style sheet has the same three rules for the print report. */
+/** Routing is computed in millimetres, because that is the space the face geometry lives in. */
+const mmPathToPx = (path: string) => path.replace(/-?\d+(\.\d+)?/g, (value) => String(Math.round(Number(value) * PANEL_MM_TO_PX * 100) / 100))
 const capacity = computed(() => geometry.value.capacity)
 const slotIndexes = computed(() => Array.from({ length: capacity.value }, (_, index) => index))
 const moduleWidth = computed(() => geometry.value.moduleWidthPx)
@@ -350,23 +355,69 @@ const onBoardKeydown = (event: KeyboardEvent) => {
 }
 
 const wirePaths = computed(() => {
-  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string }> = []
+  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string; source: 'busbar' | 'device' }> = []
+  const board = geometry.value
   const busX: Record<'L' | 'N' | 'PE', number> = { L: 3, N: 7, PE: 11 }
-  // One lookup table per recomputation instead of a scan per wire. The schema allows 2000
-  // connections over 500 devices, and a drag re-runs this on every frame, so the nested scan was
-  // a million comparisons per frame on a large board.
   const devicesById = new Map(currentProject.value.devices.map((device) => [device.instanceId, device]))
+  // Face metrics are pure per product, and a board mixes a few hundred products at most, so the
+  // terminals are resolved once per product instead of once per wire and once per recompute.
+  const terminalsByProduct = new Map<string, ReturnType<typeof faceTerminals>>()
+
+  /**
+   * Where a device sits in board millimetres, and the terminals on it. The board draws the same
+   * metrics the wire lands in, so a connection cannot end up pointing at a place the face has no
+   * clamp for.
+   */
+  const terminalAt = (instanceId: string, bus: 'L' | 'N' | 'PE', side: 'top' | 'bottom') => {
+    const device = devicesById.get(instanceId)
+    if (!device || device.mount === 'busbar') return null
+    const product = definitions.value.get(device.productId)
+    if (!product) return null
+    let terminals = terminalsByProduct.get(device.productId)
+    if (!terminals) {
+      terminals = faceTerminals(product)
+      terminalsByProduct.set(device.productId, terminals)
+    }
+    const terminal = terminalForBus(terminals, bus, side)
+    if (!terminal) return null
+    const leftMm = board.railStartXMm + device.slot * board.modulePitchMm
+    const topMm = board.rowTopMm[device.row]
+    return {
+      x: leftMm + terminal.x,
+      y: topMm + terminal.y,
+      height: terminal.height,
+    }
+  }
+
   for (const connection of currentProject.value.connections ?? []) {
     const target = devicesById.get(connection.toDeviceId)
     if (!target) continue
-    const width = geometry.value.deviceWidthPx(target.productId)
-    const targetX = geometry.value.railStartXPx + (target.slot * geometry.value.moduleWidthPx) + width / 2
-    const targetY = geometry.value.rowTopPx[target.row] + geometry.value.deviceHeightPx(target.productId) / 2
-    const sourceX = busX[connection.fromBus]
-    const sourceY = targetY - geometry.value.railHeightPx / 2
-    const bendX = Math.max(sourceX + 8, targetX - 8)
-    const d = `M ${sourceX} ${sourceY} H ${bendX} V ${targetY} H ${targetX}`
-    paths.push({ id: connection.id, d, bus: connection.fromBus, color: connection.color || '#c65c3b', thickness: connection.thickness || 2, label: connection.label })
+    const targetPoint = terminalAt(connection.toDeviceId, connection.fromBus, 'top')
+    if (!targetPoint) continue
+
+    const bus = connection.fromBus
+    // A connection that names its source device is a cascade — the feed to one breaker coming out
+    // of another. Those wires were never drawn at all, and a board built as a cascade of breakers
+    // used to look like a board with no wiring between its devices.
+    const source = connection.fromDeviceId ? 'device' : 'busbar'
+    const sourcePoint = source === 'device' && connection.fromDeviceId
+      ? terminalAt(connection.fromDeviceId, bus, 'bottom')
+      : null
+    if (source === 'device' && !sourcePoint) continue
+
+    const origin = sourcePoint
+      ? { x: sourcePoint.x, y: sourcePoint.y }
+      : { x: busX[bus], y: board.rowTopMm[target.row] }
+
+    paths.push({
+      id: connection.id,
+      d: mmPathToPx(routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4 })),
+      bus,
+      color: connection.color || wireColor(bus),
+      thickness: connection.thickness || 2,
+      label: connection.label,
+      source,
+    })
   }
   return paths
 })

@@ -38,6 +38,8 @@ export const router = createRouter({
         { path: 'projects', name: 'projects', component: () => import('../views/ProjectsView.vue') },
         { path: 'projects/:projectId/editor', name: 'editor', component: () => import('../views/EditorView.vue') },
         { path: 'editor', name: 'current-editor', component: () => import('../views/EditorView.vue') },
+        // The rebuilt board. It carries its own route until it has earned the editor's tests.
+        { path: 'board', name: 'board', component: () => import('../views/BoardWorkspaceView.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', name: 'notFound', component: () => import('../views/NotFoundView.vue') },

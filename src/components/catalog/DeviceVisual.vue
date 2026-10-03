@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent } from 'vue'
 import type { DeviceDefinition } from '../../domain/types'
 import DeviceChassis from './deviceFace/DeviceChassis.vue'
 import DeviceFace from './deviceFace/DeviceFace.vue'
-import { getDeviceFaceMetrics, faceShellFamily } from './deviceFace/metrics'
+import { getDeviceFaceMetrics, faceShellFamily } from '../../domain/faceMetrics'
 
 const ModelPreview = defineAsyncComponent(() => import('./ModelPreview.vue'))
 

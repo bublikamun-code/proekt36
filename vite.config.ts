@@ -25,6 +25,10 @@ const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
+  // The offline worker is a same-origin script, and without this directive the default of
+  // `default-src 'self'` would cover it too — but stating it means a future `worker-src blob:`
+  // can never be added by accident, which is the usual way a service worker turns into a hole.
+  "worker-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "style-src-attr 'unsafe-inline'",

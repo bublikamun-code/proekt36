@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createProject, migrateProject, migrateProjectList, PROJECT_SCHEMA_VERSION } from '../src/domain/project'
+import { createProject, migrateProject, migrateProjectList, PROJECT_SCHEMA_VERSION, uid } from '../src/domain/project'
 import type { PanelProject } from '../src/domain/types'
 
 describe('project schema migration', () => {
@@ -82,5 +82,39 @@ describe('project schema migration', () => {
     expect(once.devices.map((device) => device.instanceId)).toEqual(['first', 'second', 'third', 'bus'])
     expect(once.devices.map((device) => device.marking)).toEqual(['QF01', '', 'ВФ-02', ''])
     expect(once.devices[2]?.note).toBe('с пробелами')
+  })
+})
+
+describe('идентификаторы вне защищённого контекста', () => {
+  const v4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+  it('выдаёт корректный v4 и без secure context', () => {
+    expect(uid()).toMatch(v4)
+
+    // The regression: `crypto.randomUUID` is undefined outside a secure context, and this app is
+    // opened from plain addresses often enough that the difference is the difference between a
+    // working page and a blank one.
+    const original = globalThis.crypto
+    Object.defineProperty(globalThis, 'crypto', {
+      value: { getRandomValues: original.getRandomValues.bind(original) },
+      configurable: true,
+    })
+    try {
+      const generated = uid()
+      expect(generated).toMatch(v4)
+      expect(uid()).not.toBe(generated)
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { value: original, configurable: true })
+    }
+  })
+
+  it('объясняет, когда генератора нет вовсе', () => {
+    const original = globalThis.crypto
+    Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true })
+    try {
+      expect(() => uid()).toThrow(/getRandomValues/)
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { value: original, configurable: true })
+    }
   })
 })

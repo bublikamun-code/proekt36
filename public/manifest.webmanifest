@@ -1,0 +1,39 @@
+{
+  "name": "Панель 36 — конфигуратор распределительных щитов",
+  "short_name": "Панель 36",
+  "description": "Предварительная 2D-компоновка демонстрационных распределительных щитов прямо в браузере: каталог, спецификация, проверки и печатный отчёт. Данные проектов остаются на устройстве.",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "/app/projects",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f2eb",
+  "theme_color": "#f5f2eb",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Рабочая область",
+      "url": "/app/projects"
+    },
+    {
+      "name": "Демо-щит",
+      "url": "/demo/project"
+    }
+  ]
+}

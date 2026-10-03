@@ -101,7 +101,7 @@ test('a 12-module rail renders 18 mm pitch and footprint-based device widths', a
 test('an 18-module rail renders 18 slots and the same 18 mm pitch', async ({ page }) => {
   await openEditorWith(page, project('Геометрия 18', { cabinetId: 'panel36-18-r18-embedded', railId: 'rail-18', enclosureWidth: 354, enclosureHeight: 260 }, [
     device('ekf-mcb-3p-c25', 0, 2),
-    device('schneider-spd-t2-4p', 0, 6),
+    device('ekf-spd-t1-3p-n-pe', 0, 6),
   ]))
 
   await expect(page.locator('.canvas-spec')).toHaveText('18 мод./рейка · 18 мм')

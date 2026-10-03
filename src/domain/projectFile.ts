@@ -8,7 +8,11 @@ const APPLICATION_NAME = 'Panel36'
 const CAD_MODEL_REVISION = '1'
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
-const stableHash = (value: unknown) => {
+/**
+ * Short, stable FNV-1a hash of a JSON value. Exported so a file name derived from an identifier
+ * can use the same hash everywhere instead of growing a second one.
+ */
+export const stableHash = (value: unknown) => {
   const source = JSON.stringify(value)
   let hash = 2166136261
   for (let index = 0; index < source.length; index += 1) {

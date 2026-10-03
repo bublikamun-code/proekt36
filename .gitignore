@@ -30,3 +30,6 @@ tools/ai-proxy.env
 test-results
 playwright-report
 blob-report
+
+# Браузеры Playwright, если PLAYWRIGHT_BROWSERS_PATH указывает внутрь проекта
+.playwright-browsers

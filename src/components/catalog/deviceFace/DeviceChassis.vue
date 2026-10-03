@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DeviceDefinition } from '../../../domain/types'
-import type { DeviceFaceMetrics } from './metrics'
+import type { DeviceFaceMetrics } from '../../../domain/faceMetrics'
+import { faceTerminals } from '../../../domain/wiring'
 import { closedPolylinePath } from './path'
 
 const props = defineProps<{ product: DeviceDefinition; metrics: DeviceFaceMetrics }>()
@@ -14,6 +15,18 @@ const outlinePath = computed(() => closedPolylinePath(props.metrics.outline))
 const panel = computed(() => props.metrics.panel)
 const panelTopLight = computed(() => `M ${panel.value.x + 0.8} ${panel.value.y + 0.5} H ${panel.value.x + panel.value.width - 0.8}`)
 const panelBottomShade = computed(() => `M ${panel.value.x + 0.8} ${panel.value.y + panel.value.height - 0.4} H ${panel.value.x + panel.value.width - 0.8}`)
+
+/**
+ * The bus a terminal belongs to, so the clamp can be coloured the way the wire that lands in it is
+ * coloured. Real panels mark the line, the neutral and the earth apart at the terminal itself, and
+ * a drawing that does the same turns "which wire goes where" from a question into a glance.
+ */
+const busByColumn = computed(() => {
+  const map = new Map<number, string>()
+  const terminals = faceTerminals(props.product, props.metrics)
+  for (const terminal of terminals.top) if (!map.has(terminal.column)) map.set(terminal.column, terminal.bus)
+  return map
+})
 </script>
 
 <template>
@@ -27,7 +40,11 @@ const panelBottomShade = computed(() => `M ${panel.value.x + 0.8} ${panel.value.
     <rect class="dv-clip" :x="metrics.clip.x" :y="metrics.clip.y" :width="metrics.clip.width" :height="metrics.clip.height" rx="0.6" />
     <rect class="dv-clip-hook" :x="metrics.clipHook.x" :y="metrics.clipHook.y" :width="metrics.clipHook.width" :height="metrics.clipHook.height" rx="0.6" />
     <g v-for="pocket in metrics.pockets" :key="`${pocket.column}-${pocket.y}`" class="dv-pocket-group">
-      <rect class="dv-pocket-rim" :x="pocket.x - 0.5" :y="pocket.y - 0.5" :width="pocket.width + 1" :height="pocket.height + 1" rx="1.4" />
+      <rect
+        class="dv-pocket-rim"
+        :class="busByColumn.get(pocket.column) && busByColumn.get(pocket.column) !== 'aux' ? `dv-pocket-bus-${busByColumn.get(pocket.column)}` : undefined"
+        :x="pocket.x - 0.5" :y="pocket.y - 0.5" :width="pocket.width + 1" :height="pocket.height + 1" rx="1.4"
+      />
       <rect class="dv-pocket" :x="pocket.well.x" :y="pocket.well.y" :width="pocket.well.width" :height="pocket.well.height" rx="0.9" />
       <path class="dv-pocket-depth" :d="`M ${pocket.well.x + 0.5} ${pocket.well.y + 0.5} H ${pocket.well.x + pocket.well.width - 0.5}`" />
       <path class="dv-pocket-floor" :d="`M ${pocket.well.x + 0.5} ${pocket.well.y + pocket.well.height - 0.4} H ${pocket.well.x + pocket.well.width - 0.5}`" />

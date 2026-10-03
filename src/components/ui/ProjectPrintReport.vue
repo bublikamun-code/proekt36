@@ -4,7 +4,10 @@ import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDe
 import { buildBom } from '../../domain/pricing'
 import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
-import type { DeviceDefinition, PanelProject } from '../../domain/types'
+import SingleLineDiagram from './SingleLineDiagram.vue'
+import { claimsASource, verificationLabel as verificationLabelFor } from '../../domain/provenance'
+import { buildLabelSheet, labelSheetWarning } from '../../domain/labelSheet'
+import type { DeviceDefinition, PanelProject, VerificationStatus } from '../../domain/types'
 
 const props = defineProps<{
   project: PanelProject
@@ -19,13 +22,15 @@ const lines = computed(() => buildBom(props.project.devices, props.definitions))
 /** Address lookup for the connection list, so a large report does not rescan the board per wire. */
 const addressByInstanceId = computed(() => new Map(props.project.devices.map((device) => [device.instanceId, device.address])))
 const issues = computed(() => validateProject(props.project, props.definitions))
+const labelSheet = computed(() => buildLabelSheet(props.project, props.definitions))
+const labelWarning = computed(() => labelSheetWarning(labelSheet.value))
 // The summary must count modules exactly the way the per-row table does, so a
 // missing product or a fractional import width cannot make the two disagree.
 const modules = computed(() => props.project.devices.filter(isDinDevice).reduce((sum, device) => sum + getFootprintModules(device, props.definitions), 0))
 const capacity = computed(() => getRowCapacity(props.project) * props.project.settings.rows)
 const rows = computed(() => Array.from({ length: props.project.settings.rows }, (_, index) => index))
 const productFor = (productId: string) => props.definitions.get(productId)
-const verificationLabel = (status: DeviceDefinition['verificationStatus']) => status === 'verified' ? 'подтверждено' : status === 'template' ? 'шаблон' : 'старые данные'
+const verificationLabel = (status: VerificationStatus | undefined) => verificationLabelFor(status, { sentence: true })
 </script>
 
 <template>
@@ -49,6 +54,11 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
       <div><span>Свободно</span><strong>{{ getFreeSlots(project, definitions) }} мод.</strong></div>
       <div><span>Ёмкость</span><strong>{{ capacity }} мод.</strong></div>
       <div><span>Модульный шаг</span><strong>{{ layout.modulePitchMm }} мм</strong></div>
+    </section>
+
+    <section class="print-single-line" aria-label="Однолинейная схема">
+      <h2>Однолинейная схема</h2>
+      <SingleLineDiagram :project="project" :definitions="definitions" />
     </section>
 
     <section class="print-rack-summary">
@@ -77,10 +87,33 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
             <td>{{ productFor(device.productId)?.name || 'Неизвестное изделие' }}</td>
             <td>{{ productFor(device.productId)?.series || productFor(device.productId)?.sku || '—' }}</td>
             <td>{{ device.marking || device.address }}</td>
-            <td>{{ verificationLabel(productFor(device.productId)?.verificationStatus) }}<template v-if="productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
+            <td>{{ verificationLabel(productFor(device.productId)?.verificationStatus) }}<template v-if="claimsASource(productFor(device.productId)?.verificationStatus) && productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
           </tr>
         </tbody>
       </table>
+    </section>
+
+    <section class="print-labels" aria-label="Лист маркировки">
+      <h2>Лист маркировки</h2>
+      <p class="print-labels-note">
+        По одной этикетке на позицию, в порядке монтажа. Это лист для печати и вырезки, а не заказ:
+        поставщик, цена и сроки здесь не указаны.
+      </p>
+      <p v-if="labelWarning" class="print-labels-warning">{{ labelWarning }}</p>
+      <p v-if="!labelSheet.labels.length">На доске нет аппаратов — маркировать нечего.</p>
+      <div v-else class="print-label-grid">
+        <div
+          v-for="label in labelSheet.labels"
+          :key="label.instanceId"
+          class="print-label"
+          :class="{ 'is-unmarked': !label.marked, 'is-duplicated': label.duplicated }"
+        >
+          <span class="print-label-text">{{ label.text || '—' }}</span>
+          <span class="print-label-meta">{{ label.position }} · {{ label.name }}</span>
+          <span v-if="label.duplicated" class="print-label-flag">адрес повторяется</span>
+          <span v-else-if="!label.marked" class="print-label-flag">адрес не проставлен</span>
+        </div>
+      </div>
     </section>
 
     <section class="print-connections">
@@ -106,7 +139,7 @@ const verificationLabel = (status: DeviceDefinition['verificationStatus']) => st
             <td>{{ line.quantity }}</td>
             <td>{{ line.priceKnown ? `${line.unitPrice.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
             <td>{{ line.priceKnown ? `${line.total.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
-            <td>{{ verificationLabel(productFor(line.productId)?.verificationStatus) }}<template v-if="productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
+            <td>{{ verificationLabel(productFor(line.productId)?.verificationStatus) }}<template v-if="claimsASource(productFor(line.productId)?.verificationStatus) && productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
           </tr>
         </tbody>
       </table>

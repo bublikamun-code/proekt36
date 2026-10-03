@@ -1,11 +1,12 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { builtinCatalog, enmasSeriesCatalog, sampleCatalog } from '../data/catalog'
+import { builtinCatalog, workspaceCatalog } from '../data/catalog'
 import {
   compactRow,
   evaluateCabinetMigration,
   getFootprintModules,
   getRowCapacity,
+  MAX_ROWS,
   placeProduct,
   resolveDeviceMove,
   type LayoutMigrationPlan,
@@ -14,9 +15,10 @@ import { autoNumber, createProject, migrateProject, presetProducts, uid } from '
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
-import type { Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
+import type { BusType, Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
 import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
 import { CONNECTION_THICKNESS_MM } from '../domain/connectionSpec'
+import { wireColor } from '../domain/wiring'
 import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { usePreferencesStore } from './preferences'
 
@@ -104,14 +106,15 @@ export const useProjectStore = defineStore('project', () => {
 
   const currentProject = computed(() => projects.value.find((item) => item.id === currentProjectId.value) ?? projects.value[0]!)
   const definitions = computed(() => new Map<string, DeviceDefinition>([
-    ...builtinCatalog.map((item) => [item.id, item] as const),
-    ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
-    ...sampleCatalog.map((item) => [item.id, item] as const),
+    ...workspaceCatalog.map((item) => [item.id, item] as const),
     ...importedModels.value.map((model) => [model.id, {
       id: model.id, name: model.name, brand: model.brand, sku: model.sku, category: model.category,
       moduleWidth: model.moduleWidth, poles: model.poles, ratedCurrent: model.ratedCurrent,
       voltage: model.voltage, bus: model.bus, price: model.price, weight: model.weight,
       height: model.height, depth: model.depth, color: '#d9ded8', imported: true, modelAssetId: model.id,
+      // The numbers came from the import dialog, not from a datasheet, so the position is
+      // unverified. The field is required precisely so this cannot be left out.
+      verificationStatus: 'unverified',
     }] as const),
   ]))
   const selectedDevice = computed(() => currentProject.value.devices.find((item) => item.instanceId === selectedDeviceId.value) ?? null)
@@ -407,11 +410,32 @@ export const useProjectStore = defineStore('project', () => {
     return created
   }
 
-  const addDevice = (productId: string, row = 0, slot = 0) => {
+  /**
+   * `row` and `slot` stay optional so that a click in the catalogue, which names no position, can be
+   * told apart from a drop, which does.
+   *
+   * A click searches rows from the top for the first one that will take the device. Refusing because
+   * row 1 is full while row 2 is half empty is not a rule anyone would write on purpose — the person
+   * clicking wanted the device on the board, and where it lands is bookkeeping. A drop, on the other
+   * hand, lands exactly where it was dropped or not at all, so it never searches.
+   */
+  /**
+   * Places a device and reports where it went, so a caller that can do better than "it failed" —
+   * duplicating next to an original, for one — can try somewhere else without having to parse a
+   * notice it cannot clear.
+   */
+  const addDevice = (productId: string, row?: number, slot = 0): { ok: boolean; row?: number; error?: string } => {
     const product = definitions.value.get(productId)
-    if (!product) return notify('Товар не найден', 'error')
-    const result = placeProduct(currentProject.value.devices, product, row, slot, getRowCapacity(currentProject.value), uid, definitions.value)
-    if (result.error) return notify(result.error, 'error')
+    if (!product) { notify('Товар не найден', 'error'); return { ok: false } }
+    const capacity = getRowCapacity(currentProject.value)
+    const candidates = row === undefined ? Array.from({ length: MAX_ROWS }, (_, index) => index) : [row]
+    let result: ReturnType<typeof placeProduct> = { devices: currentProject.value.devices, slot }
+    let landedRow = row
+    for (const candidate of candidates) {
+      result = placeProduct(currentProject.value.devices, product, candidate, slot, capacity, uid, definitions.value)
+      if (!result.error) { landedRow = candidate; break }
+    }
+    if (result.error) { notify(result.error, 'error'); return { ok: false } }
     const previousIds = new Set(currentProject.value.devices.map((item) => item.instanceId))
     let linked = 0
     commit((project) => {
@@ -420,6 +444,7 @@ export const useProjectStore = defineStore('project', () => {
     })
     selectedDeviceId.value = result.devices.find((item) => !previousIds.has(item.instanceId))?.instanceId ?? null
     if (linked) notify(`Аппарат добавлен и подключён к шине`)
+    return { ok: true, row: landedRow }
   }
 
   const moveDeviceById = (instanceId: string, row: number, slot: number, options?: { coalesce?: string }) => {
@@ -466,10 +491,21 @@ export const useProjectStore = defineStore('project', () => {
     notify('Устройство удалено')
   }
 
+  /**
+   * A copy belongs next to its original. When the row has no room beside it, the next row that
+   * does is still a copy — refusing outright and leaving the board untouched is the one outcome
+   * that serves nobody, and the notice about it arrives after the person has waited.
+   */
   const duplicateSelected = () => {
     const selected = selectedDevice.value
     if (!selected) return
-    addDevice(selected.productId, selected.row, selected.slot + getFootprintModules(selected, definitions.value))
+    const beside = selected.slot + getFootprintModules(selected, definitions.value)
+    const placed = addDevice(selected.productId, selected.row, beside)
+    if (placed.ok) return
+    const anywhere = addDevice(selected.productId)
+    if (anywhere.ok && anywhere.row !== undefined && anywhere.row !== selected.row) {
+      notify(`Копия поставлена в ряд ${anywhere.row + 1}: ряд ${selected.row + 1} занят.`)
+    }
   }
 
   const updateSelected = (patch: Partial<PlacedDevice>): boolean => {
@@ -511,6 +547,30 @@ export const useProjectStore = defineStore('project', () => {
     if (!source || source.mount !== 'busbar' || !target) return notify('Выберите шину Fork и аппарат назначения', 'error')
     if (currentProject.value.connections.some((item) => item.kind === 'busbar' && item.fromDeviceId === fromDeviceId && item.toDeviceId === toDeviceId)) return notify('Такое подключение уже есть', 'error')
     commit((project) => project.connections.push({ id: uid(), circuitId: '', fromBus: 'L', toDeviceId, color: '#aeb8b4', thickness: 2, label: `FORK → ${target.address || 'аппарат'}`, kind: 'busbar', fromDeviceId }), 'Шина подключена')
+  }
+
+  /**
+   * Draws a wire between two devices by hand, the way a cascade is recorded: the feed leaves the
+   * bottom of one device and arrives at the top of the other, on the same bus.
+   *
+   * The circuit is left empty, as a busbar feed is. A cascade is a physical run of copper, not a
+   * load, and giving it a circuit would invent a load the person never asked for. The validation
+   * rules already treat a connection without a circuit as a feed rather than a missing field.
+   */
+  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string): boolean => {
+    if (fromDeviceId === toDeviceId) return rejectCommand('Нельзя соединить аппарат с самим собой.')
+    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
+    const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
+    if (!target || !source) return rejectCommand('Аппарат не найден.')
+    const duplicate = currentProject.value.connections.some((item) => item.fromDeviceId === fromDeviceId
+      && item.toDeviceId === toDeviceId && item.fromBus === fromBus)
+    if (duplicate) return rejectCommand('Такой провод уже проведён.')
+    const label = `${source.address || 'аппарат'} → ${target.address || 'аппарат'}`
+    commit((project) => project.connections.push({
+      id: uid(), circuitId: '', fromBus, toDeviceId,
+      color: wireColor(fromBus), thickness: 2, label, kind: 'busbar', fromDeviceId,
+    }), `Провод ${label} проведён`)
+    return true
   }
 
   const isProtectionDevice = (device: PlacedDevice | undefined) => {
@@ -558,6 +618,9 @@ export const useProjectStore = defineStore('project', () => {
       project.circuits.push(circuit)
       project.connections.push(connection)
     }, 'Цепь добавлена')
+    // The circuit is returned so the board can offer its load name for editing straight away,
+    // instead of sending the person to a panel to find out what they just created.
+    return circuit
   }
 
   const updateCircuit = (id: string, patch: Partial<Circuit>): boolean => {
@@ -650,12 +713,16 @@ export const useProjectStore = defineStore('project', () => {
     if (index >= 0) projects.value[index] = next
   }
 
-  const addImportedModel = async (metadata: ModelMetadata, data: ArrayBuffer) => {
+  /**
+   * `silent` is for restoring a whole library from an archive: the same notice repeated once per
+   * model is noise, and the caller announces the result as a single count.
+   */
+  const addImportedModel = async (metadata: ModelMetadata, data: ArrayBuffer, options?: { silent?: boolean }) => {
     try {
       await putModelAsset(metadata.id, data)
       importedModels.value.push(metadata)
       if (repository.available) await persistNow()
-      notify('Модель добавлена в библиотеку')
+      if (!options?.silent) notify('Модель добавлена в библиотеку')
     } catch (error) {
       persistenceError = actionableStorageError(error, 'модель в IndexedDB')
       storageError.value = persistenceError
@@ -767,7 +834,7 @@ export const useProjectStore = defineStore('project', () => {
     applyPreset, updateSettings, selectCabinet, selectRail, stageCabinetMigration, stageRailMigration,
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
-    addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
+    addBusbarConnection, connectOnBoard, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
     retryPersistence, addImportedModel, deleteImportedModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })

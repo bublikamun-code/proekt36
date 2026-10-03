@@ -9,7 +9,7 @@ import {
   faceTerminalColumns,
   fitFaceText,
   getDeviceFaceMetrics,
-} from '../src/components/catalog/deviceFace/metrics'
+} from '../src/domain/faceMetrics'
 import type { DeviceDefinition } from '../src/domain/types'
 import { closedPolylinePath, polylinePath } from '../src/components/catalog/deviceFace/path'
 

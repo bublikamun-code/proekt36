@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { bomToCsv, buildBom } from '../../domain/pricing'
+import { verificationLabel as verificationLabelFor } from '../../domain/provenance'
 import { useProjectStore } from '../../stores/project'
 
 const store = useProjectStore()
@@ -18,13 +19,11 @@ const weight = computed(() => currentProject.value.devices.reduce((sum, item) =>
 const productFor = (productId: string) => definitions.value.get(productId)
 const verificationLabel = (productId: string) => {
   const product = productFor(productId)
-  // A missing status is not a historical one: the built-in catalogue carries no status field at
-  // all, and reporting real products as historical would be untrue.
-  return product?.verificationStatus === 'verified' ? 'Подтверждено'
-    : product?.verificationStatus === 'template' ? 'Шаблон'
-      : product?.imported ? 'Импорт, не проверено'
-        : product?.verificationStatus === 'legacy' ? 'Исторические данные'
-          : 'Статус не указан'
+  // An imported row says so by name: "parameters not confirmed" on its own would hide the more
+  // useful fact that the position came from the user's own file.
+  return product?.imported && product.verificationStatus !== 'verified'
+    ? 'Импорт, не проверено'
+    : verificationLabelFor(product?.verificationStatus)
 }
 
 const exportCsv = () => {

@@ -5,7 +5,35 @@ import { CONNECTION_THICKNESS_MM } from './connectionSpec'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
 export { PROJECT_SCHEMA_VERSION } from './projectSchema'
-export const uid = () => crypto.randomUUID()
+/**
+ * RFC 4122 version 4 identifier.
+ *
+ * `crypto.randomUUID()` exists only in a secure context, and this application is deliberately
+ * server-less: it is opened from whatever address the machine happens to have. `localhost` counts
+ * as secure, but `http://192.168.1.10:5173` and any plain public address do not — there
+ * `crypto.randomUUID` is `undefined`, and the page used to die with
+ * "crypto.randomUUID is not a function" the moment it tried to create its first project. Nothing
+ * in the product needs a secure context, so the identifier cannot depend on one either.
+ *
+ * `crypto.getRandomValues` is available outside secure contexts, so the fallback assembles the same
+ * shape by hand and sets the version and variant bits that make it a valid v4.
+ */
+export const uid = () => {
+  const source = globalThis.crypto
+  if (typeof source?.randomUUID === 'function') return source.randomUUID()
+  if (typeof source?.getRandomValues !== 'function') {
+    // Reached only on browsers without Web Crypto at all. Saying so beats an opaque crash: an
+    // identifier that silently degrades to Math.random would collide between two records, and a
+    // broken project file is worse than an application that explains why it cannot start.
+    throw new Error('Браузер не умеет генерировать идентификаторы: нет crypto.getRandomValues')
+  }
+  const bytes = new Uint8Array(16)
+  source.getRandomValues(bytes)
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 export const DEFAULT_CABINET_ID = 'enmas-nx8-24-embedded'
 export const DEFAULT_RAIL_ID = 'rail-12' as const
 

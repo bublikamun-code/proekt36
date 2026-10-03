@@ -1711,6 +1711,16 @@ kbd {
   stroke-width: 1.2;
   vector-effect: non-scaling-stroke;
 }
+/* Terminal clamps carry the colour of the bus they serve, the same three colours as the wires. */
+.dv-pocket-bus-l {
+  stroke: #a44d37;
+}
+.dv-pocket-bus-n {
+  stroke: #5f7f9c;
+}
+.dv-pocket-bus-pe {
+  stroke: #47a067;
+}
 .wire-l {
   stroke: #a44d37;
 }
@@ -2355,6 +2365,67 @@ kbd {
 .print-report {
   display: none;
 }
+
+/* Single-line diagram. Geometry is computed in the component and the drawing is scaled by its
+   viewBox, so these rules only carry ink: the same SVG has to read on screen and on A3 paper. */
+.single-line {
+  margin: 0;
+}
+.single-line figcaption {
+  margin-bottom: 6px;
+  color: var(--text-faint);
+  font: 12px/1.4 var(--mono);
+}
+.single-line svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.single-line-empty {
+  margin: 0;
+  padding: 14px;
+  color: var(--text-faint);
+  border: 1px dashed var(--line);
+  font: 13px/1.4 var(--mono);
+}
+.single-line-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font: 12px/1.5 var(--mono);
+}
+.sl-bus,
+.sl-branch {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+.sl-source rect,
+.sl-device rect {
+  fill: var(--surface);
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+.sl-unprotected rect {
+  stroke-dasharray: 4 3;
+}
+.sl-node-dot {
+  fill: var(--text);
+}
+.sl-node-label {
+  fill: var(--text);
+  font: 600 11px var(--mono);
+}
+.sl-node-sub,
+.sl-caption {
+  fill: var(--text-muted);
+  font: 9px var(--mono);
+}
+.sl-load-label {
+  fill: var(--text);
+  font: 11px var(--mono);
+}
 .modal-backdrop {
   position: fixed;
   z-index: 80;
@@ -2879,6 +2950,21 @@ kbd {
   color: var(--heading);
   font-size: var(--text-lg);
   overflow-wrap: anywhere;
+}
+/* A project that reaches outside the built-in catalogue depends on a model that lives only in this
+   browser. The note sits on the card rather than behind the export dialog: the moment the user
+   needs it is after clearing site data, which is too late for a dialog. */
+.project-card-cad {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  font: var(--text-micro)/1.45 var(--mono);
+  overflow-wrap: anywhere;
+}
+.project-card-cad b {
+  color: var(--heading);
 }
 .project-card-metrics {
   display: flex;
@@ -3435,11 +3521,101 @@ kbd {
   .print-report tr {
     break-inside: avoid;
   }
+
+  .print-single-line {
+    break-inside: avoid;
+  }
+  .single-line {
+    margin: 0;
+  }
+  .single-line svg {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+  }
+  .single-line figcaption,
+  .single-line-notes,
+  .single-line-empty {
+    color: #444;
+    font: 8pt/1.4 var(--mono);
+  }
+  .single-line-notes {
+    margin: 3mm 0 0;
+    padding-left: 5mm;
+  }
+  .sl-bus,
+  .sl-branch {
+    stroke: #111;
+  }
+  .sl-source rect,
+  .sl-device rect {
+    fill: #fff;
+    stroke: #111;
+  }
+  .sl-node-dot {
+    fill: #111;
+  }
+  .sl-node-label,
+  .sl-load-label {
+    fill: #111;
+  }
+  .sl-node-sub,
+  .sl-caption {
+    fill: #333;
+  }
+
   .print-connections,
   .print-rack-summary,
   .print-marking,
+  .print-labels,
   .print-bom {
     break-inside: auto;
+  }
+
+  /* The label sheet is cut by hand, so the cut lines are real: a dashed border on every label and
+     no page break inside one. A label that straddles a page break is useless on the panel. */
+  .print-labels-note {
+    margin: 1mm 0 3mm;
+    font: 8pt var(--mono);
+    color: #444;
+  }
+  .print-labels-warning {
+    margin: 0 0 3mm;
+    padding: 1.5mm 2mm;
+    border: 0.3mm solid #b4472e;
+    font: 8.5pt var(--mono);
+  }
+  .print-label-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+  }
+  .print-label {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.6mm;
+    min-height: 14mm;
+    padding: 1.6mm 2mm;
+    border: 0.2mm dashed #999;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-label-text {
+    font: 600 10pt/1.15 var(--mono);
+    font-weight: 600;
+    word-break: break-word;
+  }
+  .print-label-meta {
+    font: 7pt var(--mono);
+    color: #555;
+  }
+  .print-label-flag {
+    font: 7pt var(--mono);
+    color: #b4472e;
+  }
+  .print-label.is-unmarked .print-label-text {
+    color: #999;
   }
   .print-connections p,
   .print-issues p {

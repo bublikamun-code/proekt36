@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import { createProject } from '../src/domain/project'
 import { CURRENT_PROJECT_KEY } from '../src/storage/projectRepository'
 import { PERSIST_DELAY_MS, useProjectStore } from '../src/stores/project'
+import { getRowCapacity, getRowUsage } from '../src/domain/layout'
 
 class MemoryStorage {
   private readonly values = new Map<string, string>()
@@ -240,6 +241,55 @@ describe('busbar wiring on insert', () => {
     store.addDevice('shk', 0, 5)
 
     expect(store.currentProject.connections).toEqual([])
+    store.$dispose()
+  })
+})
+
+/**
+ * A click in the catalogue names no position, so the store looks down the rows for the first one
+ * that will take the device. This was found while porting the panels to the new board: with row 1
+ * full and row 2 half empty, every click failed with «не хватает места в ряду».
+ */
+describe('размещение по клику', () => {
+  const freshStore = () => {
+    const storage = new MemoryStorage()
+    setupBrowserStorage(storage)
+    setActivePinia(createPinia())
+    return useProjectStore()
+  }
+
+  // One module wide, so a slot count and a module count are the same thing here.
+  const PRODUCT = 'ekf-mcb-1p-b16'
+  const fillRow = (store: ReturnType<typeof useProjectStore>, row: number) => {
+    for (let slot = 0; slot < getRowCapacity(store.currentProject); slot += 1) {
+      store.addDevice(PRODUCT, row, slot)
+    }
+    return PRODUCT
+  }
+
+  it('находит свободный ряд ниже заполненного', () => {
+    const store = freshStore()
+    store.newProject('Ряды', 'apartment')
+    const productId = fillRow(store, 0)
+    expect(getRowUsage(0, store.currentProject, store.definitions).used).toBe(getRowCapacity(store.currentProject))
+
+    store.addDevice(productId)
+    expect(store.toast?.tone).toBe('ok')
+    expect(store.currentProject.devices.some((device) => device.row === 1)).toBe(true)
+    store.$dispose()
+  })
+
+  it('не ищет другой ряд, когда позиция указана явно', () => {
+    const store = freshStore()
+    store.newProject('Ряды', 'apartment')
+    const productId = fillRow(store, 0)
+
+    const before = store.currentProject.devices.length
+    store.addDevice(productId, 0, 0)
+    // A drop lands where it was dropped or not at all, even when the row below has plenty of room.
+    expect(store.currentProject.devices).toHaveLength(before)
+    expect(store.toast?.tone).toBe('error')
+    expect(store.toast?.text).toContain('места')
     store.$dispose()
   })
 })

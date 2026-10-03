@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { allCatalog, builtinCatalog } from '../src/data/catalog'
 import { createDevice, createProject } from '../src/domain/project'
-import { phaseBalance, validateProject } from '../src/domain/validation'
+import { phaseBalance } from '../src/domain/electrical'
+import { validateProject } from '../src/domain/validation'
 import type { Circuit } from '../src/domain/types'
 
 const definitions = new Map(allCatalog.map((item) => [item.id, item]))

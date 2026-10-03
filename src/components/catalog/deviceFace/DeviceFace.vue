@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DeviceDefinition } from '../../../domain/types'
-import { faceLabels, type DeviceFaceMetrics } from './metrics'
+import { faceLabels, faceSocketGrid, type DeviceFaceMetrics } from '../../../domain/faceMetrics'
 import { closedPolylinePath, polylinePath } from './path'
 
 const props = defineProps<{ product: DeviceDefinition; metrics: DeviceFaceMetrics }>()
@@ -30,21 +30,9 @@ const statusDots = computed(() => Array.from({ length: Math.max(2, Math.min(prop
   cy: serviceWindow.value.y + serviceWindow.value.height - 2.4,
   r: 0.8,
 })))
-const socketGrid = computed(() => {
-  const total = Math.max(2, Math.min(props.product.terminalCount || 6, 10))
-  const rows = Math.max(2, Math.min(Math.round(total / 2), 4))
-  const { body, heightMm } = props.metrics
-  return Array.from({ length: rows }, (_, row) => [0.28, 0.72].map((ratio) => ({
-    cx: body.x + body.width * ratio,
-    cy: heightMm * (0.24 + (row * 0.48) / Math.max(1, rows - 1)),
-    r: Math.min(1.9, body.width * 0.13),
-  }))).flat()
-})
-const nguSockets = computed(() => [0.34, 0.66].flatMap((ratioY) => [0.32, 0.68].map((ratioX) => ({
-  cx: props.metrics.widthMm * ratioX,
-  cy: props.metrics.heightMm * ratioY,
-  r: Math.min(2, props.metrics.body.width * 0.08),
-}))))
+// The screws come from the domain now, so the wire tool and the drawing read one fact. Same
+// numbers as before this moved — the picture did not change.
+const sockets = computed(() => faceSocketGrid(props.product, props.metrics))
 /** An SVG path must open with a moveto command; without it the browser drops the path entirely. */
 const points = polylinePath
 const leverPath = (toggle: typeof props.metrics.toggles[number]) => closedPolylinePath(toggle.points)
@@ -100,7 +88,7 @@ const leverPath = (toggle: typeof props.metrics.toggles[number]) => closedPolyli
 
     <g v-if="category === 'terminals'" class="dv-terminals">
       <rect v-if="isNgu" class="dv-insulator" :x="metrics.body.x + 2" :y="metrics.heightMm * 0.16" :width="metrics.body.width - 4" :height="metrics.heightMm * 0.62" rx="1.6" />
-      <g v-for="(socket, index) in (isNgu ? nguSockets : socketGrid)" :key="`socket-${index}`">
+      <g v-for="(socket, index) in sockets" :key="`socket-${index}`">
         <circle class="dv-socket" :cx="socket.cx" :cy="socket.cy" :r="socket.r" />
         <path class="dv-screw-slot" :d="`M ${socket.cx - socket.r * 0.7} ${socket.cy} H ${socket.cx + socket.r * 0.7}`" />
       </g>

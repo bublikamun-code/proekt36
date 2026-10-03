@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
+import { gotoEditor, seedProject, settledWidthOf, unlockWorkspace } from './helpers'
 
 /**
  * The working area fits the board to whatever room it has, and the user can also scale it by hand.
@@ -33,11 +33,11 @@ test('the buttons, the wheel and the fit button all scale the same board', async
   await gotoEditor(page)
   const cabinet = page.locator('.cabinet')
   const scroll = page.locator('.canvas-scroll')
-  const before = (await cabinet.boundingBox())?.width ?? 0
+  const before = await settledWidthOf(page, '.cabinet')
   expect(before).toBeGreaterThan(0)
 
   await page.getByRole('button', { name: 'Увеличить масштаб' }).click()
-  const grown = (await cabinet.boundingBox())?.width ?? 0
+  const grown = await settledWidthOf(page, '.cabinet')
   expect(grown).toBeGreaterThan(before)
 
   // Ctrl + wheel is the gesture the working area is expected to answer to, and it zooms in rather

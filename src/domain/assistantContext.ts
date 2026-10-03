@@ -1,7 +1,7 @@
 import { categoryLabels } from '../data/catalog'
 import { cabinetById } from '../data/enclosures'
 import { getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice, resolveLayout } from './layout'
-import { phaseBalance } from './validation'
+import { phaseBalance } from './electrical'
 import { APPLICATION_REVISION, CATALOG_REVISION } from './projectSchema'
 import type { Category, DeviceDefinition, PanelProject, ValidationIssue } from './types'
 

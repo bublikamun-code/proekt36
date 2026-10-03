@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { dragWithPointer, gotoEditor, seedProject } from './helpers'
+import { dragWithPointer, gotoEditor, seedProject, settledLeftOf } from './helpers'
 
 const oneModuleRow = [
   { id: 'a', row: 0, slot: 0 },
@@ -7,11 +7,10 @@ const oneModuleRow = [
   { id: 'c', row: 0, slot: 2 },
 ]
 
-const leftOf = async (page: import('@playwright/test').Page, id: string) => {
-  const box = await page.locator(`.placed-device[data-instance-id="${id}"]`).boundingBox()
-  if (!box) throw new Error(`Device ${id} is not on the board`)
-  return box.x
-}
+// Positions are read only once the device has come to rest: these elements animate, and a reading
+// taken mid-transition is a value in flight.
+const leftOf = (page: import('@playwright/test').Page, id: string) =>
+  settledLeftOf(page, `.placed-device[data-instance-id="${id}"]`)
 
 test('dropping a device onto a neighbour pushes that neighbour aside', async ({ page }) => {
   await seedProject(page, oneModuleRow)

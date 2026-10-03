@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia'
 import { categoryLabels } from '../../data/catalog'
 import { beginBoardDrag } from '../../composables/useBoardDrag'
 import { getProductFootprintModules } from '../../domain/layout'
+import { uid } from '../../domain/project'
+import { VERIFICATION_LABELS } from '../../domain/provenance'
 import type { BusType, Category, DeviceDefinition, ModelMetadata } from '../../domain/types'
 import { detectImportKind, validateGltfZip, validateModelFile, type PreparedImport } from '../../storage/modelImportFlow'
 import { useProjectStore } from '../../stores/project'
@@ -43,20 +45,21 @@ const products = computed(() => {
     const matchesCategory = category.value === 'all' || product.category === category.value
     const matchesSearch = !term || `${product.name} ${product.brand} ${product.sku}`.toLocaleLowerCase('ru').includes(term)
     // Most of the catalogue is generated from a series template, so "verified" is the exception
-    // rather than the rule. Imported models carry no status at all and count as unverified.
+    // rather than the rule. Positions whose parameters nobody checked are `unverified`.
     const matchesVerification = !verifiedOnly.value || product.verificationStatus === 'verified'
     return matchesCategory && matchesSearch && matchesVerification
   })
 })
 
+/**
+ * The badge is empty for a confirmed position — the flag marks what is *not* confirmed. A
+ * locally imported model is named as an import, because "parameters not confirmed" alone would
+ * hide the more useful fact that the row came from the user's own file.
+ */
 const verificationLabel = (product: DeviceDefinition) => {
   if (product.verificationStatus === 'verified') return ''
   if (product.imported) return 'Импорт, не проверено'
-  if (product.verificationStatus === 'template') return 'Шаблон'
-  if (product.verificationStatus === 'legacy') return 'Исторические данные'
-  // A missing status is not the same as a historical one: the built-in catalogue carries no
-  // status field at all, and calling those real products historical would be simply untrue.
-  return 'Статус не указан'
+  return VERIFICATION_LABELS[product.verificationStatus]
 }
 
 const browse = () => fileInput.value?.click()
@@ -70,7 +73,7 @@ const onFile = async (event: Event) => {
     const kind = detectImportKind(file)
     const data = await file.arrayBuffer()
     prepared.value = kind === 'zip' ? validateGltfZip(data, file) : await validateModelFile(file)
-    importForm.value = { id: crypto.randomUUID(), ...prepared.value.metadata, createdAt: new Date().toISOString() }
+    importForm.value = { id: uid(), ...prepared.value.metadata, createdAt: new Date().toISOString() }
   } catch (error) {
     prepared.value = null
     importError.value = error instanceof Error ? error.message : 'Не удалось проверить файл'

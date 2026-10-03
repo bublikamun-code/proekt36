@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { strToU8, zipSync } from 'fflate'
 import { categoryLabels } from '../../src/data/catalog'
 import type { Category } from '../../src/domain/types'
-import { dragWithPointer, gotoEditor, pickOption } from './helpers'
+import { dragWithPointer, gotoEditor, openSidePanels, pickOption } from './helpers'
 
 const positions = new Float32Array([
   -0.6, -0.5, 0,
@@ -163,8 +163,7 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   // default budget, and more than a bare 180 s once the suite runs in parallel.
   test.setTimeout(300_000)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
-  await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
+  await openSidePanels(page)
 
   for (const item of importCases) await importModel(page, item)
   expect(await countIndexedDbAssets(page)).toBe(3)
@@ -190,9 +189,7 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
 
   // The reload closes the side panels again, and a catalogue item that is not on
   // screen cannot be grabbed with a pointer.
-  const reopenPanels = page.getByRole('button', { name: 'Показать боковые панели' })
-  if (await reopenPanels.isVisible()) await reopenPanels.click()
-  await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
+  await openSidePanels(page)
 
   const glbSource = page.locator('.catalog-item').filter({ hasText: 'Импорт GLB' })
   const dropTarget = page.locator('.din-row').nth(1).locator('.slot-cell').nth(10)

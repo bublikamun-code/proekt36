@@ -3,14 +3,16 @@ import { computed, ref } from 'vue'
 import DeviceVisual from '../components/catalog/DeviceVisual.vue'
 import ProjectPrintReport from '../components/ui/ProjectPrintReport.vue'
 import { demoProject } from '../data/demoProject'
-import { enmasSeriesCatalog } from '../data/catalog'
+import { workspaceCatalog } from '../data/catalog'
 import { getEnclosureMinimum, getFreeSlots, getRowUsage, getProductFootprintModules, resolveLayout } from '../domain/layout'
 import { getPanelGeometry } from '../domain/panelGeometry'
 import { buildBom } from '../domain/pricing'
-import { phaseBalance, validateProject } from '../domain/validation'
+import { verificationLabel as verificationLabelFor } from '../domain/provenance'
+import { phaseBalance } from '../domain/electrical'
+import { validateProject } from '../domain/validation'
 import type { DeviceDefinition, PlacedDevice } from '../domain/types'
 
-const definitions = new Map<string, DeviceDefinition>(enmasSeriesCatalog.map((product) => [product.id, product]))
+const definitions = new Map<string, DeviceDefinition>(workspaceCatalog.map((product) => [product.id, product]))
 const activeTab = ref<'2d' | 'bom' | 'checks' | 'circuits'>('2d')
 const selectedId = ref(demoProject.devices[0]?.instanceId || '')
 const zoom = ref(1)
@@ -72,10 +74,7 @@ const onTabKeydown = (event: KeyboardEvent, index: number) => {
   setTab(tabs[next].id)
   document.querySelector<HTMLButtonElement>(`[data-demo-tab="${tabs[next].id}"]`)?.focus()
 }
-const verificationLabel = (productId: string) => {
-  const status = definitions.get(productId)?.verificationStatus
-  return status === 'verified' ? 'подтверждено' : status === 'template' ? 'шаблон' : 'данные не проверены'
-}
+const verificationLabel = (productId: string) => verificationLabelFor(definitions.get(productId)?.verificationStatus, { sentence: true })
 const formatCategory = (category: string) => category === 'terminals' ? 'Клеммы' : category === 'RCBO' ? 'Дифавтоматы' : category === 'MCB' ? 'Автоматы' : category === 'SPD' ? 'УЗИП' : category
 </script>
 

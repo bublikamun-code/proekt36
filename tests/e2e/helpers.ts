@@ -12,11 +12,68 @@ export const unlockWorkspace = async (page: Page) => {
   }, DEMO_SESSION)
 }
 
+const boardRegion = (page: Page) => page.getByRole('region', { name: 'Схема электрощита' })
+
+/**
+ * Opens the side panels, whichever state the editor came up in.
+ *
+ * The editor opens focused, and a reload that also cleared the workspace puts it back that way.
+ * Checking `isVisible()` on the trigger alone is not enough: right after a reload the button is not
+ * there yet, so the check answers "no" and the panels stay shut for the rest of the test.
+ */
+export const openSidePanels = async (page: Page) => {
+  await boardRegion(page).waitFor({ state: 'visible', timeout: 60_000 })
+  const trigger = page.getByRole('button', { name: 'Показать боковые панели' })
+  if (await trigger.isVisible()) await trigger.click()
+  await page.getByRole('heading', { name: 'Каталог' }).waitFor({ state: 'visible' })
+}
+
 /**
  * The board's readiness signal. Every spec that opens the editor starts from it, so start-up cost
  * is paid once, here, instead of being charged to whichever assertion happens to run first.
  */
-const boardRegion = (page: Page) => page.getByRole('region', { name: 'Схема электрощита' })
+/**
+ * Waits until an element has stopped moving, then reads where it is.
+ *
+ * Devices animate into place, so a reading taken during the transition catches a position in flight.
+ * A test that compares that against a settled number fails for a reason that has nothing to do with
+ * the board — and it fails more often on a loaded machine, which is exactly when a red test is least
+ * useful. Two consecutive frames with an unchanged box means nothing is moving.
+ */
+export const settledLeftOf = async (page: Page, selector: string) => {
+  const locator = page.locator(selector).first()
+  await locator.waitFor({ state: 'attached' })
+  await locator.evaluate((element) => new Promise<void>((resolve) => {
+    let last = element.getBoundingClientRect().left
+    const tick = () => {
+      const now = element.getBoundingClientRect().left
+      if (now === last) return resolve()
+      last = now
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }))
+  const box = await locator.boundingBox()
+  if (!box) throw new Error(`Nothing is at ${selector}`)
+  return box.x
+}
+
+/** The settled width of an element, for the same reason `settledLeftOf` exists for positions. */
+export const settledWidthOf = async (page: Page, selector: string) => {
+  const locator = page.locator(selector).first()
+  await locator.waitFor({ state: 'attached' })
+  await locator.evaluate((element) => new Promise<void>((resolve) => {
+    let last = element.getBoundingClientRect().width
+    const tick = () => {
+      const now = element.getBoundingClientRect().width
+      if (now === last) return resolve()
+      last = now
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }))
+  return (await locator.boundingBox())?.width ?? 0
+}
 
 export const gotoEditor = async (page: Page) => {
   await unlockWorkspace(page)
