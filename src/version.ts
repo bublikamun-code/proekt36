@@ -9,4 +9,4 @@
  * Bump this together with `package.json` when releasing — see the release steps in
  * `CHANGELOG.md` and section 10 of the runbook.
  */
-export const APP_VERSION = '0.2.0'
+export const APP_VERSION = '0.3.0'

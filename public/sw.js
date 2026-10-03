@@ -18,7 +18,7 @@
  * are deleted on `activate`, and a stale chunk can never be served against a new document.
  * `APP_VERSION` is the only thing that has to be bumped, and the app already bumps it for release.
  */
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 const SHELL_CACHE = `panel36-shell-${VERSION}`
 const ASSET_CACHE = `panel36-assets-${VERSION}`
 
