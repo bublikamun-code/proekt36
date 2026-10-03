@@ -98,7 +98,12 @@ export const normalizeCircuit = (value: unknown): Circuit => {
 /** Normalize a connection, including old records that did not have kind. */
 export const normalizeConnection = (value: unknown): Connection => {
   const raw = asRecord(value)
-  const kind = raw.kind === 'busbar' || raw.fromDeviceId ? 'busbar' : 'circuit'
+  // An older file says nothing about where a wire comes from, and its two shapes still mean what
+  // they meant: a connection that names a device is a run from that device, one that names a
+  // circuit is a line of it. A file that does say `bus` is a feed from the panel bus, and it is not
+  // promoted to a run from a device just because a stray source id rode along.
+  const kind: Connection['kind'] = raw.kind === 'bus' && !raw.fromDeviceId ? 'bus'
+    : raw.kind === 'busbar' || raw.fromDeviceId ? 'busbar' : 'circuit'
   return {
     id: asText(raw.id, uid()),
     circuitId: asText(raw.circuitId),
@@ -109,6 +114,10 @@ export const normalizeConnection = (value: unknown): Connection => {
     label: asText(raw.label),
     kind,
     fromDeviceId: asText(raw.fromDeviceId) || undefined,
+    // Zero is the first terminal, so it is written only when the file named a later one. A file that
+    // never heard of the field keeps the landing it always had.
+    terminal: raw.terminal === undefined ? undefined : asInteger(raw.terminal, 0, 0, 16),
+    fromTerminal: raw.fromTerminal === undefined ? undefined : asInteger(raw.fromTerminal, 0, 0, 16),
   }
 }
 

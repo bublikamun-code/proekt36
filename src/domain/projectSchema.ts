@@ -46,6 +46,14 @@ export const isFutureRevision = (value: unknown, current: string | number): bool
 }
 
 
+/**
+ * The highest terminal index a connection may name.
+ *
+ * A terminal block with more screws than this is not a thing on a DIN rail, and the bound is what
+ * keeps a hand-edited file from pointing a wire at a terminal that cannot exist.
+ */
+export const CONNECTION_TERMINAL_LIMIT = 16
+
 export const PROJECT_LIMITS = {
   id: 128,
   name: 160,
@@ -197,8 +205,14 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: true })
   finiteNumber(errors, value.thickness, `${path}.thickness`, { min: CONNECTION_THICKNESS_MM.min, max: CONNECTION_THICKNESS_MM.max })
   string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text })
-  enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar'], false)
+  enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar', 'bus'], false)
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })
+  // A terminal index is optional and small: it counts screws on a terminal block, and nothing in the
+  // panel has more than a handful. A file without it keeps the first terminal.
+  for (const field of ['terminal', 'fromTerminal'] as const) {
+    if (value[field] === undefined) continue
+    finiteNumber(errors, value[field], `${path}.${field}`, { min: 0, max: CONNECTION_TERMINAL_LIMIT, integer: true })
+  }
 }
 
 const validateReferences = (errors: string[], project: RecordValue) => {
@@ -214,6 +228,11 @@ const validateReferences = (errors: string[], project: RecordValue) => {
     if (typeof connection.toDeviceId === 'string' && !deviceIds.has(connection.toDeviceId)) add(errors, `connections[${index}].toDeviceId`, `ссылается на несуществующее устройство «${connection.toDeviceId}»`)
     if (connection.kind === 'busbar') {
       if (typeof connection.fromDeviceId !== 'string' || !deviceIds.has(connection.fromDeviceId)) add(errors, `connections[${index}].fromDeviceId`, 'для подключения к шине укажите существующее устройство-источник')
+    } else if (connection.kind === 'bus') {
+      // A feed from the panel bus has no source device — that is what makes it a feed. A file that
+      // names one is a cascade that lost its kind, and reading it as a feed would quietly move the
+      // wire off the device it actually leaves from.
+      if (connection.fromDeviceId !== undefined) add(errors, `connections[${index}].fromDeviceId`, 'подключение от шины щита не указывает устройство-источник')
     } else if (typeof connection.circuitId === 'string' && !circuitIds.has(connection.circuitId)) {
       add(errors, `connections[${index}].circuitId`, `ссылается на несуществующую цепь «${connection.circuitId}»`)
     }

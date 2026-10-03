@@ -41,17 +41,29 @@ export const demoProject: PanelProject = {
    * to carry, and it made the board look plausible while telling the reader nothing about where the
    * neutral and the earth go — and left the bus-completeness check reporting a gap on a fixture
    * that is meant to be clean.
+   *
+   * The earth and the neutral of the lighting circuit go to the terminal blocks, not to the
+   * protective devices. QF02 is a single-pole breaker: it has one clamp, and that clamp is the
+   * line. A 1P+N residual current device has two — line in, neutral out — and no earth at all, so
+   * a PE wire drawn into either would enter a clamp that does not exist, and three wires would be
+   * drawn on top of each other where the picture claimed one connection. XT01 is an N block (ПВ)
+   * and XT02 a PE block (ЗБИ), which is where a real panel puts them.
+   *
+   * The check that reports this is new: it asks whether a device has a clamp of the bus being
+   * connected, and the fixture says no for exactly these two lines. That is the rule working.
    */
   connections: [
     { id: 'demo-connection-living-l', circuitId: 'demo-circuit-living', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#d65b43', thickness: 2, label: 'L → QFI01' },
     { id: 'demo-connection-living-n', circuitId: 'demo-circuit-living', fromBus: 'N', toDeviceId: 'demo-qfi01', color: '#8a9599', thickness: 2, label: 'N → QFI01' },
-    { id: 'demo-connection-living-pe', circuitId: 'demo-circuit-living', fromBus: 'PE', toDeviceId: 'demo-qfi01', color: '#47a067', thickness: 2, label: 'PE → QFI01' },
+    { id: 'demo-connection-living-pe', circuitId: 'demo-circuit-living', fromBus: 'PE', toDeviceId: 'demo-xt02', color: '#47a067', thickness: 2, label: 'PE → XT02 (1)' },
     { id: 'demo-connection-kitchen-l', circuitId: 'demo-circuit-kitchen', fromBus: 'L', toDeviceId: 'demo-qfi02', color: '#d65b43', thickness: 2, label: 'L → QFI02' },
     { id: 'demo-connection-kitchen-n', circuitId: 'demo-circuit-kitchen', fromBus: 'N', toDeviceId: 'demo-qfi02', color: '#8a9599', thickness: 2, label: 'N → QFI02' },
-    { id: 'demo-connection-kitchen-pe', circuitId: 'demo-circuit-kitchen', fromBus: 'PE', toDeviceId: 'demo-qfi02', color: '#47a067', thickness: 2, label: 'PE → QFI02' },
+    { id: 'demo-connection-kitchen-pe', circuitId: 'demo-circuit-kitchen', fromBus: 'PE', toDeviceId: 'demo-xt02', terminal: 1, color: '#47a067', thickness: 2, label: 'PE → XT02 (2)' },
     { id: 'demo-connection-light-l', circuitId: 'demo-circuit-light', fromBus: 'L', toDeviceId: 'demo-qf02', color: '#d65b43', thickness: 2, label: 'L → QF02' },
-    { id: 'demo-connection-light-n', circuitId: 'demo-circuit-light', fromBus: 'N', toDeviceId: 'demo-qf02', color: '#8a9599', thickness: 2, label: 'N → QF02' },
-    { id: 'demo-connection-light-pe', circuitId: 'demo-circuit-light', fromBus: 'PE', toDeviceId: 'demo-qf02', color: '#47a067', thickness: 2, label: 'PE → QF02' },
+    { id: 'demo-connection-light-n', circuitId: 'demo-circuit-light', fromBus: 'N', toDeviceId: 'demo-xt01', color: '#8a9599', thickness: 2, label: 'N → XT01' },
+    // Two conductors under one screw is how a real terminal block takes three earth wires: the
+    // block offers six screws, and the person wiring it decides which of them each circuit sits on.
+    { id: 'demo-connection-light-pe', circuitId: 'demo-circuit-light', fromBus: 'PE', toDeviceId: 'demo-xt02', color: '#47a067', thickness: 2, label: 'PE → XT02 (1)' },
     // A cascade: the lighting feed leaves the main breaker rather than the busbar. This is how most
     // real boards are wired, and until the wiring was routed to terminals it could not be drawn.
     { id: 'demo-connection-cascade-light', circuitId: 'demo-circuit-light', fromBus: 'L', toDeviceId: 'demo-qf02', color: '#d65b43', thickness: 2, label: 'QF01 → QF02', kind: 'busbar', fromDeviceId: 'demo-qf01' },

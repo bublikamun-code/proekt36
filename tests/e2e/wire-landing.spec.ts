@@ -15,11 +15,26 @@ import { unlockWorkspace } from './helpers'
  * scale itself.
  */
 const measure = async (page: Page) => page.evaluate(() => {
-  const centres = [...document.querySelectorAll<SVGRectElement>('.dv-pocket')]
-    .map((rect) => {
-      const box = rect.getBoundingClientRect()
-      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-    })
+
+/**
+ * Where a wire may land, on screen.
+ *
+ * A breaker has clamps — pockets drawn as wells — and a terminal block has screws. Both are places a
+ * conductor is held, and measuring only the pockets called every wire into a terminal block
+ * unlanded, which is a measurement fault rather than a wiring fault: the wire was in the screw.
+ */
+const connectionPoints = () => [
+  ...[...document.querySelectorAll<SVGRectElement>('.dv-pocket')].map((rect) => {
+    const box = rect.getBoundingClientRect()
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }),
+  ...[...document.querySelectorAll<SVGCircleElement>('.dv-socket')].map((circle) => {
+    const box = circle.getBoundingClientRect()
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }),
+]
+
+  const centres = connectionPoints()
 
   const wires = [...document.querySelectorAll<SVGPathElement>('.wires path, .scene-wire')]
     .map((path) => {
@@ -75,7 +90,7 @@ for (const route of ROUTES) {
       await unlockWorkspace(page)
       await seededWiredProject(page)
       await page.goto(route.path)
-      await expect(page.locator('.dv-pocket').first()).toBeAttached({ timeout: 60_000 })
+      await expect(page.locator('.dv-pocket, .dv-socket').first()).toBeAttached({ timeout: 60_000 })
       await page.waitForTimeout(800)
 
       const result = await measure(page)

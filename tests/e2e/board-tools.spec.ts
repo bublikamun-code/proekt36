@@ -147,8 +147,11 @@ test.describe('инструменты доски', () => {
     // The hand-drawn wire has to obey the same tracing as the automatic ones, or the board is
     // showing two different truths about where a wire ends.
     const landing = await page.evaluate(() => {
-      const centres = [...document.querySelectorAll<SVGRectElement>('.dv-pocket')]
-        .map((rect) => { const box = rect.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } })
+      // A clamp well or a terminal block screw: both are places a wire can be held.
+      const centres = [
+        ...[...document.querySelectorAll<SVGRectElement>('.dv-pocket')],
+        ...[...document.querySelectorAll<SVGCircleElement>('.dv-socket')],
+      ].map((shape) => { const box = shape.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } })
       const wires = [...document.querySelectorAll<SVGPathElement>('.scene-wire')].map((path) => {
         const numbers = (path.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? []
         const matrix = path.ownerSVGElement!.getScreenCTM()!

@@ -126,6 +126,30 @@ const removeCircuit = async (id: string, circuitName: string) => {
     danger: true,
   })) store.deleteCircuit(id)
 }
+/**
+ * The wires that belong to no circuit: feeds from the panel bus and runs between two devices.
+ *
+ * They were recorded but listed nowhere — the panel showed a connection only under the circuit it
+ * belonged to, and these belong to none. So a wire drawn on the board could not be renamed, cannot
+ * be changed to another bus, and could only be removed by deleting one of the two devices it
+ * touches. That is the same hole the board's wire card closes, from the other side.
+ */
+const standaloneConnections = computed(() => currentProject.value.connections.filter((item) => item.kind !== 'circuit'))
+const connectionSource = (connection: (typeof currentProject.value.connections)[number]) => {
+  if (connection.kind === 'bus' || !connection.fromDeviceId) return `шина ${connection.fromBus}`
+  return currentProject.value.devices.find((device) => device.instanceId === connection.fromDeviceId)?.address || 'удалённый аппарат'
+}
+const connectionTarget = (connection: (typeof currentProject.value.connections)[number]) =>
+  currentProject.value.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'удалённый аппарат'
+const removeStandaloneConnection = async (connection: (typeof currentProject.value.connections)[number]) => {
+  if (await confirm({
+    title: 'Удалить провод?',
+    description: `Провод «${connection.label || connection.id}» (${connectionSource(connection)} → ${connectionTarget(connection)}) будет удалён. Действие можно отменить через Ctrl+Z.`,
+    confirmLabel: 'Удалить провод',
+    danger: true,
+  })) store.deleteConnection(connection.id)
+}
+
 const removeConnection = async (id: string, circuitName: string) => {
   if (await confirm({
     title: 'Удалить подключение?',
@@ -234,6 +258,24 @@ const migrationIssueLabel = (code: string) => ({
         </div>
       </div>
       <p v-if="!busbars.length" class="connection-empty">Добавьте FORK из каталога «Шины».</p>
+    </section>
+
+    <section class="inspector-section" aria-labelledby="wire-title">
+      <div class="section-title"><h3 id="wire-title">Провода щита</h3><span class="mono">{{ standaloneConnections.length }}</span></div>
+      <p class="microcopy">Запитки от шин и каскады между аппаратами. Их нельзя отнести к цепи: это провода, а не линии нагрузки.</p>
+      <div v-for="connection in standaloneConnections" :key="connection.id" class="connection-card" :data-standalone-connection="connection.id">
+        <div class="connection-card-head">
+          <strong>{{ connectionSource(connection) }} → {{ connectionTarget(connection) }}</strong>
+          <button class="icon-button danger" :aria-label="`Удалить провод ${connection.label || connection.id}`" @click="removeStandaloneConnection(connection)">×</button>
+        </div>
+        <div class="form-grid compact-form">
+          <label>Шина<AppSelect label="Шина провода" :model-value="connection.fromBus" :options="BUS_OPTIONS" @update:model-value="store.updateConnection(connection.id, { fromBus: $event as 'L' | 'N' | 'PE' })" /></label>
+          <label>Цвет<input :value="connection.color" type="color" @change="store.updateConnection(connection.id, { color: ($event.target as HTMLInputElement).value })" /></label>
+          <label>Толщина<input :value="connection.thickness" type="number" :min="CONNECTION_THICKNESS_MM.min" :max="CONNECTION_THICKNESS_MM.max" :step="CONNECTION_THICKNESS_MM.step" @change="store.updateConnection(connection.id, { thickness: clampThickness(Number(($event.target as HTMLInputElement).value)) })" /></label>
+          <label class="wide">Подпись<input :value="connection.label" placeholder="Например, PE → XT02" @change="store.updateConnection(connection.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+        </div>
+      </div>
+      <p v-if="!standaloneConnections.length" class="connection-empty">Прямых проводов нет.</p>
     </section>
 
     <section class="inspector-section circuits-section">

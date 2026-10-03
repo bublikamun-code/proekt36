@@ -74,8 +74,29 @@ export interface Connection {
   color: string
   thickness: number
   label: string
-  kind?: 'circuit' | 'busbar'
+  /**
+   * Where the wire comes from, which is the one thing a line on a board cannot show by itself.
+   *
+   * `circuit` — a line of a circuit: its colour and its name belong to the circuit.
+   * `busbar`  — a run from another device, a fork or a breaker; `fromDeviceId` names where it
+   *             leaves from.
+   * `bus`     — a feed from the panel bus itself, with no source device because the bus is not a
+   *             device. This is what a feed drawn by hand on the board records, and what an older
+   *             project means by a connection that names no circuit and no source.
+   */
+  kind?: 'circuit' | 'busbar' | 'bus'
   fromDeviceId?: string
+  /**
+   * Which terminal of the device the wire enters, counted within its side, zero-based.
+   *
+   * A breaker decides its own: one column is the line, the next is the neutral, and the bus says
+   * which is which. A terminal block cannot decide — it has six screws of the same bus, and only
+   * the person who wired it knows that this circuit sits on the third. Absent means the first, so a
+   * block wired before this field existed lands exactly where it always did.
+   */
+  terminal?: number
+  /** The same choice for the device the wire leaves from, for the same reason. */
+  fromTerminal?: number
 }
 
 export interface DeviceDefinition {

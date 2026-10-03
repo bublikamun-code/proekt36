@@ -132,6 +132,12 @@ const LOAD_LABEL = 20
           Шина {{ bus.label }} ({{ bus.name || bus.bus }}, {{ bus.ratedCurrent ?? '—' }} А) питает подключённые аппараты.
         </li>
       </ul>
+      <ul v-if="model.feeds.length" class="single-line-notes">
+        <li v-for="feed in model.feeds" :key="`${feed.from.instanceId}-${feed.to.instanceId}-${feed.bus}`">
+          {{ feed.from.label }} → {{ feed.to.label }} ({{ feed.bus }}): питание
+          {{ feed.via === 'cascade' ? 'каскадом от другого аппарата' : feed.via === 'busbar' ? 'от шины аппарата' : 'от шины щита' }}.
+        </li>
+      </ul>
       <ul v-if="model.unmodelled.length" class="single-line-notes">
         <li v-for="device in model.unmodelled" :key="device.instanceId">
           {{ device.address }} — {{ device.name }}: в схеме питания не участвует, цепь не заведена.

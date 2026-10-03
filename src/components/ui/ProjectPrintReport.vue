@@ -7,7 +7,7 @@ import { validateProject } from '../../domain/validation'
 import SingleLineDiagram from './SingleLineDiagram.vue'
 import { claimsASource, verificationLabel as verificationLabelFor } from '../../domain/provenance'
 import { buildLabelSheet, labelSheetWarning } from '../../domain/labelSheet'
-import type { DeviceDefinition, PanelProject, VerificationStatus } from '../../domain/types'
+import type { Connection, DeviceDefinition, PanelProject, VerificationStatus } from '../../domain/types'
 
 const props = defineProps<{
   project: PanelProject
@@ -21,6 +21,26 @@ const layout = computed(() => resolveLayout(props.project))
 const lines = computed(() => buildBom(props.project.devices, props.definitions))
 /** Address lookup for the connection list, so a large report does not rescan the board per wire. */
 const addressByInstanceId = computed(() => new Map(props.project.devices.map((device) => [device.instanceId, device.address])))
+
+/**
+ * Where a wire comes from, in the words the report uses elsewhere.
+ *
+ * Every run from a fork was printed as "FORK-шина" whatever fed it, and a feed from the panel bus
+ * was printed as a bare bus letter with no source at all. On a sheet somebody builds from, "откуда
+ * этот провод" is the first question asked of it.
+ */
+const wireSource = (connection: Connection): string => {
+  if (connection.kind === 'bus') return `шина ${connection.fromBus}`
+  if (connection.kind === 'busbar') {
+    return connection.fromDeviceId
+      ? addressByInstanceId.value.get(connection.fromDeviceId) || 'FORK-шина'
+      : 'FORK-шина'
+  }
+  return `шина ${connection.fromBus}`
+}
+
+/** The terminal a wire enters, when the panel does not decide it by itself. */
+const wireTerminal = (connection: Connection) => (connection.terminal === undefined ? '' : `зажим ${connection.terminal + 1}`)
 const issues = computed(() => validateProject(props.project, props.definitions))
 const labelSheet = computed(() => buildLabelSheet(props.project, props.definitions))
 const labelWarning = computed(() => labelSheetWarning(labelSheet.value))
@@ -122,7 +142,7 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
       <ol>
         <li v-for="connection in project.connections" :key="connection.id">
           <strong>{{ connection.label || 'Без подписи' }}</strong>
-          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${addressByInstanceId.get(connection.toDeviceId) || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
+          <span>{{ wireSource(connection) }} → {{ addressByInstanceId.get(connection.toDeviceId) || 'устройство' }}{{ wireTerminal(connection) ? `, ${wireTerminal(connection)}` : '' }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
         </li>
       </ol>
     </section>

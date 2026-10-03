@@ -41,9 +41,9 @@ const scene = ref<InstanceType<typeof BoardScene> | null>(null)
  */
 const tool = ref<BoardTool>('select')
 const TOOLS: { id: BoardTool; label: string; hint: string }[] = [
-  { id: 'select', label: 'Выбрать', hint: 'Выделить аппарат. Клавиша 1' },
+  { id: 'select', label: 'Выбрать', hint: 'Выделить аппарат или провод. Клавиша 1' },
   { id: 'address', label: 'Адрес', hint: 'Подписать аппарат на корпусе. Клавиша 2' },
-  { id: 'wire', label: 'Провести', hint: 'Соединить два зажима на доске. Клавиша 3' },
+  { id: 'wire', label: 'Провести', hint: 'Соединить два зажима или зажим с шиной L, N или PE. Клавиша 3' },
 ]
 
 const onBoardKey = (event: KeyboardEvent) => {
@@ -55,15 +55,24 @@ const onBoardKey = (event: KeyboardEvent) => {
   if (event.key === '2') { tool.value = 'address'; return }
   if (event.key === '3') { tool.value = 'wire'; return }
   if (event.key.toLowerCase() === 'c' && store.selectedDevice) { scene.value?.createCircuit(store.selectedDeviceId!); return }
-  if (event.key === 'Escape') { tool.value = 'select'; scene.value?.cancelWire(); return }
+  if (event.key === 'Escape') { tool.value = 'select'; scene.value?.cancelWire(); store.selectConnection(null); return }
 
   // Delete and duplicate act on whatever is selected, and both are one keystroke away from a
   // mistake. They are undoable, which is why there is no confirmation dialog: an interrupted
   // two-step dialog is worse than an action that is both faster and reversible.
-  if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedDevice) {
-    event.preventDefault()
-    store.deleteSelected()
-    return
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    // A picked wire goes before a picked device: it is the smaller thing to lose, and Delete on
+    // the one you can see highlighted is the one you meant.
+    if (store.selectedConnection) {
+      event.preventDefault()
+      store.deleteConnection(store.selectedConnection.id)
+      return
+    }
+    if (store.selectedDevice) {
+      event.preventDefault()
+      store.deleteSelected()
+      return
+    }
   }
   if (event.key.toLowerCase() === 'd' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault()
@@ -94,10 +103,29 @@ const panelsOpen = ref(preferences.panelsOpen)
  */
 const wantsDemoFixture = () => route.query.fixture === 'demo'
 
+/**
+ * The project named in the address, when there is one.
+ *
+ * The route `/app/projects/:projectId/board` is what a person reaches from the project list, and it
+ * says which project it draws. Following it here — rather than only switching the store — is what
+ * makes a link to somebody else's board open their board instead of whichever one was last open.
+ */
+const openProjectInRoute = () => {
+  const id = typeof route.params.projectId === 'string' ? route.params.projectId : ''
+  if (!id || id === currentProjectId.value) return false
+  if (!projects.value.some((project) => project.id === id)) return false
+  store.switchProject(id)
+  return true
+}
+
 onMounted(() => {
   if (wantsDemoFixture() || !store.projects.length) {
     store.importProject({ ...structuredClone(demoProject), id: 'board-fixture', name: 'Доска · проверка трассировки' })
   }
+  // An explicit fixture is an explicit request for that project, so the address does not get to
+  // choose: `?fixture=demo` was arriving at `/app/projects/<другой>/board`, where the guard had put
+  // the seeded project, and the board came up with no wires on it at all.
+  if (!wantsDemoFixture()) openProjectInRoute()
 })
 
 const togglePanels = () => {
@@ -152,7 +180,12 @@ const importFile = async (event: Event) => {
  */
 const openProject = (event: Event) => {
   const id = (event.target as HTMLSelectElement).value
-  if (id && id !== currentProjectId.value) store.switchProject(id)
+  if (id && id !== currentProjectId.value) {
+    store.switchProject(id)
+    // The address names the project, so switching by hand keeps saying which one is on the board.
+    // A stale address is worse than no address: a refresh would bring back the board just left.
+    void router.replace({ name: 'project-board', params: { projectId: id }, query: route.query })
+  }
 }
 
 const canUndo = () => undoStack.value.length > 0

@@ -5,6 +5,7 @@ import { getRowCapacity, placeProduct, resolveDeviceMove } from '../../domain/la
 import { routeWire, wireColor } from '../../domain/wiring'
 import { validateProject } from '../../domain/validation'
 import { beginBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
+import BoardWireInspector from './BoardWireInspector.vue'
 import DeviceChassis from '../catalog/deviceFace/DeviceChassis.vue'
 import DeviceFace from '../catalog/deviceFace/DeviceFace.vue'
 import { useProjectStore } from '../../stores/project'
@@ -49,18 +50,31 @@ const measure = () => {
   const style = window.getComputedStyle(element)
   const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
   const width = element.clientWidth - (Number.isFinite(padding) ? padding : 0)
-  if (width > 0 && scene.value.width > 0) fitScale.value = width / scene.value.width
+  // Height used to be ignored, so a tall board was fitted by width alone and ran off the bottom of
+  // the window: the lower rows and everything on them were below the fold, on a workspace whose
+  // whole point is the whole panel. The available height is measured from the canvas to the window
+  // rather than from the canvas itself, because the canvas grows with the board it holds.
+  const room = Math.max(240, window.innerHeight - element.getBoundingClientRect().top - 24)
+  if (width <= 0 || scene.value.width <= 0 || scene.value.height <= 0) return
+  const next = Math.min(width / scene.value.width, room / scene.value.height)
+  // The observer fires when this element resizes, which the drawing itself causes; without a dead
+  // band the two would chase each other.
+  if (Math.abs(next - fitScale.value) > 0.005) fitScale.value = next
 }
 
 onMounted(() => {
   measure()
+  window.addEventListener('resize', measure)
   if (canvas.value) {
     observer = new ResizeObserver(measure)
     observer.observe(canvas.value)
   }
 })
 
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('resize', measure)
+})
 
 const scale = computed(() => Math.max(0.4, Math.min(6, (props.scale ?? 1) * fitScale.value)))
 
@@ -170,11 +184,129 @@ const deviceById = (instanceId: string) => scene.value.devices.find((device) => 
  * nothing to guess and nothing to look up. The one decision left open by the plan — whether a wire
  * records the bus or an explicit terminal index — is settled in favour of the bus here, because the
  * two produce the same interaction and differ only in what is written to the project.
+ *
+ * A wire may start or end on one of the three panel buses. That is the line every real board
+ * begins with, and until the rails were drawn there was nowhere on the picture to take it from: the
+ * store could record a feed and the board could show one, but no hand could draw one.
  */
+type WireEnd =
+  | { kind: 'terminal'; instanceId: string; bus: string; side: 'top' | 'bottom'; column: number }
+  | { kind: 'bus'; bus: BusType }
+  | null
+
 const pendingWire = ref<WireEnd>(null)
 const hoveredWire = ref<WireEnd>(null)
 const wireRefusal = ref('')
 
+const isWireEnd = (end: WireEnd, device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom', column: number) =>
+  Boolean(end && end.kind === 'terminal' && end.instanceId === device.instanceId && end.bus === bus && end.side === side && end.column === column)
+
+const terminalAt = (device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom', column?: number) => {
+  const row = side === 'top' ? device.terminals.top : device.terminals.bottom
+  if (column !== undefined && row[column]) return row[column]
+  return row.find((terminal) => terminal.bus === bus)
+}
+
+/**
+ * The two ends of a wire, in board millimetres, and the shape that joins them.
+ *
+ * A run from the rail is drawn like a run from a fork: it leaves a horizontal line and drops into
+ * the clamp. A run between two clamps leaves one and climbs into the other, and the route itself
+ * decides whether it has to climb at all.
+ */
+const pointOf = (end: NonNullable<WireEnd>) => {
+  if (end.kind === 'bus') {
+    const rail = scene.value.busRails.find((candidate) => candidate.bus === end.bus)
+    return rail ? { x: rail.x + rail.width / 2, y: rail.tapY, height: 0 } : null
+  }
+  const device = deviceById(end.instanceId)
+  const terminal = device && terminalAt(device, end.bus, end.side, end.column)
+  if (!device || !terminal) return null
+  return { x: device.x + terminal.x, y: device.y + terminal.y, height: terminal.height }
+}
+
+const wireEnds = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
+  const source = pointOf(from)
+  const target = pointOf(to)
+  if (!source || !target) return null
+  return { from: source, to: target, source: (from.kind === 'bus' ? 'busbar' : 'device') as 'busbar' | 'device' }
+}
+
+/** The line that follows the pointer: real routing to the hovered clamp, straight to the rest. */
+const ghostPath = computed(() => {
+  const from = pendingWire.value
+  const to = hoveredWire.value
+  if (!from || !to) return ''
+  const ends = wireEnds(from, to)
+  if (ends) return routeWire({ from: ends.from, to: ends.to, source: ends.source, stubMm: 4 })
+  const start = from.kind === 'terminal' ? deviceById(from.instanceId) : null
+  const startTerminal = start && from.kind === 'terminal' ? terminalAt(start, from.bus, from.side, from.column) : null
+  if (!start || !startTerminal || from.kind !== 'terminal') return ''
+  return `M ${start.x + startTerminal.x} ${start.y + startTerminal.y} L ${dragPointer.value.x} ${dragPointer.value.y}`
+})
+
+const clearWire = () => {
+  pendingWire.value = null
+  hoveredWire.value = null
+  wireRefusal.value = ''
+}
+
+/** The buses carry one wire each: a rail is a single conductor, and two L wires are the same wire. */
+const connect = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
+  const terminal = from.kind === 'terminal' ? from : to.kind === 'terminal' ? to : null
+  const bus = from.kind === 'bus' ? from.bus : to.kind === 'bus' ? to.bus : null
+  if (from.kind === 'terminal' && to.kind === 'terminal') {
+    // A run between two apparatus always leaves the bottom of the first and arrives at the top of
+    // the second, whatever was clicked in which order, so the terminal that matters is the one on
+    // the arriving apparatus — the second end of this call.
+    return store.connectOnBoard(from.instanceId, from.bus as BusType, to.instanceId, to.column || undefined)
+  }
+  if (!terminal || !bus) {
+    wireRefusal.value = 'Провод соединяет зажим с шиной или два зажима между собой.'
+    return false
+  }
+  // The feed always leaves a rail and arrives at the clamp above a device, whatever order the two
+  // ends were clicked in: a wire entering a device from underneath is a different piece of copper.
+  return store.connectFromBus(bus, terminal.instanceId, terminal.column || undefined)
+}
+
+const onTerminalClick = (device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom', column: number) => {
+  const first = pendingWire.value
+  const end: WireEnd = { kind: 'terminal', instanceId: device.instanceId, bus, side, column }
+  if (!first) {
+    pendingWire.value = end
+    wireRefusal.value = ''
+    return
+  }
+  // Two screws of a terminal block are two terminals, not one wire drawn twice: the column is part
+  // of which clamp was clicked.
+  const same = first.kind === end.kind && first.instanceId === end.instanceId && first.bus === end.bus
+    && first.side === end.side && first.column === end.column
+  if (same) { clearWire(); return }
+  if (first.bus !== end.bus) {
+    // A wire carries one bus. Letting a person join L to N would produce something that cannot be
+    // built, and the board is exactly where they find out, so it is refused here rather than later.
+    wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
+    return
+  }
+  if (connect(first, end)) { clearWire(); emit('update:tool', 'select') }
+}
+
+const onBusClick = (bus: BusType) => {
+  const first = pendingWire.value
+  const end: WireEnd = { kind: 'bus', bus }
+  if (!first) {
+    pendingWire.value = end
+    wireRefusal.value = ''
+    return
+  }
+  if (first.kind === 'bus' && first.bus === end.bus) { clearWire(); return }
+  if (first.bus !== end.bus) {
+    wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
+    return
+  }
+  if (connect(first, end)) { clearWire(); emit('update:tool', 'select') }
+}
 /**
  * What the board says about the project, straight from the validator.
  *
@@ -218,71 +350,6 @@ const announce = (instanceId: string) => {
   announced.value = list.map((entry) => `${name}: ${entry.message}`).join(' ')
 }
 
-type WireEnd = { instanceId: string; bus: string; side: 'top' | 'bottom' } | null
-const isWireEnd = (end: WireEnd, instanceId: string, bus: string, side: 'top' | 'bottom') =>
-  Boolean(end && end.instanceId === instanceId && end.bus === bus && end.side === side)
-
-const terminalAt = (device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom') => {
-  const row = side === 'top' ? device.terminals.top : device.terminals.bottom
-  return row.find((terminal) => terminal.bus === bus)
-}
-
-/** The end the feed leaves from and the end it arrives at, for a wire between two clamps. */
-const wireEnds = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
-  const start = deviceById(from.instanceId)
-  const end = deviceById(to.instanceId)
-  if (!start || !end) return null
-  const fromTerminal = terminalAt(start, from.bus, from.side)
-  const toTerminal = terminalAt(end, to.bus, to.side)
-  if (!fromTerminal || !toTerminal) return null
-  return {
-    from: { x: start.x + fromTerminal.x, y: start.y + fromTerminal.y, height: fromTerminal.height },
-    to: { x: end.x + toTerminal.x, y: end.y + toTerminal.y, height: toTerminal.height },
-  }
-}
-
-/** The line that follows the pointer: real routing to the hovered clamp, straight to the rest. */
-const ghostPath = computed(() => {
-  const from = pendingWire.value
-  const to = hoveredWire.value
-  if (!from || !to) return ''
-  const ends = wireEnds(from, to)
-  if (ends) return routeWire({ from: ends.from, to: ends.to, source: 'device', stubMm: 4 })
-  const start = deviceById(from.instanceId)
-  const startTerminal = start && terminalAt(start, from.bus, from.side)
-  if (!start || !startTerminal) return ''
-  return `M ${start.x + startTerminal.x} ${start.y + startTerminal.y} L ${dragPointer.value.x} ${dragPointer.value.y}`
-})
-
-const clearWire = () => {
-  pendingWire.value = null
-  hoveredWire.value = null
-  wireRefusal.value = ''
-}
-
-const onTerminalClick = (device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom') => {
-  const first = pendingWire.value
-  if (!first) {
-    pendingWire.value = { instanceId: device.instanceId, bus, side }
-    wireRefusal.value = ''
-    return
-  }
-  if (first.instanceId === device.instanceId && first.bus === bus && first.side === side) { clearWire(); return }
-  if (first.bus !== bus) {
-    // A wire carries one bus. Letting a person join L to N would produce something that cannot be
-    // built, and the board is exactly where they find out, so it is refused here rather than later.
-    wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${bus} соединить нельзя.`
-    return
-  }
-  const connection = connectOnBoard(first, { instanceId: device.instanceId, bus, side })
-  if (connection) { clearWire(); emit('update:tool', 'select') }
-}
-
-const connectOnBoard = (from: NonNullable<typeof pendingWire.value>, to: NonNullable<typeof pendingWire.value>) => {
-  const ok = store.connectOnBoard(from.instanceId, from.bus as BusType, to.instanceId)
-  if (!ok) wireRefusal.value = 'Провести провод не получилось.'
-  return ok
-}
 
 const beginAddress = (device: BoardSpace['devices'][number]) => {
   editing.value = { kind: 'address', instanceId: device.instanceId, x: device.x, y: device.y, value: device.address }
@@ -341,8 +408,35 @@ const cancelAddress = () => {
 
 const onDeviceClick = (device: BoardSpace['devices'][number]) => {
   if (tool.value === 'address') { beginAddress(device); return }
-  store.selectedDeviceId = device.instanceId
+  store.selectDevice(device.instanceId)
 }
+
+/**
+ * Picking a wire.
+ *
+ * A wire is one or two millimetres wide on screen and sits under the device it serves, so aiming at
+ * one by eye is guesswork. Each wire therefore carries a second, invisible copy of its own path,
+ * three millimetres wide, which is what the pointer actually hits — and clicking it selects the
+ * wire instead of the device behind it. Before this the only way to remove a wire was to delete a
+ * device it happened to touch.
+ */
+/**
+ * A click on the bare plate takes the selection away.
+ *
+ * Without it there is no way back to "nothing is picked" once a wire or a device has been: the
+ * tools are modal, and every other click lands on something. A person who wants to start over has
+ * to reload the page.
+ */
+const onPlateClick = () => {
+  store.selectConnection(null)
+  store.selectDevice(null)
+}
+
+const onWireClick = (event: MouseEvent, wireId: string) => {
+  event.stopPropagation()
+  store.selectConnection(wireId)
+}
+
 
 const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][number]) => {
   if (event.button !== 0) return
@@ -363,7 +457,18 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
     role="img"
     :aria-label="`Схема электрощита: ${scene.devices.length} аппаратов, ${scene.wires.length} соединений`"
   >
-    <rect class="scene-plate" x="0" y="0" :width="scene.width" :height="scene.height" rx="3" />
+    <rect class="scene-plate" x="0" y="0" :width="scene.width" :height="scene.height" rx="3" @click="onPlateClick" />
+
+    <!-- The three buses of the panel, in the margin the geometry reserves above the first row.
+         A wire fed from the bus used to begin at a fixed point in the left-hand gutter, so the
+         line looked as if it came out of nothing and the picture never said where L, N and PE were. -->
+    <g class="scene-buses">
+      <g v-for="bus in scene.busRails" :key="`bus-${bus.bus}`" class="scene-bus" :class="{ 'is-wire-target': tool === 'wire' }">
+        <rect class="scene-bus-rail" :x="bus.x" :y="bus.y" :width="bus.width" :height="bus.height" rx="1" :fill="bus.color" />
+        <text class="scene-bus-label" :x="bus.x - 2.4" :y="bus.y + bus.height - 0.5" text-anchor="end">{{ bus.label }}</text>
+        <title>{{ bus.title }}</title>
+      </g>
+    </g>
 
     <g class="scene-rails">
       <g v-for="rail in scene.rails" :key="`rail-${rail.row}`">
@@ -407,19 +512,36 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
     />
 
     <!-- Wires first, so a device covers the end of its own wire the way a real panel does. -->
-    <g class="scene-wires" aria-hidden="true">
+    <g class="scene-wires">
       <path
         v-for="wire in scene.wires"
         :key="wire.id"
         class="scene-wire"
-        :class="`scene-wire-${wire.bus.toLowerCase()}`"
+        :class="[`scene-wire-${wire.bus.toLowerCase()}`, { 'is-selected': wire.id === store.selectedConnectionId }]"
+        :data-wire-id="wire.id"
         :d="wire.d"
         :stroke="wire.color || busColor[wire.bus]"
         :stroke-width="wire.thickness || 2"
         fill="none"
-      >
-        <title>{{ wire.label }}</title>
-      </path>
+        aria-hidden="true"
+      />
+      <!-- The invisible copy is what the pointer hits, and it is drawn last so that it is the
+           topmost thing on the line: a conductor is a millimetre or two wide on screen and lies under
+           the device it serves, so without it a wire could not be aimed at, let alone picked. It
+           carries no stroke of its own, so it changes nothing on the paper. -->
+      <path
+        v-for="wire in scene.wires"
+        :key="`hit-${wire.id}`"
+        class="scene-wire-hit"
+        :class="{ 'is-selected': wire.id === store.selectedConnectionId }"
+        :d="wire.d"
+        :data-wire-id="wire.id"
+        :aria-label="`Провод: ${wire.fromName} → ${wire.toName}, шина ${wire.bus}`"
+        role="button"
+        tabindex="0"
+        @click="onWireClick($event, wire.id)"
+        @keydown.enter="store.selectConnection(wire.id)"
+      />
     </g>
 
     <g
@@ -485,18 +607,37 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
           :key="`${side}-${terminal.bus}-${terminal.column}`"
           class="scene-terminal"
           :class="{
-            'is-start': isWireEnd(pendingWire, device.instanceId, terminal.bus, side),
-            'is-hover': isWireEnd(hoveredWire, device.instanceId, terminal.bus, side),
+            'is-start': isWireEnd(pendingWire, device, terminal.bus, side, terminal.column),
+            'is-hover': isWireEnd(hoveredWire, device, terminal.bus, side, terminal.column),
           }"
           :cx="terminal.x" :cy="terminal.y" r="2.6"
           :stroke="wireColor(terminal.bus)"
           :data-terminal="`${device.instanceId}:${terminal.bus}:${side}:${terminal.column}`"
-          @pointerenter="hoveredWire = { instanceId: device.instanceId, bus: terminal.bus, side }"
+          @pointerenter="hoveredWire = { kind: 'terminal', instanceId: device.instanceId, bus: terminal.bus, side, column: terminal.column }"
           @pointerleave="hoveredWire = null"
-          @click.stop="onTerminalClick(device, terminal.bus, side)"
+          @click.stop="onTerminalClick(device, terminal.bus, side, terminal.column)"
           />
         </template>
       </g>
+    </g>
+
+    <!-- The buses are targets too, and the same shape of target as the clamps: a rail is where a
+         wire is clamped as surely as a pocket is. They are drawn above the wires on purpose — every
+         feed leaves a rail, so without that the wires would lie across the rails and swallow every
+         click on them. -->
+    <g v-if="tool === 'wire'" class="scene-bus-targets">
+      <rect
+        v-for="bus in scene.busRails"
+        :key="`bus-target-${bus.bus}`"
+        class="scene-bus-target"
+        :class="{ 'is-start': pendingWire?.kind === 'bus' && pendingWire.bus === bus.bus }"
+        :x="bus.x" :y="bus.y - 1.2" :width="bus.width" :height="bus.height + 2.4"
+        :data-bus="bus.bus"
+        :aria-label="bus.title"
+        @pointerenter="hoveredWire = { kind: 'bus', bus: bus.bus }"
+        @pointerleave="hoveredWire = null"
+        @click.stop="onBusClick(bus.bus)"
+      />
     </g>
 
     <path
@@ -514,6 +655,8 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       text-anchor="middle"
     >{{ wireRefusal }}</text>
   </svg>
+
+  <BoardWireInspector />
 
   <p v-if="wireRefusal" class="board-wire-refusal" role="status">{{ wireRefusal }}</p>
   <p v-if="announced" class="board-issue-note" role="status">{{ announced }}</p>
@@ -586,6 +729,59 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   fill: var(--board-slot);
   fill-opacity: .001;
   cursor: crosshair;
+}
+
+/* The buses are part of the panel, not an overlay on it, so they are drawn with the plate. */
+.scene-bus-rail {
+  fill-opacity: .85;
+  stroke: var(--board-plate-edge);
+  stroke-width: .25;
+}
+
+.scene-bus-label {
+  font: 600 2.4px var(--mono);
+  fill: var(--board-ink);
+}
+
+.scene-bus.is-wire-target .scene-bus-rail {
+  fill-opacity: .45;
+  stroke-dasharray: 1.2 .8;
+}
+
+.scene-bus-target {
+  fill: var(--board-slot);
+  fill-opacity: .001;
+  cursor: crosshair;
+}
+
+.scene-bus-target.is-hover,
+.scene-bus-target.is-start {
+  fill-opacity: .5;
+  stroke: var(--accent);
+  stroke-width: .3;
+}
+
+/*
+ * A wire is one or two millimetres wide and lies under the device it serves, so each one carries a
+ * second, invisible copy of its own path, three millimetres wide, for the pointer to hit. It paints
+ * nothing: `stroke: transparent` with `pointer-events: stroke` is exactly that.
+ */
+.scene-wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.scene-wire-hit:hover {
+  stroke: var(--accent);
+  stroke-opacity: .35;
+}
+
+.scene-wire.is-selected {
+  filter: drop-shadow(0 0 0.5mm var(--accent));
 }
 
 .scene-terminal.is-hover {

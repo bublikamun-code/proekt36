@@ -34,12 +34,23 @@ test.describe('новая доска', () => {
       })
       // A clamp lives inside its device's group, so its own transform has to be part of the
       // measurement — reading its x/y attributes alone would measure it at the board origin.
-      const clamps = Array.from(svg.querySelectorAll<SVGRectElement>('.dv-pocket')).map((rect) => {
-        const local = rect.getScreenCTM()!
-        const point = new DOMPoint(
-          Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2,
-          Number(rect.getAttribute('y')) + Number(rect.getAttribute('height')) / 2,
-        ).matrixTransform(local)
+      // Both kinds of landing: a clamp well on a breaker and a screw on a terminal block. Measuring
+      // only the wells called every wire into a terminal block unlanded, which is the fault of the
+      // ruler rather than of the wiring.
+      const clamps = [
+        ...Array.from(svg.querySelectorAll<SVGRectElement>('.dv-pocket')).map((rect) => ({
+          local: new DOMPoint(
+            Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2,
+            Number(rect.getAttribute('y')) + Number(rect.getAttribute('height')) / 2,
+          ),
+          matrix: rect.getScreenCTM()!,
+        })),
+        ...Array.from(svg.querySelectorAll<SVGCircleElement>('.dv-socket')).map((circle) => ({
+          local: new DOMPoint(Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))),
+          matrix: circle.getScreenCTM()!,
+        })),
+      ].map((entry) => {
+        const point = entry.local.matrixTransform(entry.matrix)
         return { centre: { x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 } }
       })
       const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.abs(a.x - b.x) < 2 && Math.abs(a.y - b.y) < 2

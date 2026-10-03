@@ -48,6 +48,20 @@ export interface SingleLineGroup {
   loads: SingleLineLoad[]
 }
 
+export interface SingleLineFeed {
+  /** The device the wire leaves from. */
+  from: { label: string; instanceId: string }
+  /** The device the wire arrives at. */
+  to: { label: string; instanceId: string }
+  bus: BusType
+  /**
+   * `cascade` — from another protective device.
+   * `busbar`  — from a declared fork.
+   * `bus`     — from the panel bus itself, which is no device and has no line to draw.
+   */
+  via: 'cascade' | 'busbar' | 'bus'
+}
+
 export interface SingleLineBus {
   label: string
   name?: string
@@ -60,6 +74,15 @@ export interface SingleLineModel {
   source: { label: string; phases: 1 | 3; ratedCurrent: number; voltage: number }
   /** Fork busbars the project declares, feeding one or more protective devices. */
   busbars: SingleLineBus[]
+  /**
+   * Runs between two devices rather than from the incoming.
+   *
+   * These used to be invisible on the diagram: a wire from one breaker to the next was read as a
+   * busbar feed, so a breaker was drawn upstream of a column in the shape of a rail. The gap the
+   * note below fills is exactly the one the plan refuses to paper over — a cascade is drawn as
+   * what it is, not attached to whichever device happens to be first.
+   */
+  feeds: SingleLineFeed[]
   groups: SingleLineGroup[]
   /** Devices on the board that no circuit reaches, named so the gap stays visible. */
   unmodelled: { address: string; name: string; instanceId: string }[]
@@ -98,13 +121,43 @@ export const buildSingleLine = (
   const byId = new Map(devices.map((device) => [device.instanceId, device]))
 
   // A device fed by a declared fork is drawn with that bus upstream of it, which is the only place
-  // the project records that a busbar supplies it.
+  // the project records that a busbar supplies it. A run from another breaker is a cascade: it is
+  // listed in `feeds`, because drawing an MCB in the shape of a rail would say something the panel
+  // does not contain.
+  const isBusbarDevice = (instanceId: string | undefined) => {
+    if (!instanceId) return false
+    const device = byId.get(instanceId)
+    return device ? productOf(device.productId)?.category === 'busbar' : false
+  }
   const forkFor = (instanceId: string) => {
     const link = (project.connections ?? []).find((connection) => connection.kind === 'busbar' && connection.toDeviceId === instanceId)
     const source = link?.fromDeviceId ? byId.get(link.fromDeviceId) : undefined
-    if (!source) return null
+    if (!source || !isBusbarDevice(source.instanceId)) return null
     const product = productOf(source.productId)
     return { label: source.marking || source.address || '—', name: product?.name, instanceId: source.instanceId, bus: (link?.fromBus ?? 'L') as BusType, ratedCurrent: product?.ratedCurrent }
+  }
+
+  const feeds: SingleLineFeed[] = []
+  for (const connection of project.connections ?? []) {
+    const to = byId.get(connection.toDeviceId)
+    if (!to) continue
+    const target = { label: to.marking || to.address || '—', instanceId: to.instanceId }
+    // A feed from the panel bus names no source device, because the bus is not a device. There is no
+    // column to draw it in — a rail is not an apparatus — so it is listed, which is where a reader
+    // looks for how an apparatus is fed.
+    if (connection.kind === 'bus' && !connection.fromDeviceId) {
+      feeds.push({ from: { label: `шина ${connection.fromBus}`, instanceId: `bus:${connection.fromBus}` }, to: target, bus: connection.fromBus, via: 'bus' })
+      continue
+    }
+    if (connection.kind !== 'busbar' || !connection.fromDeviceId) continue
+    const from = byId.get(connection.fromDeviceId)
+    if (!from) continue
+    feeds.push({
+      from: { label: from.marking || from.address || '—', instanceId: from.instanceId },
+      to: target,
+      bus: connection.fromBus,
+      via: isBusbarDevice(from.instanceId) ? 'busbar' : 'cascade',
+    })
   }
 
   const busbars = new Map<string, SingleLineBus>()
@@ -154,6 +207,7 @@ export const buildSingleLine = (
       voltage: project.settings.phase === 1 ? SINGLE_PHASE_VOLTAGE_V : THREE_PHASE_VOLTAGE_V,
     },
     busbars: [...busbars.values()],
+    feeds,
     groups,
     unmodelled,
   }

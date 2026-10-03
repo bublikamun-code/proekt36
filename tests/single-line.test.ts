@@ -94,6 +94,20 @@ describe('однолинейная схема', () => {
     expect(singleLineExtent(buildSingleLine(project, definitions))).toEqual({ columns: 1, rows: 3 })
   })
 
+  it('перечисляет запитку от шины щита отдельно от каскадов', () => {
+    // A feed from the panel bus names no source device, because the bus is not a device: there is no
+    // column to draw it in, so it can only be listed. Not listing it left the printout saying
+    // nothing about how the apparatus was fed, which is the one thing the diagram is for.
+    const project = board()
+    const target = project.devices[0]!.instanceId
+    project.connections = [{ id: 'bus-feed', circuitId: '', fromBus: 'PE', toDeviceId: target, color: '#47a067', thickness: 2, label: 'PE → QF01', kind: 'bus' }]
+
+    const model = buildSingleLine(project, definitions)
+    expect(model.feeds).toHaveLength(1)
+    expect(model.feeds[0]).toMatchObject({ via: 'bus', bus: 'PE' })
+    expect(model.feeds[0]!.from.label).toBe('шина PE')
+  })
+
   it('различает защитные аппараты и прочее', () => {
     expect(isProtectiveDevice(product('ekf-mcb-1p-c6'))).toBe(true)
     expect(isProtectiveDevice(product('ekf-rcbo-1p-c16'))).toBe(true)

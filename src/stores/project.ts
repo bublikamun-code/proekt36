@@ -120,6 +120,25 @@ export const useProjectStore = defineStore('project', () => {
   const selectedDevice = computed(() => currentProject.value.devices.find((item) => item.instanceId === selectedDeviceId.value) ?? null)
   const selectedProduct = computed(() => selectedDevice.value ? definitions.value.get(selectedDevice.value.productId) ?? null : null)
 
+  /**
+   * The selected wire.
+   *
+   * A wire was previously untouchable: it could be drawn and it could be undone, but there was
+   * nothing to click, so the only way to get rid of one was to delete a device it happened to
+   * touch. Selection is part of the same store state as the selected device and is deliberately not
+   * written to storage — nobody returns to a page expecting a wire to still be picked.
+   */
+  const selectedConnectionId = ref<string | null>(null)
+  const selectedConnection = computed(() => currentProject.value.connections.find((item) => item.id === selectedConnectionId.value) ?? null)
+  const selectDevice = (instanceId: string | null) => {
+    selectedDeviceId.value = instanceId
+    if (instanceId) selectedConnectionId.value = null
+  }
+  const selectConnection = (connectionId: string | null) => {
+    selectedConnectionId.value = connectionId
+    if (connectionId) selectedDeviceId.value = null
+  }
+
   const persistNow = async () => {
     if (!repository.available) {
       updateStorageState()
@@ -213,6 +232,7 @@ export const useProjectStore = defineStore('project', () => {
 
   watch(currentProjectId, (id) => {
     selectedDeviceId.value = null
+    selectedConnectionId.value = null
     cabinetMigration.value = null
     currentProjectDirty = true
     if (repository.available) {
@@ -557,18 +577,50 @@ export const useProjectStore = defineStore('project', () => {
    * load, and giving it a circuit would invent a load the person never asked for. The validation
    * rules already treat a connection without a circuit as a feed rather than a missing field.
    */
-  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string): boolean => {
+  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string, terminal?: number): boolean => {
     if (fromDeviceId === toDeviceId) return rejectCommand('Нельзя соединить аппарат с самим собой.')
     const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
     const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
     if (!target || !source) return rejectCommand('Аппарат не найден.')
+    // The terminal is part of what makes a wire this wire: the same run to a terminal block is a
+    // second wire when it lands on the next screw, and refusing it made four screws of every block
+    // unreachable.
     const duplicate = currentProject.value.connections.some((item) => item.fromDeviceId === fromDeviceId
-      && item.toDeviceId === toDeviceId && item.fromBus === fromBus)
+      && item.toDeviceId === toDeviceId && item.fromBus === fromBus && (item.terminal ?? 0) === (terminal ?? 0))
     if (duplicate) return rejectCommand('Такой провод уже проведён.')
     const label = `${source.address || 'аппарат'} → ${target.address || 'аппарат'}`
     commit((project) => project.connections.push({
       id: uid(), circuitId: '', fromBus, toDeviceId,
       color: wireColor(fromBus), thickness: 2, label, kind: 'busbar', fromDeviceId,
+      ...(terminal === undefined ? {} : { terminal }),
+    }), `Провод ${label} проведён`)
+    return true
+  }
+
+  /**
+   * Feeds a device from one of the panel buses.
+   *
+   * This is the connection that was impossible to draw by hand: the board had no bus to click, and
+   * the store had no method for it, so a panel could show its cascades but not its own feeds — the
+   * one line every real board starts with. The record is the same as the one an imported project
+   * carries, except that its kind says where it comes from: `bus` is the panel bus, `busbar` is
+   * another device. Without that distinction the two cannot be told apart in the report, and the
+   * check that every cascade names a source would fire on a perfectly ordinary feed.
+   */
+  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number): boolean => {
+    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
+    if (!target) return rejectCommand('Аппарат не найден.')
+    // Two wires of the same bus to the same device are the same wire only if they land on the same
+    // terminal. On a terminal block they do not: a six-screw block takes three earth wires, and the
+    // second one used to be refused as a duplicate of the first.
+    const duplicate = currentProject.value.connections.some((item) => !item.fromDeviceId
+      && item.toDeviceId === toDeviceId && item.fromBus === bus && (item.terminal ?? 0) === (terminal ?? 0))
+    if (duplicate) return rejectCommand(`${bus} → ${target.address || 'аппарат'} уже проведён.`)
+    const label = `${bus} → ${target.address || 'аппарат'}`
+    commit((project) => project.connections.push({
+      id: uid(), circuitId: '', fromBus: bus, toDeviceId,
+      color: wireColor(bus), thickness: 2, label, kind: 'bus',
+      ...(terminal === undefined ? {} : { terminal }),
     }), `Провод ${label} проведён`)
     return true
   }
@@ -684,9 +736,12 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  const deleteConnection = (id: string) => commit((project) => {
-    project.connections = project.connections.filter((item) => item.id !== id)
-  }, 'Подключение удалено')
+  const deleteConnection = (id: string) => {
+    commit((project) => {
+      project.connections = project.connections.filter((item) => item.id !== id)
+    }, 'Подключение удалено')
+    if (selectedConnectionId.value === id) selectedConnectionId.value = null
+  }
 
   const deleteCircuit = (id: string) => commit((project) => {
     project.circuits = project.circuits.filter((item) => item.id !== id)
@@ -828,13 +883,14 @@ export const useProjectStore = defineStore('project', () => {
 
   return {
     projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration,
+    selectedConnectionId, selectedConnection, selectDevice, selectConnection,
     definitions, importedModels, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
     storageAlert, storageRecoveryNotice, hasStorageBackup, hasStorageRecovery, downloadStorageSnapshot, restoreStorageBackup, dismissStorageAlert,
     lastSavedAt, theme, toast, switchProject, newProject, duplicateProject, renameProject, deleteProject,
     applyPreset, updateSettings, selectCabinet, selectRail, stageCabinetMigration, stageRailMigration,
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
-    addBusbarConnection, connectOnBoard, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
+    addBusbarConnection, connectOnBoard, connectFromBus, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
     retryPersistence, addImportedModel, deleteImportedModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })
