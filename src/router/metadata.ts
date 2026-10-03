@@ -78,6 +78,18 @@ export const pageMetadata: Record<string, PageMetadata> = {
     robots: 'noindex,nofollow',
     public: false,
   },
+  board: {
+    title: 'Доска щита — Панель 36',
+    description: 'Доска распределительного щита с проводами, идущими в зажимы, в Панель 36.',
+    robots: 'noindex,nofollow',
+    public: false,
+  },
+  'project-board': {
+    title: 'Доска щита — Панель 36',
+    description: 'Доска распределительного щита с проводами, идущими в зажимы, в Панель 36.',
+    robots: 'noindex,nofollow',
+    public: false,
+  },
   notFound: {
     title: 'Страница не найдена — Панель 36',
     description: 'Запрошенная страница Панель 36 не найдена.',

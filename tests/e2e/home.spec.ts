@@ -65,24 +65,29 @@ test.describe('public site and workspace shell', () => {
     await expect(page.getByRole('heading', { name: 'Проекты щитов' })).toBeVisible()
   })
 
-  test('dashboard creates a preset project and opens its canonical editor route', async ({ page }) => {
+  // A project opens on the board, not on the editor it replaced. The route still names the project,
+  // so a link to somebody's panel opens that panel rather than whichever was last open.
+  test('dashboard creates a preset project and opens its canonical board route', async ({ page }) => {
     await unlockWorkspace(page)
     await page.goto('/app/projects')
     await page.getByRole('button', { name: '＋ Создать панель' }).click()
     await page.getByLabel('Название проекта').fill('Новая квартира')
     await page.getByRole('button', { name: /Квартира/ }).click()
     await page.getByRole('button', { name: 'Создать проект' }).click()
-    await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/editor/)
-    await expect(page.getByRole('button', { name: /Текущий проект/ })).toContainText('Новая квартира')
-    await expect(page.locator('.placed-device')).not.toHaveCount(0)
+    await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/board$/)
+    // The board picks a project with a select rather than the editor's menu, and says the same thing
+    // in it: which project is on the table.
+    await expect(page.getByRole('combobox', { name: 'Текущий проект' })).toHaveValue(/.+/)
+    await expect(page.getByRole('combobox', { name: 'Текущий проект' })).toContainText('Новая квартира')
+    await expect(page.locator('.scene-device')).not.toHaveCount(0)
   })
 
-  test('dashboard imports a raw project and routes to the editor', async ({ page }) => {
+  test('dashboard imports a raw project and routes to the board', async ({ page }) => {
     await unlockWorkspace(page)
     await page.goto('/app/projects')
     await page.getByLabel('Файл проекта: JSON или архив').setInputFiles({ name: 'project.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(rawProject)) })
-    await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/editor/)
-    await expect(page.getByRole('button', { name: /Текущий проект/ })).toContainText('Импорт из workspace')
+    await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/board$/)
+    await expect(page.getByRole('combobox', { name: 'Текущий проект' })).toContainText('Импорт из workspace')
   })
 
   test('public metadata is indexable while auth is not', async ({ page }) => {

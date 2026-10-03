@@ -105,10 +105,18 @@ const clearFilters = () => {
   liveMessage.value = 'Фильтры сброшены.'
 }
 
+/**
+ * Opening a project lands on the board.
+ *
+ * The editor is still here and still works — it is what the layout tests were written against — but
+ * it draws a wire from the busbar to the middle of a device and cannot draw a wire between two
+ * devices at all. Sending a person there by default would mean the panel they see is not the panel
+ * they built.
+ */
 const openProject = (id: string) => {
   if (!projects.value.some((project) => project.id === id)) return
   store.switchProject(id)
-  void router.push({ name: 'editor', params: { projectId: id } })
+  void router.push({ name: 'project-board', params: { projectId: id } })
 }
 const createProject = ({ name, preset }: { name: string; preset: string }) => {
   store.newProject(name, preset); store.applyPreset(preset); wizardOpen.value = false; openProject(currentProjectId.value)

@@ -38,7 +38,10 @@ export const router = createRouter({
         { path: 'projects', name: 'projects', component: () => import('../views/ProjectsView.vue') },
         { path: 'projects/:projectId/editor', name: 'editor', component: () => import('../views/EditorView.vue') },
         { path: 'editor', name: 'current-editor', component: () => import('../views/EditorView.vue') },
-        // The rebuilt board. It carries its own route until it has earned the editor's tests.
+        // The board, addressed by the project it draws. Opening a project from the list lands here:
+        // it is the board that draws wires into clamps, and the editor above is kept for the layout
+        // it has always had rather than replaced on the spot.
+        { path: 'projects/:projectId/board', name: 'project-board', component: () => import('../views/BoardWorkspaceView.vue') },
         { path: 'board', name: 'board', component: () => import('../views/BoardWorkspaceView.vue') },
       ],
     },
@@ -62,9 +65,13 @@ router.beforeEach((to) => {
   // Canonicalise the parameterless editor link before the view exists. The editor component is
   // loaded through a dynamic import, so doing this inside it left a window where the address bar
   // read /app/editor and then changed under the user — a refresh appeared to move them.
-  if (to.name === 'current-editor') {
+  if (to.name === 'current-editor' || to.name === 'board') {
     const projectId = useProjectStore().currentProjectId
-    if (projectId) return { name: 'editor', params: { projectId } }
+    // The query goes along: `?fixture=demo` is how the board is asked for the demo project, and a
+    // redirect that dropped it turned every such visit into a board with no wires on it.
+    if (projectId) return to.name === 'board'
+      ? { name: 'project-board', params: { projectId }, query: to.query }
+      : { name: 'editor', params: { projectId } }
     return { name: 'projects' }
   }
 
