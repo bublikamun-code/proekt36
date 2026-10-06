@@ -55,4 +55,11 @@ const contentSecurityPolicy = (): Plugin => ({
 
 export default defineConfig({
   plugins: [vue(), contentSecurityPolicy()],
+  server: {
+    // Explicit IPv4 + fixed port: Playwright's webServer polls 127.0.0.1:5173, and a
+    // wildcard/::1-only listener used to make it time out on some machines.
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+  },
 })

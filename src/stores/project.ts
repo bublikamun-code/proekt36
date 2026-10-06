@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { builtinCatalog, workspaceCatalog } from '../data/catalog'
 import {
@@ -32,7 +32,18 @@ export const PERSIST_DELAY_MS = 200
 type ProjectHistory = { undo: PanelProject[]; redo: PanelProject[] }
 type StorageStatus = 'saving' | 'saved' | 'save-failed' | 'storage-unavailable'
 
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+// structuredClone beats the JSON round-trip, but it refuses to walk a reactive proxy:
+// devices can carry nested proxies (e.g. a definition straight from the reactive catalog),
+// while toRaw only peels the top level. Raw payloads take the fast path; anything that
+// still holds a proxy falls back to JSON, which reads through the getters.
+const clone = <T>(value: T): T => {
+  const raw = toRaw(value as object)
+  try {
+    return structuredClone(raw) as T
+  } catch {
+    return JSON.parse(JSON.stringify(raw)) as T
+  }
+}
 
 const seedProject = () => {
   const project = createProject('Освещение квартиры', 'apartment', presetProducts('apartment').settings)

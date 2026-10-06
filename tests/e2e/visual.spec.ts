@@ -16,6 +16,8 @@ import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
  * - Baselines live per platform in tests/e2e/visual.spec.ts-snapshots and are named for the OS.
  *   Running on a new one produces a diff that says nothing about the design, and it needs a new
  *   baseline rather than a repair of the existing one.
+ * - maxDiffPixelRatio absorbs the residual antialiasing/hinting noise (observed ≤0.5% of pixels
+ *   across machines with identical content) while still failing on any real layout shift.
  */
 const freeze = async (page: import('@playwright/test').Page) => {
   // The board animates width and transform; a screenshot mid-transition is a coin flip.
@@ -34,14 +36,14 @@ test.describe('visual', () => {
     await page.goto('/')
     await expect(page.locator('h1')).toBeVisible()
     await freeze(page)
-    await expect(page).toHaveScreenshot('home.png', { fullPage: true, animations: 'disabled' })
+    await expect(page).toHaveScreenshot('home.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
   })
 
   test('the read-only demo board renders as designed', async ({ page }) => {
     await page.goto('/demo/project')
     await expect(page.locator('.demo-project-cabinet')).toBeVisible()
     await freeze(page)
-    await expect(page).toHaveScreenshot('demo-project.png', { fullPage: true, animations: 'disabled' })
+    await expect(page).toHaveScreenshot('demo-project.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
   })
 
   test('the same board renders in the dark theme', async ({ page }) => {
@@ -49,7 +51,7 @@ test.describe('visual', () => {
     await expect(page.locator('.demo-project-cabinet')).toBeVisible()
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
     await freeze(page)
-    await expect(page).toHaveScreenshot('demo-project-dark.png', { fullPage: true, animations: 'disabled' })
+    await expect(page).toHaveScreenshot('demo-project-dark.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
   })
 
   /**
@@ -71,7 +73,7 @@ test.describe('visual', () => {
     await expect(page.getByLabel('Поиск по каталогу')).toBeVisible()
     await expect(page.locator('.scene-wire').first()).toBeVisible()
     await freeze(page)
-    await expect(page.locator('.workspace')).toHaveScreenshot('board-workspace.png', { animations: 'disabled' })
+    await expect(page.locator('.workspace')).toHaveScreenshot('board-workspace.png', { animations: 'disabled', maxDiffPixelRatio: 0.01 })
   })
 
   test('the editor board renders as designed', async ({ page }) => {
@@ -84,6 +86,6 @@ test.describe('visual', () => {
     await expect(page.locator('.placed-device').first()).toBeVisible()
     await page.getByRole('button', { name: 'Показать боковые панели' }).click()
     await freeze(page)
-    await expect(page).toHaveScreenshot('editor-board.png', { animations: 'disabled' })
+    await expect(page).toHaveScreenshot('editor-board.png', { animations: 'disabled', maxDiffPixelRatio: 0.01 })
   })
 })

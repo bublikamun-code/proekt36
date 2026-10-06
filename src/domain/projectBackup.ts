@@ -7,7 +7,7 @@ import type { ModelMetadata, PanelProject } from './types'
 const BACKUP_SCHEMA = 'panel36.backup.v1'
 const MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const clone = <T>(value: T): T => structuredClone(value as object) as T
 
 export interface WorkspaceBackup {
   schema: typeof BACKUP_SCHEMA

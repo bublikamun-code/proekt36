@@ -17,6 +17,18 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:http'
 
 const HOST = '127.0.0.1'
+// Sliding-window limit on /chat: the proxy holds a paid API key, so any local
+// runaway loop must hit a wall instead of burning the quota.
+const CHAT_RATE_LIMIT = Number(process.env.AI_PROXY_RATE_LIMIT) || 10
+const CHAT_RATE_WINDOW_MS = Number(process.env.AI_PROXY_RATE_WINDOW_MS) || 60_000
+const chatHits = []
+const chatAllowed = (now) => {
+  while (chatHits.length > 0 && now - chatHits[0] > CHAT_RATE_WINDOW_MS) chatHits.shift()
+  if (chatHits.length >= CHAT_RATE_LIMIT) return false
+  chatHits.push(now)
+  return true
+}
+
 /**
  * The port is named for the build as well: the browser half and the production CSP both read
  * VITE_AI_PROXY_PORT, so moving the proxy moves all three at once. A variable only the proxy knew
@@ -161,6 +173,10 @@ const main = async () => {
     }
 
     if (request.method === 'POST' && request.url === '/chat') {
+      if (!chatAllowed(Date.now())) {
+        sendJson(response, 429, { error: 'rate_limited', message: `Лимит ${CHAT_RATE_LIMIT} запросов за ${CHAT_RATE_WINDOW_MS / 1000} с исчерпан. Подождите немного.` })
+        return
+      }
       if (!config.apiKey) {
         sendJson(response, 503, { error: 'no_api_key', message: 'Прокси запущен, но ключ не задан. Заполните tools/ai-proxy.env и перезапустите npm run ai.' })
         return

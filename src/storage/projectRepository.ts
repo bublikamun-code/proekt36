@@ -59,7 +59,16 @@ const getDefaultStorage = (): LocalStorageLike | null => {
   }
 }
 
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+// Snapshots arrive from the store and may carry nested reactive proxies; the plain
+// structuredClone path covers the common raw case, JSON absorbs the rest. Everything
+// cloned here is schema-validated JSON data, so the fallback loses nothing.
+const clone = <T>(value: T): T => {
+  try {
+    return structuredClone(value as object) as T
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as T
+  }
+}
 
 const isModelMetadata = (value: unknown): value is ModelMetadata => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
