@@ -1,4 +1,5 @@
 import { CATALOG_REVISION as DATA_CATALOG_REVISION } from '../data/catalog'
+import { wireRouteError } from './wireRoute'
 import { CONNECTION_THICKNESS_MM } from './connectionSpec'
 import type { PanelProject } from './types'
 import { APP_VERSION } from '../version'
@@ -206,6 +207,8 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   string(errors, value.color, `${path}.color`, { required: true, max: 64, nonEmpty: true })
   finiteNumber(errors, value.thickness, `${path}.thickness`, { min: CONNECTION_THICKNESS_MM.min, max: CONNECTION_THICKNESS_MM.max })
   string(errors, value.label, `${path}.label`, { required: true, max: PROJECT_LIMITS.text })
+  const invalidRoute = wireRouteError(value.route)
+  if (invalidRoute) add(errors, `${path}.route`, invalidRoute)
   enumValue(errors, value.kind, `${path}.kind`, ['circuit', 'busbar', 'bus'], false)
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })
   // A terminal index is optional and small: it counts screws on a terminal block, and nothing in the

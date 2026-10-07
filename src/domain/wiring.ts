@@ -1,5 +1,6 @@
 import { faceSocketGrid, getDeviceFaceMetrics, type DeviceFaceMetrics, type FacePocket } from './faceMetrics'
-import type { BusType, Connection, DeviceDefinition, PlacedDevice } from './types'
+import type { BusType, Connection, DeviceDefinition, PlacedDevice, WireLayer, WirePoint, WireRoute } from './types'
+export type { WirePoint } from './types'
 
 /**
  * Where a wire physically attaches, and how it gets there.
@@ -187,9 +188,59 @@ export const connectionTouchesTerminal = (
   return matches(connection.toDeviceId, target) || matches(connection.fromDeviceId, source)
 }
 
-export interface WirePoint {
-  x: number
-  y: number
+export interface WireSegment {
+  d: string
+  layer: WireLayer
+  /** Index of the run between two successive routePoints, including device endpoints. */
+  index: number
+}
+
+/** Round only generated elbows; the caller's endpoints and anchors remain exact. */
+const roundedOrthogonalPath = (points: WirePoint[]): string => {
+  const vertices = points.filter((point, index) => index === 0
+    || point.x !== points[index - 1]!.x || point.y !== points[index - 1]!.y)
+  const first = vertices[0]!
+  let path = `M ${round(first.x)} ${round(first.y)}`
+  for (let index = 1; index < vertices.length; index += 1) {
+    const point = vertices[index]!
+    const next = vertices[index + 1]
+    if (!next) {
+      path += ` L ${round(point.x)} ${round(point.y)}`
+      continue
+    }
+    const previous = vertices[index - 1]!
+    const inLength = Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y)
+    const outLength = Math.abs(next.x - point.x) + Math.abs(next.y - point.y)
+    const radius = Math.min(2, inLength / 2, outLength / 2)
+    const entry = { x: point.x - Math.sign(point.x - previous.x) * radius, y: point.y - Math.sign(point.y - previous.y) * radius }
+    const exit = { x: point.x + Math.sign(next.x - point.x) * radius, y: point.y + Math.sign(next.y - point.y) * radius }
+    path += ` L ${round(entry.x)} ${round(entry.y)} Q ${round(point.x)} ${round(point.y)} ${round(exit.x)} ${round(exit.y)}`
+  }
+  return path
+}
+
+/**
+ * Manual anchors split the conductor into independently layered orthogonal runs.
+ * No collision avoidance or bundle spread may move those anchors. Only generated elbows are
+ * rounded; saved points remain exact endpoints so front/rear transitions have no gap.
+ */
+export const manualWireSegments = (from: WirePoint, to: WirePoint, route: WireRoute): WireSegment[] => {
+  const anchors = [from, ...route.points, to]
+  return anchors.slice(0, -1).map((start, index) => {
+    const end = anchors[index + 1]!
+    let vertices: WirePoint[]
+    if (start.x === end.x || start.y === end.y) vertices = [start, end]
+    else if (!route.points.length) {
+      // With no interior anchor, keep vertical entry and exit at device contacts.
+      const middleY = (start.y + end.y) / 2
+      vertices = [start, { x: start.x, y: middleY }, { x: end.x, y: middleY }, end]
+    } else {
+      // Leave the source vertically; the last run enters the target vertically.
+      const elbow = index === anchors.length - 2 ? { x: end.x, y: start.y } : { x: start.x, y: end.y }
+      vertices = [start, elbow, end]
+    }
+    return { d: roundedOrthogonalPath(vertices), layer: route.segmentLayers[index] ?? 'rear', index }
+  })
 }
 
 export interface RouteOptions {
@@ -241,32 +292,40 @@ export interface RouteOptions {
  * path: a wire that leaves the rail at a slightly different millimetre is still a wire to that
  * clamp, while a route bent around an offset would no longer be the same shape for every wire.
  */
-export const routeWire = ({ from, to, source, stubMm = 2.2, upward, descentX, fromSide, toSide, exitY: sourceExit, entryY: targetEntry }: RouteOptions) => {
+type WirePathStep = { command: 'M' | 'L' | 'H' | 'V'; point: WirePoint }
+
+const automaticWireSteps = ({ from, to, source, stubMm = 2.2, upward, descentX, fromSide, toSide, exitY: sourceExit, entryY: targetEntry }: RouteOptions): WirePathStep[] => {
+  const step = (command: WirePathStep['command'], x: number, y: number): WirePathStep => ({ command, point: { x, y } })
+  const start = step('M', from.x, from.y)
+  const end = step('L', to.x, to.y)
   const stub = Math.max(0.8, stubMm)
   const entryY = targetEntry ?? (to.y + (toSide === 'bottom' ? 1 : -1) * (to.height / 2 + stub))
   if (source === 'device' && (sourceExit !== undefined || fromSide !== undefined || toSide !== undefined)) {
     const exitY = sourceExit ?? from.y + (fromSide === 'top' ? -stub : stub)
     const channel = descentX ?? (from.x + to.x) / 2
-    return `M ${round(from.x)} ${round(from.y)} V ${round(exitY)} H ${round(channel)} V ${round(entryY)} H ${round(to.x)} L ${round(to.x)} ${round(to.y)}`
+    return [start, step('V', from.x, exitY), step('H', channel, exitY), step('V', channel, entryY), step('H', to.x, entryY), end]
   }
   if (source === 'busbar') {
-    // Along the rail, then straight down into the terminal from above.
     const descent = descentX ?? to.x
     if (Math.abs(descent - to.x) < 0.01) {
-      return `M ${round(from.x)} ${round(from.y)} H ${round(to.x)} V ${round(entryY)} L ${round(to.x)} ${round(to.y)}`
+      return [start, step('H', to.x, from.y), step('V', to.x, entryY), end]
     }
-    return `M ${round(from.x)} ${round(from.y)} H ${round(descent)} V ${round(entryY)} H ${round(to.x)} L ${round(to.x)} ${round(to.y)}`
+    return [start, step('H', descent, from.y), step('V', descent, entryY), step('H', to.x, entryY), end]
   }
   const up = upward ?? to.y < from.y
-  if (up) {
-    // Straight up the free space above the row and down into the terminal from above.
-    return `M ${round(from.x)} ${round(from.y)} V ${round(entryY)} H ${round(to.x)} L ${round(to.x)} ${round(to.y)}`
-  }
-  // Out of the bottom terminal, down into the free space under the row, across, then up into the
-  // terminal of the device below.
+  if (up) return [start, step('V', from.x, entryY), step('H', to.x, entryY), end]
   const exitY = from.y + stub
-  return `M ${round(from.x)} ${round(from.y)} V ${round(exitY)} H ${round(to.x)} V ${round(entryY)} L ${round(to.x)} ${round(to.y)}`
+  return [start, step('V', from.x, exitY), step('H', to.x, exitY), step('V', to.x, entryY), end]
 }
+
+/** The same generated vertices used for rendering, exposed without parsing an SVG string. */
+export const routeWirePoints = (options: RouteOptions): WirePoint[] => automaticWireSteps(options).map((step) => step.point)
+
+export const routeWire = (options: RouteOptions): string => automaticWireSteps(options).map(({ command, point }) => {
+  if (command === 'H') return `H ${round(point.x)}`
+  if (command === 'V') return `V ${round(point.y)}`
+  return `${command} ${round(point.x)} ${round(point.y)}`
+}).join(' ')
 
 const round = (value: number) => Math.round(value * 100) / 100
 

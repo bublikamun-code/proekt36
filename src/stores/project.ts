@@ -17,6 +17,7 @@ import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
 import type { BusType, Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
 import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
+import { wireRouteError } from '../domain/wireRoute'
 import { CONNECTION_THICKNESS_MM } from '../domain/connectionSpec'
 import { connectionTouchesTerminal, connectionKey, faceTerminals, terminalForBus, wireColor } from '../domain/wiring'
 import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
@@ -579,6 +580,8 @@ export const useProjectStore = defineStore('project', () => {
 
   // Every UI path uses the same endpoint rules before changing the project or its undo history.
   const connectionError = (connection: Connection, checkDuplicate = true) => {
+    const invalidRoute = wireRouteError(connection.route)
+    if (invalidRoute) return invalidRoute
     if (!['L', 'N', 'PE'].includes(connection.fromBus)) return 'Выберите провод L, N или PE.'
     if (connection.kind === 'busbar' && !connection.fromDeviceId) return 'Укажите аппарат или шину источника.'
     if (connection.kind === 'bus' && connection.fromDeviceId) return 'Питание от общей шины не может иметь аппарат-источник.'
@@ -596,7 +599,7 @@ export const useProjectStore = defineStore('project', () => {
   const addBoardWire = (connection: Connection): boolean => {
     const invalid = connectionError(connection)
     if (invalid) return rejectCommand(invalid)
-    commit((project) => project.connections.push(connection), `Провод ${connection.label} проведён`)
+    commit((project) => project.connections.push(clone(connection)), `Провод ${connection.label} проведён`)
     return true
   }
 
@@ -611,17 +614,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string, terminal?: number,
-    endpoints: Pick<Connection, 'fromTerminal' | 'fromSide' | 'toSide'> = {}): boolean => {
+    endpoints: Pick<Connection, 'fromTerminal' | 'fromSide' | 'toSide' | 'route'> = {}): boolean => {
     const name = (id: string) => currentProject.value.devices.find((item) => item.instanceId === id)?.address || 'аппарат'
     return addBoardWire({ id: uid(), circuitId: '', fromBus, toDeviceId, fromDeviceId,
       color: wireColor(fromBus), thickness: 2, label: `${name(fromDeviceId)} → ${name(toDeviceId)}`,
       kind: 'busbar', terminal, ...endpoints })
   }
 
-  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number, toSide: 'top' | 'bottom' = 'top'): boolean => {
+  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number, toSide: 'top' | 'bottom' = 'top', route?: Connection['route']): boolean => {
     const name = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)?.address || 'аппарат'
     return addBoardWire({ id: uid(), circuitId: '', fromBus: bus, toDeviceId,
-      color: wireColor(bus), thickness: 2, label: `${bus} → ${name}`, kind: 'bus', terminal, toSide })
+      color: wireColor(bus), thickness: 2, label: `${bus} → ${name}`, kind: 'bus', terminal, toSide, route })
   }
 
   const isProtectionDevice = (device: PlacedDevice | undefined) => {
@@ -672,7 +675,7 @@ export const useProjectStore = defineStore('project', () => {
       connectionTouchesTerminal(item, currentProject.value.devices, definitions.value, targetDeviceId, 'L'))
     commit((project) => {
       project.circuits.push(circuit)
-      if (!alreadyFed) project.connections.push(connection)
+      if (!alreadyFed) project.connections.push(clone(connection))
     }, 'Цепь добавлена')
     // The circuit is returned so the board can offer its load name for editing straight away,
     // instead of sending the person to a panel to find out what they just created.
@@ -725,7 +728,7 @@ export const useProjectStore = defineStore('project', () => {
     const connection = currentProject.value.connections.find((item) => item.id === id)
     if (!connection) return rejectCommand('Подключение не найдено.')
     const values = patch as Record<string, unknown>
-    const allowed = new Set(['circuitId', 'fromBus', 'toDeviceId', 'color', 'thickness', 'label', 'terminal', 'fromTerminal', 'fromSide', 'toSide'])
+    const allowed = new Set(['circuitId', 'fromBus', 'toDeviceId', 'color', 'thickness', 'label', 'terminal', 'fromTerminal', 'fromSide', 'toSide', 'route'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение подключения содержит недопустимые поля.')
     if ('fromBus' in values && !['L', 'N', 'PE'].includes(values.fromBus as string)) return rejectCommand('Шина должна быть L, N или PE.')
     if ('toDeviceId' in values && !currentProject.value.devices.some((item) => item.instanceId === values.toDeviceId)) return rejectCommand('Подключаемое устройство не найдено.')
@@ -742,7 +745,10 @@ export const useProjectStore = defineStore('project', () => {
     if (patch.fromBus && !patch.color) patch.color = wireColor(patch.fromBus)
     commit((project) => {
       const item = project.connections.find((entry) => entry.id === id)
-      if (item) Object.assign(item, patch)
+      if (item) {
+        Object.assign(item, clone(patch))
+        if ('route' in patch && patch.route === undefined) delete item.route
+      }
     })
     return true
   }

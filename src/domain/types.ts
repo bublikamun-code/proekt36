@@ -68,6 +68,21 @@ export interface Circuit {
   note: string
 }
 
+/** Board-space millimetres; device endpoints are resolved from their contacts. */
+export interface WirePoint {
+  x: number
+  y: number
+}
+
+export type WireLayer = 'front' | 'rear'
+
+export interface WireRoute {
+  /** Interior anchors only. Their positions do not move when an endpoint device moves. */
+  points: WirePoint[]
+  /** One layer for each run: source → anchors → destination. */
+  segmentLayers: WireLayer[]
+}
+
 export interface Connection {
   id: string
   circuitId: string
@@ -102,6 +117,8 @@ export interface Connection {
   /** Omitted in older projects: source bottom, destination top. */
   fromSide?: 'top' | 'bottom'
   toSide?: 'top' | 'bottom'
+  /** Omitted means automatic routing. */
+  route?: WireRoute
 }
 
 export interface DeviceDefinition {

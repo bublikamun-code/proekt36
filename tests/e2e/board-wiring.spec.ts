@@ -163,8 +163,8 @@ test.describe('провода доски', () => {
     await page.getByRole('option', { name: /^PE/ }).click()
     await expect(page.getByRole('alert')).toContainText('нет подключения PE')
     await expect(page.locator(`.scene-wire[data-wire-id="${wireId}"]`)).toHaveClass(/scene-wire-l/)
-    await inspector.getByLabel('Толщина, мм').fill('3')
-    await inspector.getByLabel('Толщина, мм').press('Tab')
+    await inspector.getByLabel('Толщина линии, мм').fill('3')
+    await inspector.getByLabel('Толщина линии, мм').press('Tab')
     await expect(page.locator(`.scene-wire[data-wire-id="${wireId}"]`)).toHaveAttribute('stroke-width', '3')
     await page.getByRole('button', { name: /Отменить/ }).click()
 

@@ -1,6 +1,7 @@
 import { builtinCatalog } from '../data/catalog'
 import { cabinetById, railById } from '../data/enclosures'
 import type { Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings } from './types'
+import { wireRouteError } from './wireRoute'
 import { CONNECTION_THICKNESS_MM } from './connectionSpec'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
@@ -99,6 +100,8 @@ export const normalizeCircuit = (value: unknown): Circuit => {
 /** Normalize a connection, including old records that did not have kind. */
 export const normalizeConnection = (value: unknown): Connection => {
   const raw = asRecord(value)
+  const invalidRoute = wireRouteError(raw.route)
+  if (invalidRoute) throw new Error(invalidRoute)
   // An older file says nothing about where a wire comes from, and its two shapes still mean what
   // they meant: a connection that names a device is a run from that device, one that names a
   // circuit is a line of it. A file that does say `bus` is a feed from the panel bus, and it is not
@@ -121,6 +124,7 @@ export const normalizeConnection = (value: unknown): Connection => {
     fromTerminal: raw.fromTerminal === undefined ? undefined : asInteger(raw.fromTerminal, 0, 0, 16),
     fromSide: raw.fromSide === 'top' || raw.fromSide === 'bottom' ? raw.fromSide : undefined,
     toSide: raw.toSide === 'top' || raw.toSide === 'bottom' ? raw.toSide : undefined,
+    ...(raw.route === undefined ? {} : { route: JSON.parse(JSON.stringify(raw.route)) as NonNullable<Connection['route']> }),
   }
 }
 

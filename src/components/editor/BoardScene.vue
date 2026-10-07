@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { buildBoardScene, type BoardScene as BoardSpace } from '../../domain/boardScene'
 import { getRowCapacity, placeProduct, resolveDeviceMove } from '../../domain/layout'
 import { buildLabelSheet, labelTextFor } from '../../domain/labelSheet'
-import { wireColor } from '../../domain/wiring'
+import { manualWireSegments, wireColor } from '../../domain/wiring'
 import { validateProject } from '../../domain/validation'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
 import { useBoardViewport } from '../../composables/useBoardViewport'
@@ -11,7 +11,7 @@ import BoardWireInspector from './BoardWireInspector.vue'
 import DeviceChassis from '../catalog/deviceFace/DeviceChassis.vue'
 import DeviceFace from '../catalog/deviceFace/DeviceFace.vue'
 import { useProjectStore } from '../../stores/project'
-import type { BusType, Connection, ValidationIssue } from '../../domain/types'
+import type { BusType, Connection, ValidationIssue, WireRoute, WireLayer, WirePoint } from '../../domain/types'
 
 /**
  * The board, drawn as one SVG.
@@ -234,7 +234,90 @@ const hoveredWire = ref<WireEnd>(null)
 const wireRefusal = ref('')
 const wireBus = ref<BusType>('L')
 const pointer = ref<{ x: number; y: number } | null>(null)
+const pendingPoints = ref<WirePoint[]>([])
+const pendingLayer = ref<WireLayer>('front')
+const pendingLayers = ref<WireLayer[]>([])
+const routeDraft = ref<WireRoute | null>(null)
+const routeEditingId = ref<string | null>(null)
+const draggingRoutePoint = ref<number | null>(null)
+const draftWire = computed(() => {
+  if (!routeDraft.value || !routeEditingId.value) return null
+  const project = { ...store.currentProject, connections: store.currentProject.connections.map((wire) => wire.id === routeEditingId.value ? { ...wire, route: routeDraft.value! } : wire) }
+  return buildBoardScene(project, store.definitions).wires.find((wire) => wire.id === routeEditingId.value) ?? null
+})
+const renderWires = computed(() => scene.value.wires.map((wire) => draftWire.value?.id === wire.id ? draftWire.value : wire))
+const routeStroke = (thickness: number) => Math.max(2.8, (thickness || 2) * scale.value)
+const eventPoint = (event: MouseEvent | PointerEvent): WirePoint | null => {
+  const matrix = svgElement.value?.getScreenCTM()
+  if (!matrix) return null
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+  return { x: Math.round(Math.max(0, Math.min(scene.value.width, point.x)) * 10) / 10, y: Math.round(Math.max(0, Math.min(scene.value.height, point.y)) * 10) / 10 }
+}
+const cancelRouteEdit = () => { routeDraft.value = null; routeEditingId.value = null; draggingRoutePoint.value = null }
+const beginRouteEdit = async () => {
+  const connection = store.selectedConnection
+  if (!connection) return
+  emit('update:tool', 'select')
+  await nextTick()
+  const wire = scene.value.wires.find((item) => item.id === connection.id)
+  if (!wire) return
+  routeEditingId.value = connection.id
+  routeDraft.value = { points: wire.editableRoute.points.map((point) => ({ ...point })), segmentLayers: [...wire.editableRoute.segmentLayers] }
+}
+const applyRouteEdit = () => {
+  if (routeEditingId.value && routeDraft.value && store.updateConnection(routeEditingId.value, { route: routeDraft.value })) cancelRouteEdit()
+}
+const setRouteLayer = (index: number, layer: WireLayer) => { if (routeDraft.value) routeDraft.value.segmentLayers[index] = layer }
+const addRoutePoint = (index: number) => {
+  const points = draftWire.value?.routePoints
+  if (!routeDraft.value || !points?.[index] || !points[index + 1]) return
+  const from = points[index]!, to = points[index + 1]!
+  routeDraft.value.points.splice(index, 0, { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 })
+  routeDraft.value.segmentLayers.splice(index, 0, routeDraft.value.segmentLayers[index] ?? 'front')
+}
+const removeRoutePoint = (index: number) => {
+  if (!routeDraft.value) return
+  routeDraft.value.points.splice(index, 1)
+  routeDraft.value.segmentLayers.splice(index + 1, 1)
+}
+const startRoutePointDrag = (event: PointerEvent, index: number) => {
+  if (event.button !== 0) return
+  event.stopPropagation(); event.preventDefault()
+  draggingRoutePoint.value = index
+  ;(event.currentTarget as SVGCircleElement).setPointerCapture(event.pointerId)
+}
+const moveRoutePoint = (event: PointerEvent) => {
+  if (draggingRoutePoint.value === null || !routeDraft.value) return
+  const point = eventPoint(event)
+  if (point) routeDraft.value.points[draggingRoutePoint.value] = point
+}
+const routePointKey = (event: KeyboardEvent, index: number) => {
+  if (!routeDraft.value) return
+  if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); event.stopPropagation(); removeRoutePoint(index); return }
+  const point = routeDraft.value.points[index]
+  if (!point || !event.key.startsWith('Arrow')) return
+  event.preventDefault(); event.stopPropagation()
+  const step = event.shiftKey ? 5 : 1
+  point.x = Math.max(0, Math.min(scene.value.width, point.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0)))
+  point.y = Math.max(0, Math.min(scene.value.height, point.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)))
+}
+const guardRouteKeys = (event: KeyboardEvent) => {
+  if (!routeDraft.value) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.scene-route-handle') && !(event.ctrlKey || event.metaKey)) return
+  if (event.key === 'Delete' || event.key === 'Backspace' || ((event.ctrlKey || event.metaKey) && ['z', 'd'].includes(event.key.toLowerCase()))) {
+    event.stopPropagation()
+    if (!target || !/^(INPUT|TEXTAREA)$/.test(target.tagName)) event.preventDefault()
+  }
+}
+const onRouteCanvasClick = (event: MouseEvent) => {
+  if (tool.value !== 'wire' || !pendingWire.value) return
+  const point = eventPoint(event)
+  if (point && pendingPoints.value.length < 64) { pendingPoints.value.push(point); pendingLayers.value.push(pendingLayer.value) }
+}
+watch(() => store.selectedConnectionId, (id) => { if (routeEditingId.value && id !== routeEditingId.value) cancelRouteEdit() })
 const trackPointer = (event: PointerEvent) => {
+  moveRoutePoint(event)
   const matrix = svgElement.value?.getScreenCTM()
   if (matrix) pointer.value = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
 }
@@ -282,17 +365,25 @@ const ghostPath = computed(() => {
       id: '__wire-preview__', circuitId: '', fromBus: bus, toDeviceId: terminal.instanceId,
       toSide: terminal.side, terminal: terminal.column, color: wireColor(bus), thickness: 2, label: '',
       kind: from.kind === 'terminal' && to.kind === 'terminal' ? 'busbar' : 'bus',
+      route: { points: to.kind === 'bus' ? [...pendingPoints.value].reverse() : [...pendingPoints.value], segmentLayers: to.kind === 'bus' ? [...pendingLayers.value, pendingLayer.value].reverse() : [...pendingLayers.value, pendingLayer.value] },
       ...(from.kind === 'terminal' && to.kind === 'terminal'
         ? { fromDeviceId: from.instanceId, fromTerminal: from.column, fromSide: from.side } : {}),
     }
     return buildBoardScene({ ...store.currentProject, connections: [...store.currentProject.connections, draft] }, store.definitions)
       .wires.find((wire) => wire.id === draft.id)?.d ?? ''
   }
-  return pointer.value ? `M ${start.x} ${start.y} L ${pointer.value.x} ${pointer.value.y}` : ''
+  if (!pointer.value) return ''
+  if (from.kind === 'bus') {
+    const rail = scene.value.busRails.find((candidate) => candidate.bus === from.bus)
+    if (rail) start.x = Math.max(rail.x, Math.min(rail.x + rail.width, pendingPoints.value[0]?.x ?? pointer.value.x))
+  }
+  return manualWireSegments(start, pointer.value, { points: pendingPoints.value, segmentLayers: [...pendingLayers.value, pendingLayer.value] }).map((part) => part.d).join(' ')
 })
 
 const clearWire = () => {
   pendingWire.value = null
+  pendingPoints.value = []
+  pendingLayers.value = []
   hoveredWire.value = null
   wireRefusal.value = ''
 }
@@ -303,12 +394,14 @@ const connect = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
   const terminal = from.kind === 'terminal' ? from : to.kind === 'terminal' ? to : null
   const bus = (from.bus !== 'aux' ? from.bus : to.bus !== 'aux' ? to.bus : wireBus.value) as BusType
   let connected = false
+  let route: WireRoute = { points: [...pendingPoints.value], segmentLayers: [...pendingLayers.value, pendingLayer.value] }
+  if (route && to.kind === 'bus') route = { points: [...route.points].reverse(), segmentLayers: [...route.segmentLayers].reverse() }
   if (from.kind === 'terminal' && to.kind === 'terminal') {
     connected = store.connectOnBoard(from.instanceId, bus, to.instanceId, to.column, {
-      fromTerminal: from.column, fromSide: from.side, toSide: to.side,
+      fromTerminal: from.column, fromSide: from.side, toSide: to.side, route,
     })
   } else if (terminal) {
-    connected = store.connectFromBus(bus, terminal.instanceId, terminal.column, terminal.side)
+    connected = store.connectFromBus(bus, terminal.instanceId, terminal.column, terminal.side, route)
   }
   if (!connected) wireRefusal.value = store.toast?.text || 'Выберите зажим аппарата.'
   return connected
@@ -333,7 +426,7 @@ const onTerminalClick = (device: BoardSpace['devices'][number], bus: string, sid
     wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
     return
   }
-  if (connect(first, end)) { clearWire(); emit('update:tool', 'select') }
+  if (connect(first, end)) { clearWire() }
 }
 
 const onBusClick = (bus: BusType) => {
@@ -349,7 +442,7 @@ const onBusClick = (bus: BusType) => {
     wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
     return
   }
-  if (connect(first, end)) { clearWire(); emit('update:tool', 'select') }
+  if (connect(first, end)) { clearWire() }
 }
 /**
  * What the board says about the project, straight from the validator.
@@ -447,6 +540,7 @@ const cancelInteraction = () => {
   cancelBoardDrag()
   stopPan()
   cancelWire()
+  cancelRouteEdit()
   editing.value = null
 }
 const revealDevice = async (instanceId: string) => {
@@ -473,7 +567,7 @@ const cancelAddress = () => {
 }
 
 const onDeviceClick = (device: BoardSpace['devices'][number]) => {
-  if (tool.value === 'pan') return
+  if (tool.value === 'pan' || routeDraft.value || (tool.value === 'wire' && pendingWire.value)) return
   if (tool.value === 'address') { beginAddress(device); return }
   store.selectDevice(device.instanceId)
 }
@@ -495,11 +589,13 @@ const onDeviceClick = (device: BoardSpace['devices'][number]) => {
  * to reload the page.
  */
 const onPlateClick = () => {
+  if (routeDraft.value || (tool.value === 'wire' && pendingWire.value)) return
   store.selectConnection(null)
   store.selectDevice(null)
 }
 
 const onWireClick = (event: MouseEvent, wireId: string) => {
+  if (tool.value === 'wire') return
   event.stopPropagation()
   store.selectConnection(wireId)
 }
@@ -508,7 +604,7 @@ const onWireClick = (event: MouseEvent, wireId: string) => {
 const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][number]) => {
   if (event.button !== 0) return
   // Dragging in address mode would move a device the person only meant to relabel.
-  if (tool.value !== 'select') return
+  if (tool.value !== 'select' || routeDraft.value) return
   const matrix = svgElement.value?.getScreenCTM()
   const rail = scene.value.rails.find((entry) => entry.row === device.row)
   if (!matrix || !rail) return
@@ -520,10 +616,12 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 </script>
 
 <template>
-  <div class="board-stage">
+  <div class="board-stage" @keydown.capture="guardRouteKeys">
   <div v-if="tool === 'wire'" class="board-wire-guide" role="status">
     <span class="wire-step">{{ pendingWire ? '2' : '1' }}</span>
-    <span>{{ pendingWire ? 'Выберите второй зажим или шину' : 'Выберите зажим аппарата или шину L, N, PE' }}<small>Esc — отменить · повторный клик — сбросить</small></span>
+    <span>{{ pendingWire ? 'Кликайте по полю для поворотов, затем выберите конечный зажим' : 'Выберите зажим аппарата или шину L, N, PE' }}<small>Esc — отменить · повторы контактов не создают новый провод</small></span>
+    <label>Прокладка <select v-model="pendingLayer" aria-label="Слой нового участка"><option value="front">Перед аппаратами</option><option value="rear">За аппаратами</option></select></label>
+    <button v-if="pendingPoints.length" type="button" @click="pendingPoints.pop(); pendingLayers.pop()">Убрать последний поворот</button>
     <label>Провод для AUX <select v-model="wireBus" aria-label="Провод для вспомогательных зажимов"><option>L</option><option>N</option><option>PE</option></select></label>
   </div>
   <div ref="canvas" class="board-scene-canvas" :class="{ 'can-pan': canPan, 'is-panning': isPanning }"
@@ -536,6 +634,9 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
     ref="svgElement"
     role="group"
     @pointermove="trackPointer"
+    @pointerup="draggingRoutePoint = null"
+    @pointercancel="draggingRoutePoint = null"
+    @click="onRouteCanvasClick"
     :aria-label="`Схема электрощита: ${scene.devices.length} аппаратов, ${scene.wires.length} соединений`"
   >
     <rect class="scene-plate" x="0" y="0" :width="scene.width" :height="scene.height" rx="3" @click="onPlateClick" />
@@ -592,38 +693,17 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       rx="0.8"
     />
 
-    <!-- Wires first, so a device covers the end of its own wire the way a real panel does. -->
-    <g class="scene-wires">
-      <path
-        v-for="wire in scene.wires"
-        :key="wire.id"
-        class="scene-wire"
-        :class="[`scene-wire-${wire.bus.toLowerCase()}`, { 'is-selected': wire.id === store.selectedConnectionId }]"
-        :data-wire-id="wire.id"
-        :d="wire.d"
-        :stroke="wire.color || busColor[wire.bus]"
-        :stroke-width="wire.thickness || 2"
-        fill="none"
-        aria-hidden="true"
-      />
-      <!-- The invisible copy is what the pointer hits, and it is drawn last so that it is the
-           topmost thing on the line: a conductor is a millimetre or two wide on screen and lies under
-           the device it serves, so without it a wire could not be aimed at, let alone picked. It
-           carries no stroke of its own, so it changes nothing on the paper. -->
-      <path
-        v-for="wire in scene.wires"
-        :key="`hit-${wire.id}`"
-        class="scene-wire-hit"
-        :class="{ 'is-selected': wire.id === store.selectedConnectionId }"
-        :d="wire.d"
-        :data-wire-id="wire.id"
-        :aria-label="`Провод: ${wire.fromName} → ${wire.toName}, шина ${wire.bus}`"
-        role="button"
-        tabindex="0"
-        @click="onWireClick($event, wire.id)"
-        @keydown.enter.prevent="store.selectConnection(wire.id)"
-        @keydown.space.prevent="store.selectConnection(wire.id)"
-      />
+    <g class="scene-wires" data-wire-layer="rear">
+      <template v-for="wire in renderWires" :key="wire.id">
+        <!-- Complete path retained for endpoint measurements and accessibility tooling. -->
+        <path class="scene-wire" :class="`scene-wire-${wire.bus.toLowerCase()}`" :stroke-width="wire.thickness || 2" :data-wire-id="wire.id" :d="wire.d" fill="none" stroke="none" aria-hidden="true" />
+        <path v-for="segment in wire.segments.filter((part) => part.layer === 'rear')" :key="segment.index"
+          class="scene-wire-segment" :data-wire-id="wire.id" :data-segment="segment.index" :d="segment.d"
+          :stroke="wire.color || busColor[wire.bus]" :style="{ strokeWidth: `${routeStroke(wire.thickness)}px` }" fill="none" />
+        <path class="scene-wire-hit" :class="{ 'is-selected': wire.id === store.selectedConnectionId }" :d="wire.d" :data-wire-id="wire.id"
+          :aria-label="`Провод: ${wire.fromName} → ${wire.toName}, шина ${wire.bus}`" role="button" tabindex="0"
+          @click="onWireClick($event, wire.id)" @keydown.enter.prevent="store.selectConnection(wire.id)" @keydown.space.prevent="store.selectConnection(wire.id)" />
+      </template>
     </g>
 
     <g
@@ -643,7 +723,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       tabindex="0"
       :aria-label="`${device.address || 'без адреса'}, ${hasCustomMarking(device) ? markingFor(device) + ' · ' : ''}${device.name}`"
       @click="onDeviceClick(device); announce(device.instanceId)"
-      @keydown.enter="store.selectedDeviceId = device.instanceId"
+      @keydown.enter="store.selectDevice(device.instanceId)"
     >
       <!-- The face is the very same component the catalogue draws, placed directly in board
            millimetres. It used to be mounted as its own scaled <svg> per device, and that second
@@ -681,6 +761,24 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
         </text>
         <text v-else class="scene-device-name" :x="device.width / 2" :y="device.height + 3.4" text-anchor="middle">{{ device.name }}</text>
       </g>
+    </g>
+
+    <g class="scene-front-wires" data-wire-layer="front">
+      <template v-for="wire in renderWires" :key="wire.id">
+        <path v-for="segment in wire.segments.filter((part) => part.layer === 'front' || wire.id === store.selectedConnectionId)" :key="segment.index"
+          class="scene-wire-segment" :class="{ 'is-selected': wire.id === store.selectedConnectionId, 'is-rear-ghost': segment.layer === 'rear' }"
+          :data-wire-id="wire.id" :data-segment="segment.index" :data-layer="segment.layer" :d="segment.d"
+          :stroke="wire.color || busColor[wire.bus]" :style="{ strokeWidth: `${routeStroke(wire.thickness)}px` }" fill="none"
+          @click="onWireClick($event, wire.id)" />
+      </template>
+    </g>
+    <g v-if="routeDraft" class="scene-route-handles">
+      <circle v-for="(point, index) in routeDraft.points" :key="index" class="scene-route-handle" :data-route-point="index"
+        :cx="point.x" :cy="point.y" :r="Math.max(2, 5 / scale)" role="button" tabindex="0" :aria-label="`Поворот ${index + 1}. Стрелки — сдвинуть, Delete — удалить`"
+        @pointerdown="startRoutePointDrag($event, index)" @keydown="routePointKey($event, index)" @click.stop />
+    </g>
+    <g v-if="pendingWire" class="scene-pending-points">
+      <circle v-for="(point, index) in pendingPoints" :key="index" :cx="point.x" :cy="point.y" r="1.5" />
     </g>
 
     <!-- Terminals become reachable while the wire tool is on: without a visible target a person is
@@ -738,7 +836,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       class="scene-wire-ghost"
       :d="ghostPath"
       :stroke="pendingWire ? wireColor(pendingWire.bus) : '#8a9599'"
-      stroke-width="0.8"
+      :style="{ strokeWidth: `${routeStroke(2)}px` }"
       fill="none"
     />
   </svg>
@@ -764,7 +862,8 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   </div>
   <p v-if="wireRefusal" class="board-wire-refusal" role="status">{{ wireRefusal }}</p>
   <p v-if="announced" class="board-issue-note" role="status">{{ announced }}</p>
-  <BoardWireInspector />
+  <BoardWireInspector :route-draft="routeDraft" @edit-route="beginRouteEdit" @apply-route="applyRouteEdit" @cancel-route="cancelRouteEdit"
+    @add-route-point="addRoutePoint" @remove-route-point="removeRoutePoint" @set-route-layer="setRouteLayer" />
   </div>
 </template>
 
@@ -876,7 +975,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   stroke-opacity: .35;
 }
 
-.scene-wire.is-selected {
+.scene-wire-segment.is-selected {
   filter: drop-shadow(0 0 0.5mm var(--accent));
 }
 
@@ -890,6 +989,9 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 }
 
 .scene-wire-ghost {
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-dasharray: 1.6 1.2;
   pointer-events: none;
 }
@@ -985,7 +1087,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   stroke: #b4472e;
 }
 
-.scene-wire {
+.scene-wire-segment {
   stroke-linecap: round;
   stroke-linejoin: round;
   /* Wires stay legible when the board is scaled down to fit a narrow panel. */
@@ -1058,4 +1160,13 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   stroke-width: 0.5;
   stroke-dasharray: 2 1.5;
 }
+</style>
+
+<style scoped>
+.scene-wire-segment { pointer-events: stroke; cursor: pointer; }
+.scene-wire-segment.is-rear-ghost { stroke-dasharray: 5 4; opacity: .7; }
+.scene-route-handle { fill: var(--surface); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: move; touch-action: none; }
+.scene-route-handle:focus { fill: var(--accent); outline: none; }
+.scene-pending-points { fill: var(--accent); pointer-events: none; }
+.board-wire-guide { flex-wrap: wrap; }
 </style>

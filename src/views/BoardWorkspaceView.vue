@@ -62,13 +62,17 @@ const TOOLS: { id: BoardTool; label: string; hint: string }[] = [
   { id: 'wire', label: 'Провести', hint: 'Соединить два зажима или зажим с шиной L, N или PE. Клавиша 3' },
 ]
 
+const undoChange = () => { scene.value?.cancelInteraction(); store.undo() }
+const redoChange = () => { scene.value?.cancelInteraction(); store.redo() }
+
 const onBoardKey = (event: KeyboardEvent) => {
+  if (event.defaultPrevented) return
   // The shortcut is for the board, not for whatever the person happens to be typing into. A digit
   // typed into a price field must not switch tools, and Escape in a text field must not.
   const target = event.target as HTMLElement | null
   if (target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName))) return
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-    event.preventDefault(); if (event.shiftKey) store.redo(); else store.undo(); return
+    event.preventDefault(); if (event.shiftKey) redoChange(); else undoChange(); return
   }
   if (workspaceMode.value !== 'assembly') return
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() !== 'd') return
@@ -264,8 +268,8 @@ const canRedo = () => redoStack.value.length > 0
         <button v-show="workspaceMode === 'assembly'" class="toolbar-button" :disabled="!store.selectedDevice" title="Создать цепь для выбранного аппарата. Клавиша C" @click="scene?.createCircuit(store.selectedDeviceId!)">Создать цепь</button>
         <button v-show="workspaceMode === 'assembly'" class="toolbar-button" :disabled="!store.selectedDevice && !store.selectedConnection" title="Удалить выбранный аппарат или провод. Клавиша Delete" @click="deleteSelection">Удалить</button>
         <button v-show="workspaceMode === 'assembly'" class="toolbar-button" :disabled="!store.selectedDevice" title="Продублировать выбранный аппарат. Ctrl+D" @click="store.duplicateSelected()">Дублировать</button>
-        <button class="toolbar-button" :disabled="!canUndo()" @click="store.undo()">↶ Отменить</button>
-        <button class="toolbar-button" :disabled="!canRedo()" @click="store.redo()">↷ Повторить</button>
+        <button class="toolbar-button" :disabled="!canUndo()" @click="undoChange">↶ Отменить</button>
+        <button class="toolbar-button" :disabled="!canRedo()" @click="redoChange">↷ Повторить</button>
         <button v-show="workspaceMode === 'assembly'" class="toolbar-button" :aria-pressed="panelsOpen && !canvasFocus" @click="togglePanels">
           {{ panelsOpen && !canvasFocus ? 'Скрыть боковые панели' : 'Показать боковые панели' }}
         </button>

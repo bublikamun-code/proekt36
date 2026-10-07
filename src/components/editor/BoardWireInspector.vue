@@ -4,7 +4,7 @@ import AppSelect from '../ui/AppSelect.vue'
 import { CONNECTION_THICKNESS_MM } from '../../domain/connectionSpec'
 import { useProjectStore } from '../../stores/project'
 import { faceTerminals, wireColor } from '../../domain/wiring'
-import type { BusType } from '../../domain/types'
+import type { BusType, WireRoute, WireLayer } from '../../domain/types'
 
 /**
  * The properties of the selected wire.
@@ -17,6 +17,11 @@ import type { BusType } from '../../domain/types'
  * It sits on the board rather than in a side panel because the wire is one or two millimetres wide
  * and the side panels are overlays that can cover it.
  */
+const props = defineProps<{ routeDraft?: WireRoute | null }>()
+const emit = defineEmits<{
+  editRoute: []; applyRoute: []; cancelRoute: [];
+  addRoutePoint: [index: number]; removeRoutePoint: [index: number]; setRouteLayer: [index: number, layer: WireLayer];
+}>()
 const store = useProjectStore()
 
 const connection = computed(() => store.selectedConnection)
@@ -111,6 +116,7 @@ defineExpose({ remove })
       {{ belongsToCircuit ? 'Линия цепи' : connection.fromDeviceId ? 'Каскад между аппаратами' : `Запитка от шины ${connection.fromBus}` }}
     </p>
 
+    <fieldset v-if="!props.routeDraft">
     <label>
       Шина
       <AppSelect
@@ -133,7 +139,7 @@ defineExpose({ remove })
       <input :value="connection.label" placeholder="Например, L → QF01" @change="update({ label: ($event.target as HTMLInputElement).value })" />
     </label>
     <label>
-      Толщина, мм
+      Толщина линии, мм
       <input
         :value="connection.thickness"
         type="number"
@@ -152,7 +158,23 @@ defineExpose({ remove })
       />
     </label>
 
-    <button class="board-wire-delete" type="button" @click="remove">Удалить провод</button>
+    </fieldset>
+    <section v-if="props.routeDraft" class="route-editor" aria-label="Редактирование трассы">
+      <strong>Трасса провода</strong>
+      <p>Тяните точки на щите. Изменения сохранятся после применения.</p>
+      <div v-for="(layer, index) in props.routeDraft.segmentLayers" :key="index" class="route-segment-control">
+        <label>Участок {{ index + 1 }}
+          <select :aria-label="`Слой участка ${index + 1}`" :value="layer" @change="emit('setRouteLayer', index, ($event.target as HTMLSelectElement).value as WireLayer)">
+            <option value="front">Перед аппаратами</option><option value="rear">За аппаратами</option>
+          </select>
+        </label>
+        <button type="button" :aria-label="`Добавить поворот на участке ${index + 1}`" :disabled="props.routeDraft.points.length >= 64" @click="emit('addRoutePoint', index)">+ Поворот</button>
+        <button v-if="index < props.routeDraft.points.length" type="button" :aria-label="`Удалить поворот ${index + 1}`" @click="emit('removeRoutePoint', index)">− Точка {{ index + 1 }}</button>
+      </div>
+      <div class="route-actions"><button type="button" @click="emit('applyRoute')">Применить трассу</button><button type="button" @click="emit('cancelRoute')">Отменить трассу</button></div>
+    </section>
+    <button v-else type="button" class="route-edit-button" @click="emit('editRoute')">Изменить трассу</button>
+    <button v-if="!props.routeDraft" class="board-wire-delete" type="button" @click="remove">Удалить провод</button>
   </aside>
 </template>
 
@@ -237,4 +259,14 @@ defineExpose({ remove })
   border-radius: 3px;
   cursor: pointer;
 }
+</style>
+<style scoped>
+.board-wire-inspector fieldset { display: grid; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.route-editor { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.route-editor p { margin: 0; color: var(--text-muted); font-size: 11px; }
+.route-segment-control { display: flex; gap: 5px; flex-wrap: wrap; padding: 6px; background: var(--canvas); border-radius: 3px; }
+.route-segment-control label { flex-basis: 100%; }
+.route-segment-control select { max-width: 100%; padding: 5px; color: var(--text); background: var(--surface); border: 1px solid var(--line); }
+.route-actions { position: sticky; bottom: -10px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 0; margin-top: 2px; background: var(--surface); border-top: 1px solid var(--line); }
+.route-editor button, .route-edit-button { padding: 6px 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 3px; cursor: pointer; }
 </style>

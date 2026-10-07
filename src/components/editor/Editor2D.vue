@@ -7,7 +7,7 @@ import { useProjectStore } from '../../stores/project'
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, usePreferencesStore } from '../../stores/preferences'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
-import { faceTerminals, routeWire, terminalForBus, wireColor } from '../../domain/wiring'
+import { faceTerminals, manualWireSegments, routeWire, terminalForBus, wireColor } from '../../domain/wiring'
 import type { PlacedDevice } from '../../domain/types'
 
 const props = defineProps<{ focused: boolean }>()
@@ -360,7 +360,7 @@ const onBoardKeydown = (event: KeyboardEvent) => {
 }
 
 const wirePaths = computed(() => {
-  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string; source: 'busbar' | 'device' }> = []
+  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string; source: 'busbar' | 'device'; layer: 'front' | 'rear' | 'legacy'; segment: number }> = []
   const board = geometry.value
   const busX: Record<'L' | 'N' | 'PE', number> = { L: 3, N: 7, PE: 11 }
   const devicesById = new Map(currentProject.value.devices.map((device) => [device.instanceId, device]))
@@ -416,9 +416,17 @@ const wirePaths = computed(() => {
       ? { x: sourcePoint.x, y: sourcePoint.y }
       : { x: busX[bus], y: board.rowTopMm[target.row] }
 
-    paths.push({
+    const segments = connection.route
+      ? manualWireSegments(origin, targetPoint, {
+          ...connection.route,
+          points: connection.route.points.map((point) => ({ x: point.x, y: point.y - board.rowTopMm[0]! })),
+        })
+      : [{ d: routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4, fromSide: connection.fromSide, toSide: connection.toSide }), layer: 'legacy' as const, index: 0 }]
+    for (const segment of segments) paths.push({
       id: connection.id,
-      d: mmPathToPx(routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4, fromSide: connection.fromSide, toSide: connection.toSide })),
+      d: mmPathToPx(segment.d),
+      layer: segment.layer,
+      segment: segment.index,
       bus,
       color: connection.color || wireColor(bus),
       thickness: connection.thickness || 2,
@@ -473,7 +481,7 @@ const wirePaths = computed(() => {
                 <div class="row-capacity" :class="{ 'is-full': rowUsage(row).percent >= 100 }" role="img" :aria-label="`Ряд ${row + 1}: занято ${rowUsage(row).used} из ${capacity} модулей${rowUsage(row).percent >= 100 ? ', ряд заполнен' : ''}`"><span :style="{ height: `${rowUsage(row).percent}%` }"></span></div>
               </div>
             </div>
-            <svg class="wires" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true"><path v-for="path in wirePaths" :key="path.id" :data-connection-id="path.id" :d="path.d" :class="`wire-${path.bus.toLowerCase()}`" :stroke="path.color" :style="{ strokeWidth: `${path.thickness}px` }"><title>{{ path.label }}</title></path></svg>
+            <svg v-for="layer in (['rear', 'legacy', 'front'] as const)" :key="layer" class="wires" :class="`wires-${layer}`" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true"><path v-for="path in wirePaths.filter((wire) => wire.layer === layer)" :key="`${path.id}:${path.segment}`" :data-connection-id="path.id" :d="path.d" :class="`wire-${path.bus.toLowerCase()}`" :stroke="path.color" :style="{ strokeWidth: `${path.thickness}px` }"><title>{{ path.label }}</title></path></svg>
           </div>
           <div class="cabinet-label"><span>{{ currentProject.name }}</span><small>{{ cabinetLabel }}</small></div>
         </div>
@@ -485,6 +493,8 @@ const wirePaths = computed(() => {
 
 
 <style scoped>
+.wires-rear { z-index: 1; }
+.wires-front { z-index: 4; }
 /* Keep the face at the same physical scale as the wire layer. Labels cannot shrink it. */
 .placed-device { padding: 0; border: 0; overflow: visible; }
 .placed-device :deep(.device-visual) { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }

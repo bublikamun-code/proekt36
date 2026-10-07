@@ -1,8 +1,8 @@
 import { getDeviceFaceMetrics, type DeviceFaceMetrics } from './faceMetrics'
 import { getPanelGeometry, type PanelGeometry } from './panelGeometry'
 import { buildBusRails, BUS_SHORT_TITLE, type BusRail } from './busRail'
-import { faceTerminals, routeWire, terminalForBus, type FaceTerminals } from './wiring'
-import type { BusType, Connection, DeviceDefinition, PanelProject } from './types'
+import { faceTerminals, manualWireSegments, routeWire, routeWirePoints, terminalForBus, type FaceTerminals, type WireSegment } from './wiring'
+import type { BusType, Connection, DeviceDefinition, PanelProject, WirePoint, WireRoute } from './types'
 
 /**
  * The whole board as one scene, in millimetres, ready to be drawn by a single SVG.
@@ -62,6 +62,12 @@ export interface SceneWire {
   from: { x: number; y: number }
   to: { x: number; y: number; height: number }
   d: string
+  /** Separate SVG paths allow runs to be drawn before or after the devices. */
+  segments: WireSegment[]
+  /** Resolved source, saved interior anchors, resolved target. */
+  routePoints: WirePoint[]
+  /** A detached manual-edit seed preserving the rendered bends and layers. */
+  editableRoute: WireRoute
 }
 
 export interface SceneRail {
@@ -232,7 +238,9 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
     if (connection.kind === 'bus' && connection.fromDeviceId) continue
     const rail = railByBus.get(connection.fromBus)
     if (!rail) continue
-    const tapX = descentFor(to.x, target.row)
+    const tapX = connection.route
+      ? Math.max(rail.x, Math.min(rail.x + rail.width, connection.route.points[0]?.x ?? to.x))
+      : descentFor(to.x, target.row)
     const start = fromTerminal ?? { x: tapX, y: rail.tapY }
     plans.push({
       connection,
@@ -241,7 +249,7 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
       descentX: fromTerminal ? undefined : tapX,
       source: fromTerminal ? 'device' : 'busbar',
       fromName: fromTerminal ? deviceName(connection.fromDeviceId) : BUS_SHORT_TITLE[connection.fromBus],
-      bundle: fromTerminal
+      bundle: connection.route ? `manual:${connection.id}` : fromTerminal
         ? `cascade:${connection.fromDeviceId}:${connection.toDeviceId}:${connection.fromBus}`
         : `rail:${connection.fromBus}:${target.row}`,
       axis: fromTerminal ? 'y' : 'x',
@@ -268,7 +276,7 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
       const offset = spread / 2 - index * WIRE_CHANNEL_MM
       // A bundle may move its route, never its clamp.
       const rail = railByBus.get(plan.connection.fromBus)
-      const start = plan.axis === 'x'
+      const start = !plan.connection.route && plan.axis === 'x'
         ? { x: Math.max(rail?.x ?? 0, Math.min((rail?.x ?? 0) + (rail?.width ?? geometry.plateWidthMm), plan.start.x + offset)), y: plan.start.y }
         : plan.start
       const connection = plan.connection
@@ -287,6 +295,17 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
         device.y < highY && device.y + device.height > lowY
         && x > device.x + BODY_CLEARANCE_MM && x < device.x + device.width - BODY_CLEARANCE_MM)) ?? railStartX
       const needsChannel = sourceDevice || connection.toSide === 'bottom'
+      const automaticOptions = { from: start, to: plan.to, source: plan.source, stubMm: 2.4,
+        descentX: needsChannel ? channel : plan.descentX, entryY, exitY, fromSide: connection.fromSide, toSide: connection.toSide }
+      const segments: WireSegment[] = connection.route
+        ? manualWireSegments(start, plan.to, connection.route)
+        : [{ index: 0, layer: 'rear', d: routeWire(automaticOptions) }]
+      // A rail feed has no persisted source clamp. Include its existing tap as the first anchor
+      // so converting a spread automatic feed to manual does not move that tap to the descent.
+      const automaticAnchors = connection.route ? [] : routeWirePoints(automaticOptions).slice(connection.fromDeviceId ? 1 : 0, -1)
+      const editableRoute: WireRoute = connection.route
+        ? { points: connection.route.points.map((point) => ({ ...point })), segmentLayers: [...connection.route.segmentLayers] }
+        : { points: automaticAnchors, segmentLayers: automaticAnchors.map(() => 'rear' as const).concat('rear') }
       wires.push({
         id: connection.id,
         bus: connection.fromBus,
@@ -302,8 +321,10 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
         toName: deviceName(connection.toDeviceId),
         from: { x: start.x, y: start.y },
         to: plan.to,
-        d: routeWire({ from: start, to: plan.to, source: plan.source, stubMm: 2.4,
-          descentX: needsChannel ? channel : plan.descentX, entryY, exitY, fromSide: connection.fromSide, toSide: connection.toSide }),
+        d: segments.map((segment) => segment.d).join(' '),
+        segments,
+        editableRoute,
+        routePoints: [{ x: start.x, y: start.y }, ...(connection.route?.points ?? []).map((point) => ({ ...point })), { x: plan.to.x, y: plan.to.y }],
       })
     }
   }
