@@ -222,6 +222,8 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   await expect(firstWire).toHaveClass(/wire-l/)
 
   await pickOption(connectionCard, 'Шина', 'PE · земля')
+  await expect(page.getByRole('alert')).toContainText('нет подключения PE')
+  await expect(firstWire).toHaveClass(/wire-l/)
   await connectionCard.getByLabel('Толщина').fill('4')
   await connectionCard.getByLabel('Толщина').press('Tab')
   await connectionCard.getByLabel('Цвет').evaluate((input) => {
@@ -229,13 +231,13 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
     colorInput.value = '#2c7155'
     colorInput.dispatchEvent(new Event('change', { bubbles: true }))
   })
-  await connectionCard.getByLabel('Подпись').fill('PE к QF01')
+  await connectionCard.getByLabel('Подпись').fill('L к QF01')
   await connectionCard.getByLabel('Подпись').press('Tab')
 
-  await expect(firstWire).toHaveClass(/wire-pe/)
+  await expect(firstWire).toHaveClass(/wire-l/)
   await expect(firstWire).toHaveAttribute('stroke', '#2c7155')
   await expect(firstWire).toHaveAttribute('style', /stroke-width: 4px/)
-  await expect(firstWire.locator('title')).toHaveText('PE к QF01')
+  await expect(firstWire.locator('title')).toHaveText('L к QF01')
 
   await circuitCard.getByRole('button', { name: '＋ Подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(2)

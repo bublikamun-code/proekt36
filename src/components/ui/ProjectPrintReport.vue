@@ -6,7 +6,7 @@ import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '.
 import { validateProject } from '../../domain/validation'
 import SingleLineDiagram from './SingleLineDiagram.vue'
 import { claimsASource, verificationLabel as verificationLabelFor } from '../../domain/provenance'
-import { buildLabelSheet, labelSheetWarning } from '../../domain/labelSheet'
+import { buildLabelSheet, labelSheetWarning, labelTextFor } from '../../domain/labelSheet'
 import type { Connection, DeviceDefinition, PanelProject, VerificationStatus } from '../../domain/types'
 
 const props = defineProps<{
@@ -43,6 +43,8 @@ const wireSource = (connection: Connection): string => {
 const wireTerminal = (connection: Connection) => (connection.terminal === undefined ? '' : `зажим ${connection.terminal + 1}`)
 const issues = computed(() => validateProject(props.project, props.definitions))
 const labelSheet = computed(() => buildLabelSheet(props.project, props.definitions))
+const labelsById = computed(() => new Map(labelSheet.value.labels.map((label) => [label.instanceId, label])))
+const markingFor = (device: PanelProject['devices'][number]) => labelsById.value.get(device.instanceId)?.text ?? labelTextFor(device, undefined)
 const labelWarning = computed(() => labelSheetWarning(labelSheet.value))
 // The summary must count modules exactly the way the per-row table does, so a
 // missing product or a fractional import width cannot make the two disagree.
@@ -91,7 +93,7 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
             <td>{{ getRowUsage(row, project, definitions).used }} мод.</td>
             <td>{{ getRowCapacity(project) }} мод.</td>
             <td>{{ getRowCapacity(project) - getRowUsage(row, project, definitions).used }} мод.</td>
-            <td>{{ project.devices.filter((device) => device.row === row).map((device) => device.marking || device.address).join(', ') || '—' }}</td>
+            <td>{{ project.devices.filter((device) => device.row === row).map((device) => `${device.address || "без адреса"}${markingFor(device) !== device.address ? ` — ${markingFor(device)}` : ""}`).join(', ') || '—' }}</td>
           </tr>
         </tbody>
       </table>
@@ -100,13 +102,14 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
     <section class="print-marking">
       <h2>Нижняя маркировка</h2>
       <table>
-        <thead><tr><th>Поз.</th><th>Изделие</th><th>Серия / артикул</th><th>Адрес</th><th>Проверка / источник</th></tr></thead>
+        <thead><tr><th>Поз.</th><th>Изделие</th><th>Серия / артикул</th><th>Адрес</th><th>Маркировка</th><th>Проверка / источник</th></tr></thead>
         <tbody>
           <tr v-for="device in project.devices.filter(isDinDevice)" :key="device.instanceId">
             <td>{{ device.row + 1 }}.{{ device.slot + 1 }}</td>
             <td>{{ productFor(device.productId)?.name || 'Неизвестное изделие' }}</td>
             <td>{{ productFor(device.productId)?.series || productFor(device.productId)?.sku || '—' }}</td>
-            <td>{{ device.marking || device.address }}</td>
+            <td>{{ device.address || '—' }}</td>
+            <td>{{ markingFor(device) || '—' }}</td>
             <td>{{ verificationLabel(productFor(device.productId)?.verificationStatus) }}<template v-if="claimsASource(productFor(device.productId)?.verificationStatus) && productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
           </tr>
         </tbody>
@@ -129,6 +132,7 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
           :class="{ 'is-unmarked': !label.marked, 'is-duplicated': label.duplicated }"
         >
           <span class="print-label-text">{{ label.text || '—' }}</span>
+          <span class="print-label-address">{{ label.address || 'Без адреса' }}</span>
           <span class="print-label-meta">{{ label.position }} · {{ label.name }}</span>
           <span v-if="label.duplicated" class="print-label-flag">адрес повторяется</span>
           <span v-else-if="!label.marked" class="print-label-flag">адрес не проставлен</span>
@@ -183,3 +187,9 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
     </footer>
   </article>
 </template>
+
+<style scoped>
+.print-label { min-width: 0; }
+.print-label-text, .print-label-address { overflow-wrap: anywhere; white-space: pre-wrap; }
+.print-label-address { font: 600 8pt var(--mono); }
+</style>

@@ -59,7 +59,9 @@ function onMove(event: PointerEvent) {
 }
 
 function onUp(event: PointerEvent) {
-  if (event.pointerId === session.value.pointerId) finish(true)
+  if (event.pointerId !== session.value.pointerId) return
+  session.value = { ...session.value, x: event.clientX, y: event.clientY }
+  finish(true)
 }
 
 const abandon = () => finish(false)

@@ -32,7 +32,7 @@ describe('сцена доски', () => {
       const device = byId.get(connection.toDeviceId)!
       // The named terminal wins over the bus: on a terminal block every screw carries the same bus,
       // and the wire says which one it enters.
-      const terminal = terminalForBus(device.terminals, wire.bus, 'top', connection.terminal)!
+      const terminal = terminalForBus(device.terminals, wire.bus, connection.toSide ?? 'top', connection.terminal)!
 
       // The path carries two decimals, which is a tenth of a millimetre — finer than the clamp.
       const end = endOf(wire.d)

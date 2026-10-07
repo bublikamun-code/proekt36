@@ -2,14 +2,16 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { buildBoardScene, type BoardScene as BoardSpace } from '../../domain/boardScene'
 import { getRowCapacity, placeProduct, resolveDeviceMove } from '../../domain/layout'
-import { routeWire, wireColor } from '../../domain/wiring'
+import { buildLabelSheet, labelTextFor } from '../../domain/labelSheet'
+import { wireColor } from '../../domain/wiring'
 import { validateProject } from '../../domain/validation'
-import { beginBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
+import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
+import { useBoardViewport } from '../../composables/useBoardViewport'
 import BoardWireInspector from './BoardWireInspector.vue'
 import DeviceChassis from '../catalog/deviceFace/DeviceChassis.vue'
 import DeviceFace from '../catalog/deviceFace/DeviceFace.vue'
 import { useProjectStore } from '../../stores/project'
-import type { BusType, ValidationIssue } from '../../domain/types'
+import type { BusType, Connection, ValidationIssue } from '../../domain/types'
 
 /**
  * The board, drawn as one SVG.
@@ -20,17 +22,39 @@ import type { BusType, ValidationIssue } from '../../domain/types'
  * nothing drawn on them could be relied on to line up. Here a clamp and the wire that lands in it
  * are two numbers about the same millimetre.
  */
-const props = defineProps<{ scale?: number; tool?: BoardTool }>()
-const emit = defineEmits<{ 'update:tool': [BoardTool] }>()
+const props = defineProps<{ scale?: number; tool?: BoardTool; active?: boolean }>()
+const emit = defineEmits<{ 'update:tool': [BoardTool]; 'update:scale': [number] }>()
 
 /**
  * What a click on the board means.
  */
-export type BoardTool = 'select' | 'address' | 'wire'
+export type BoardTool = 'select' | 'address' | 'wire' | 'pan'
 const tool = computed<BoardTool>(() => props.tool ?? 'select')
 
 const store = useProjectStore()
 const scene = computed<BoardSpace>(() => buildBoardScene(store.currentProject, store.definitions))
+
+const deviceMarkings = computed(() => {
+  const labels = new Map(buildLabelSheet(store.currentProject, store.definitions).labels.map((label) => [label.instanceId, label.text]))
+  return new Map(store.currentProject.devices.map((device) => [device.instanceId, labels.get(device.instanceId) ?? labelTextFor(device, undefined)]))
+})
+const markingFor = (device: BoardSpace['devices'][number]) => deviceMarkings.value.get(device.instanceId) || ''
+const hasCustomMarking = (device: BoardSpace['devices'][number]) => Boolean(markingFor(device) && markingFor(device) !== device.address)
+const markingLines = (device: BoardSpace['devices'][number]) => {
+  const text = markingFor(device)
+  const capacity = Math.max(5, Math.floor(device.width / 1.2))
+  const words = text.split(/\s+/)
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    if (line && line.length + word.length + 1 > capacity) { lines.push(line); line = '' }
+    let rest = word
+    while (rest.length > capacity) { lines.push(rest.slice(0, capacity)); rest = rest.slice(capacity) }
+    line = line ? `${line} ${rest}` : rest
+  }
+  if (line) lines.push(line)
+  return lines.length > 3 ? [...lines.slice(0, 2), `${lines[2]!.slice(0, capacity - 1)}…`] : lines
+}
 
 /**
  * The board is drawn in millimetres, so at 1:1 it is a 300-pixel rectangle sitting in the left
@@ -40,6 +64,7 @@ const scene = computed<BoardSpace>(() => buildBoardScene(store.currentProject, s
 const canvas = ref<HTMLElement | null>(null)
 const fitScale = ref(1)
 let observer: ResizeObserver | undefined
+let measureFrame = 0
 
 const measure = () => {
   const element = canvas.value
@@ -54,7 +79,7 @@ const measure = () => {
   // the window: the lower rows and everything on them were below the fold, on a workspace whose
   // whole point is the whole panel. The available height is measured from the canvas to the window
   // rather than from the canvas itself, because the canvas grows with the board it holds.
-  const room = Math.max(240, window.innerHeight - element.getBoundingClientRect().top - 24)
+  const room = Math.max(120, element.clientHeight - 48)
   if (width <= 0 || scene.value.width <= 0 || scene.value.height <= 0) return
   const next = Math.min(width / scene.value.width, room / scene.value.height)
   // The observer fires when this element resizes, which the drawing itself causes; without a dead
@@ -66,19 +91,25 @@ onMounted(() => {
   measure()
   window.addEventListener('resize', measure)
   if (canvas.value) {
-    observer = new ResizeObserver(measure)
+    observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(measureFrame)
+      measureFrame = window.requestAnimationFrame(measure)
+    })
     observer.observe(canvas.value)
   }
 })
 
 onBeforeUnmount(() => {
   observer?.disconnect()
+  window.cancelAnimationFrame(measureFrame)
   window.removeEventListener('resize', measure)
 })
 
-const scale = computed(() => Math.max(0.4, Math.min(6, (props.scale ?? 1) * fitScale.value)))
+watch(() => [scene.value.width, scene.value.height], () => { void nextTick(measure) })
 
-const busColor: Record<BusType, string> = { L: '#a44d37', N: '#5f7f9c', PE: '#47a067' }
+const scale = computed(() => Math.max(0.01, (props.scale ?? 1) * fitScale.value))
+
+const busColor = { L: wireColor('L'), N: wireColor('N'), PE: wireColor('PE') }
 
 const faceOf = (device: BoardSpace['devices'][number]) => device.face
 /**
@@ -94,6 +125,8 @@ const preview = ref<{ row: number; slot: number; width: number; error?: string }
 
 const svgElement = ref<SVGSVGElement | null>(null)
 
+const grabOffset = ref(0)
+
 const pointerToBoard = () => {
   const svg = svgElement.value
   const matrix = svg?.getScreenCTM()
@@ -104,7 +137,16 @@ const pointerToBoard = () => {
 
 const computePreview = () => {
   const pointer = pointerToBoard()
-  if (!pointer || !dragSource.value) { preview.value = null; return }
+  const bounds = canvas.value?.getBoundingClientRect()
+  const { x, y } = dragPointer.value
+  if (!pointer || !dragSource.value || !bounds || x < bounds.left || x >= bounds.right || y < bounds.top || y >= bounds.bottom
+    || pointer.x < 0 || pointer.x > scene.value.width || pointer.y < 0 || pointer.y > scene.value.height) {
+    preview.value = null
+    return
+  }
+  if (dragSource.value.kind === 'placed') {
+    pointer.x -= grabOffset.value
+  }
   const { railStartX, modulePitch, rails } = scene.value
 
   // The rail band is the row. A pointer above the first rail or below the last one is not a drop.
@@ -119,14 +161,17 @@ const computePreview = () => {
 
   // The same two functions the old editor validates with, so a move that fails here would have
   // failed there for the same reason.
+  const product = source.kind === 'catalog' ? store.definitions.get(source.id) : undefined
+  if (source.kind === 'catalog' && !product) { preview.value = null; return }
   const result = source.kind === 'catalog'
-    ? placeProduct(devices, store.definitions.get(source.id)!, rail.row, slot, getRowCapacity(store.currentProject), () => '', store.definitions)
+    ? placeProduct(devices, product!, rail.row, slot, getRowCapacity(store.currentProject), () => '', store.definitions)
     : resolveDeviceMove(devices, source.id, rail.row, slot, getRowCapacity(store.currentProject), store.definitions)
 
   preview.value = { row: rail.row, slot, width, error: result.error }
 }
 
 const commitDrop = () => {
+  computePreview()
   const source = dragSource.value
   const target = preview.value
   if (!source || !target || target.error) return
@@ -151,6 +196,7 @@ const tick = () => {
 
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(frame)
+  cancelBoardDrag()
   setBoardDropHandler(null)
 })
 
@@ -177,18 +223,7 @@ const addressInput = ref<HTMLInputElement | null>(null)
 
 const deviceById = (instanceId: string) => scene.value.devices.find((device) => device.instanceId === instanceId)
 
-/**
- * The wire tool: click a terminal, click another, a wire appears.
- *
- * Terminals already know their own bus and their position in board millimetres, so the tool has
- * nothing to guess and nothing to look up. The one decision left open by the plan — whether a wire
- * records the bus or an explicit terminal index — is settled in favour of the bus here, because the
- * two produce the same interaction and differ only in what is written to the project.
- *
- * A wire may start or end on one of the three panel buses. That is the line every real board
- * begins with, and until the rails were drawn there was nowhere on the picture to take it from: the
- * store could record a feed and the board could show one, but no hand could draw one.
- */
+/** Each endpoint retains the exact side and column clicked on the board. */
 type WireEnd =
   | { kind: 'terminal'; instanceId: string; bus: string; side: 'top' | 'bottom'; column: number }
   | { kind: 'bus'; bus: BusType }
@@ -197,6 +232,12 @@ type WireEnd =
 const pendingWire = ref<WireEnd>(null)
 const hoveredWire = ref<WireEnd>(null)
 const wireRefusal = ref('')
+const wireBus = ref<BusType>('L')
+const pointer = ref<{ x: number; y: number } | null>(null)
+const trackPointer = (event: PointerEvent) => {
+  const matrix = svgElement.value?.getScreenCTM()
+  if (matrix) pointer.value = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+}
 
 const isWireEnd = (end: WireEnd, device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom', column: number) =>
   Boolean(end && end.kind === 'terminal' && end.instanceId === device.instanceId && end.bus === bus && end.side === side && end.column === column)
@@ -225,24 +266,29 @@ const pointOf = (end: NonNullable<WireEnd>) => {
   return { x: device.x + terminal.x, y: device.y + terminal.y, height: terminal.height }
 }
 
-const wireEnds = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
-  const source = pointOf(from)
-  const target = pointOf(to)
-  if (!source || !target) return null
-  return { from: source, to: target, source: (from.kind === 'bus' ? 'busbar' : 'device') as 'busbar' | 'device' }
-}
-
 /** The line that follows the pointer: real routing to the hovered clamp, straight to the rest. */
 const ghostPath = computed(() => {
   const from = pendingWire.value
   const to = hoveredWire.value
-  if (!from || !to) return ''
-  const ends = wireEnds(from, to)
-  if (ends) return routeWire({ from: ends.from, to: ends.to, source: ends.source, stubMm: 4 })
-  const start = from.kind === 'terminal' ? deviceById(from.instanceId) : null
-  const startTerminal = start && from.kind === 'terminal' ? terminalAt(start, from.bus, from.side, from.column) : null
-  if (!start || !startTerminal || from.kind !== 'terminal') return ''
-  return `M ${start.x + startTerminal.x} ${start.y + startTerminal.y} L ${dragPointer.value.x} ${dragPointer.value.y}`
+  if (!from) return ''
+  const start = pointOf(from)
+  if (!start) return ''
+  if (to) {
+    if (from.bus !== to.bus && from.bus !== 'aux' && to.bus !== 'aux') return ''
+    const terminal = to.kind === 'terminal' ? to : from.kind === 'terminal' ? from : null
+    if (!terminal) return ''
+    const bus = (from.bus !== 'aux' ? from.bus : to.bus !== 'aux' ? to.bus : wireBus.value) as BusType
+    const draft: Connection = {
+      id: '__wire-preview__', circuitId: '', fromBus: bus, toDeviceId: terminal.instanceId,
+      toSide: terminal.side, terminal: terminal.column, color: wireColor(bus), thickness: 2, label: '',
+      kind: from.kind === 'terminal' && to.kind === 'terminal' ? 'busbar' : 'bus',
+      ...(from.kind === 'terminal' && to.kind === 'terminal'
+        ? { fromDeviceId: from.instanceId, fromTerminal: from.column, fromSide: from.side } : {}),
+    }
+    return buildBoardScene({ ...store.currentProject, connections: [...store.currentProject.connections, draft] }, store.definitions)
+      .wires.find((wire) => wire.id === draft.id)?.d ?? ''
+  }
+  return pointer.value ? `M ${start.x} ${start.y} L ${pointer.value.x} ${pointer.value.y}` : ''
 })
 
 const clearWire = () => {
@@ -251,23 +297,21 @@ const clearWire = () => {
   wireRefusal.value = ''
 }
 
-/** The buses carry one wire each: a rail is a single conductor, and two L wires are the same wire. */
+watch([tool, () => store.currentProject.id], () => clearWire())
+
 const connect = (from: NonNullable<WireEnd>, to: NonNullable<WireEnd>) => {
   const terminal = from.kind === 'terminal' ? from : to.kind === 'terminal' ? to : null
-  const bus = from.kind === 'bus' ? from.bus : to.kind === 'bus' ? to.bus : null
+  const bus = (from.bus !== 'aux' ? from.bus : to.bus !== 'aux' ? to.bus : wireBus.value) as BusType
+  let connected = false
   if (from.kind === 'terminal' && to.kind === 'terminal') {
-    // A run between two apparatus always leaves the bottom of the first and arrives at the top of
-    // the second, whatever was clicked in which order, so the terminal that matters is the one on
-    // the arriving apparatus — the second end of this call.
-    return store.connectOnBoard(from.instanceId, from.bus as BusType, to.instanceId, to.column || undefined)
+    connected = store.connectOnBoard(from.instanceId, bus, to.instanceId, to.column, {
+      fromTerminal: from.column, fromSide: from.side, toSide: to.side,
+    })
+  } else if (terminal) {
+    connected = store.connectFromBus(bus, terminal.instanceId, terminal.column, terminal.side)
   }
-  if (!terminal || !bus) {
-    wireRefusal.value = 'Провод соединяет зажим с шиной или два зажима между собой.'
-    return false
-  }
-  // The feed always leaves a rail and arrives at the clamp above a device, whatever order the two
-  // ends were clicked in: a wire entering a device from underneath is a different piece of copper.
-  return store.connectFromBus(bus, terminal.instanceId, terminal.column || undefined)
+  if (!connected) wireRefusal.value = store.toast?.text || 'Выберите зажим аппарата.'
+  return connected
 }
 
 const onTerminalClick = (device: BoardSpace['devices'][number], bus: string, side: 'top' | 'bottom', column: number) => {
@@ -283,7 +327,7 @@ const onTerminalClick = (device: BoardSpace['devices'][number], bus: string, sid
   const same = first.kind === end.kind && first.instanceId === end.instanceId && first.bus === end.bus
     && first.side === end.side && first.column === end.column
   if (same) { clearWire(); return }
-  if (first.bus !== end.bus) {
+  if (first.bus !== end.bus && first.bus !== 'aux' && end.bus !== 'aux') {
     // A wire carries one bus. Letting a person join L to N would produce something that cannot be
     // built, and the board is exactly where they find out, so it is refused here rather than later.
     wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
@@ -301,7 +345,7 @@ const onBusClick = (bus: BusType) => {
     return
   }
   if (first.kind === 'bus' && first.bus === end.bus) { clearWire(); return }
-  if (first.bus !== end.bus) {
+  if (first.bus !== end.bus && first.bus !== 'aux') {
     wireRefusal.value = `Провод несёт одну шину: ${first.bus} и ${end.bus} соединить нельзя.`
     return
   }
@@ -399,7 +443,29 @@ const commitLoad = () => {
 
 const commitEditor = () => (editing.value?.kind === 'load' ? commitLoad() : commitAddress())
 
-defineExpose({ cancelWire, createCircuit })
+const cancelInteraction = () => {
+  cancelBoardDrag()
+  stopPan()
+  cancelWire()
+  editing.value = null
+}
+const revealDevice = async (instanceId: string) => {
+  measure()
+  await nextTick()
+  const element = [...(canvas.value?.querySelectorAll<SVGGElement>('.scene-device') ?? [])]
+    .find((node) => node.dataset.instanceId === instanceId)
+  element?.scrollIntoView({ block: 'center', inline: 'center' })
+  element?.focus({ preventScroll: true })
+}
+const { isPanning, canPan, startPan, stopPan, guardCanvasClick, onCanvasWheel, fitView } = useBoardViewport({
+  canvas, svg: svgElement,
+  active: () => props.active !== false,
+  panTool: () => tool.value === 'pan',
+  zoom: () => props.scale ?? 1,
+  setZoom: (value) => emit('update:scale', value),
+})
+watch([tool, () => store.currentProject.id, () => props.active], () => cancelInteraction())
+defineExpose({ cancelWire, createCircuit, cancelInteraction, revealDevice, fitView })
 
 const cancelAddress = () => {
   editing.value = null
@@ -407,6 +473,7 @@ const cancelAddress = () => {
 }
 
 const onDeviceClick = (device: BoardSpace['devices'][number]) => {
+  if (tool.value === 'pan') return
   if (tool.value === 'address') { beginAddress(device); return }
   store.selectDevice(device.instanceId)
 }
@@ -442,19 +509,33 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
   if (event.button !== 0) return
   // Dragging in address mode would move a device the person only meant to relabel.
   if (tool.value !== 'select') return
+  const matrix = svgElement.value?.getScreenCTM()
+  const rail = scene.value.rails.find((entry) => entry.row === device.row)
+  if (!matrix || !rail) return
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+  grabOffset.value = point.x - device.x
   beginBoardDrag({ kind: 'placed', id: device.instanceId, width: Math.max(1, Math.round(device.width / scene.value.modulePitch)), fromRow: device.row, fromSlot: device.slot }, event)
 }
 
 </script>
 
 <template>
-  <div ref="canvas" class="board-scene-canvas">
+  <div class="board-stage">
+  <div v-if="tool === 'wire'" class="board-wire-guide" role="status">
+    <span class="wire-step">{{ pendingWire ? '2' : '1' }}</span>
+    <span>{{ pendingWire ? 'Выберите второй зажим или шину' : 'Выберите зажим аппарата или шину L, N, PE' }}<small>Esc — отменить · повторный клик — сбросить</small></span>
+    <label>Провод для AUX <select v-model="wireBus" aria-label="Провод для вспомогательных зажимов"><option>L</option><option>N</option><option>PE</option></select></label>
+  </div>
+  <div ref="canvas" class="board-scene-canvas" :class="{ 'can-pan': canPan, 'is-panning': isPanning }"
+    tabindex="0" aria-label="Рабочая область щита. Пробел и перетаскивание — переместить вид; Ctrl или Command и колесо — масштаб."
+    @pointerdown.capture="startPan" @click.capture="guardCanvasClick" @wheel="onCanvasWheel">
   <svg
     class="board-scene"
     :viewBox="`0 0 ${scene.width} ${scene.height}`"
     :style="{ width: `${scene.width * scale}px`, height: `${scene.height * scale}px` }"
     ref="svgElement"
-    role="img"
+    role="group"
+    @pointermove="trackPointer"
     :aria-label="`Схема электрощита: ${scene.devices.length} аппаратов, ${scene.wires.length} соединений`"
   >
     <rect class="scene-plate" x="0" y="0" :width="scene.width" :height="scene.height" rx="3" @click="onPlateClick" />
@@ -540,7 +621,8 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
         role="button"
         tabindex="0"
         @click="onWireClick($event, wire.id)"
-        @keydown.enter="store.selectConnection(wire.id)"
+        @keydown.enter.prevent="store.selectConnection(wire.id)"
+        @keydown.space.prevent="store.selectConnection(wire.id)"
       />
     </g>
 
@@ -559,7 +641,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       @pointerdown="startDeviceDrag($event, device)"
       role="button"
       tabindex="0"
-      :aria-label="`${device.address || 'без адреса'}, ${device.name}`"
+      :aria-label="`${device.address || 'без адреса'}, ${hasCustomMarking(device) ? markingFor(device) + ' · ' : ''}${device.name}`"
       @click="onDeviceClick(device); announce(device.instanceId)"
       @keydown.enter="store.selectedDeviceId = device.instanceId"
     >
@@ -592,8 +674,12 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       />
 
       <g class="scene-device-labels">
+        <title>{{ device.address || 'Без адреса' }} · {{ markingFor(device) }} · {{ device.name }}</title>
         <text class="scene-device-address" :x="device.width / 2" :y="-1.6" text-anchor="middle">{{ device.address || '—' }}</text>
-        <text class="scene-device-name" :x="device.width / 2" :y="device.height + 3.4" text-anchor="middle">{{ device.name }}</text>
+        <text v-if="hasCustomMarking(device)" class="scene-device-marking" :x="device.width / 2" :y="device.height + 3.4" text-anchor="middle" :aria-label="markingFor(device)">
+          <tspan v-for="(line, index) in markingLines(device)" :key="index" :x="device.width / 2" :dy="index ? 2.6 : 0">{{ line }}</tspan>
+        </text>
+        <text v-else class="scene-device-name" :x="device.width / 2" :y="device.height + 3.4" text-anchor="middle">{{ device.name }}</text>
       </g>
     </g>
 
@@ -609,8 +695,13 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
           :class="{
             'is-start': isWireEnd(pendingWire, device, terminal.bus, side, terminal.column),
             'is-hover': isWireEnd(hoveredWire, device, terminal.bus, side, terminal.column),
+            'is-incompatible': pendingWire && pendingWire.bus !== 'aux' && terminal.bus !== 'aux' && pendingWire.bus !== terminal.bus,
           }"
-          :cx="terminal.x" :cy="terminal.y" r="2.6"
+          :cx="terminal.x" :cy="terminal.y" r="3.2"
+          role="button" tabindex="0"
+          :aria-label="`${device.address || device.name}: ${terminal.bus}, зажим ${terminal.label}, ${side === 'top' ? 'сверху' : 'снизу'}`"
+          @keydown.enter.prevent="onTerminalClick(device, terminal.bus, side, terminal.column)"
+          @keydown.space.prevent="onTerminalClick(device, terminal.bus, side, terminal.column)"
           :stroke="wireColor(terminal.bus)"
           :data-terminal="`${device.instanceId}:${terminal.bus}:${side}:${terminal.column}`"
           @pointerenter="hoveredWire = { kind: 'terminal', instanceId: device.instanceId, bus: terminal.bus, side, column: terminal.column }"
@@ -633,7 +724,9 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
         :class="{ 'is-start': pendingWire?.kind === 'bus' && pendingWire.bus === bus.bus }"
         :x="bus.x" :y="bus.y - 1.2" :width="bus.width" :height="bus.height + 2.4"
         :data-bus="bus.bus"
-        :aria-label="bus.title"
+        :aria-label="bus.title" role="button" tabindex="0"
+        @keydown.enter.prevent="onBusClick(bus.bus)"
+        @keydown.space.prevent="onBusClick(bus.bus)"
         @pointerenter="hoveredWire = { kind: 'bus', bus: bus.bus }"
         @pointerleave="hoveredWire = null"
         @click.stop="onBusClick(bus.bus)"
@@ -648,18 +741,10 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
       stroke-width="0.8"
       fill="none"
     />
-    <text
-      v-if="wireRefusal"
-      class="scene-wire-refusal"
-      :x="scene.width / 2" :y="8"
-      text-anchor="middle"
-    >{{ wireRefusal }}</text>
   </svg>
 
-  <BoardWireInspector />
 
-  <p v-if="wireRefusal" class="board-wire-refusal" role="status">{{ wireRefusal }}</p>
-  <p v-if="announced" class="board-issue-note" role="status">{{ announced }}</p>
+
   <ul v-if="generalIssues.length" class="board-general-issues" role="status">
     <li v-for="entry in generalIssues" :key="entry.id">{{ entry.message }}</li>
   </ul>
@@ -669,42 +754,53 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
     ref="addressInput"
     class="board-address-input"
     :aria-label="editing.kind === 'load' ? 'Нагрузка цепи' : `Адрес: ${deviceById(editing.instanceId)?.name ?? 'устройство'}`"
-    :value="editing.value"
-    :style="{ left: `${editing.x * scale}px`, top: `${editing.y * scale}px` }"
+    v-model="editing.value"
+    :style="{ left: `${Math.max(24, ((canvas?.clientWidth ?? 0) - scene.width * scale) / 2) + editing.x * scale}px`, top: `${24 + editing.y * scale}px` }"
     @keydown.enter.prevent="commitEditor"
     @keydown.esc.prevent="cancelAddress"
     @blur="cancelAddress"
     @click.stop
   />
   </div>
+  <p v-if="wireRefusal" class="board-wire-refusal" role="status">{{ wireRefusal }}</p>
+  <p v-if="announced" class="board-issue-note" role="status">{{ announced }}</p>
+  <BoardWireInspector />
+  </div>
 </template>
 
 <style scoped>
+.board-stage { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .board-scene-canvas {
-  /*
-   * The side panels are fixed overlays. The grid reserves 270px and 330px for them, but a fixed
-   * panel is 330px wide and covers the working area anyway, so the board keeps clear of them
-   * itself. These are the widths that actually get covered — not the grid columns, which are
-   * narrower than the panels they were supposed to reserve room for. Without this the board was
-   * drawn edge to edge under both panels, reachable only where neither one covered it.
-   */
-  --panel-overlay-inline: 0px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  padding-inline: var(--panel-overlay-inline);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  background-image: radial-gradient(var(--line) .7px, transparent .7px);
+  background-size: 18px 18px;
 }
-
-.app-shell.panels-open .board-scene-canvas {
-  --panel-overlay-inline: 330px;
-}
-
+.board-scene-canvas.can-pan, .board-scene-canvas.can-pan :deep(*) { cursor: grab; }
+.board-scene-canvas.is-panning, .board-scene-canvas.is-panning :deep(*) { cursor: grabbing; }
+.board-scene-canvas.can-pan { touch-action: none; }
+.board-scene-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.scene-device { touch-action: none; }
 .board-scene {
   display: block;
-  max-width: 100%;
-  height: auto;
+  max-width: none;
+  margin-inline: auto;
   background: var(--board-plate);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / .08);
 }
+.board-wire-guide { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; flex-wrap: wrap; }
+.board-wire-guide small { display: block; color: var(--text-muted); margin-top: 3px; }
+.board-wire-guide label { margin-left: auto; }
+.wire-step { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+.scene-terminal.is-incompatible { opacity: .25; }
+.scene-terminal:focus-visible, .scene-bus-target:focus-visible { outline: none; stroke: var(--accent); stroke-width: 1.2; }
 
 .scene-plate {
   fill: var(--board-plate);
@@ -727,7 +823,7 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 
 .scene-terminal {
   fill: var(--board-slot);
-  fill-opacity: .001;
+  fill-opacity: .7;
   cursor: crosshair;
 }
 
@@ -841,6 +937,9 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 }
 
 .board-issue-note {
+  bottom: 12px;
+  left: 12px;
+  max-width: calc(100% - 36px);
   position: absolute;
   z-index: 3;
   margin: 6px;
@@ -853,6 +952,9 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 }
 
 .board-wire-refusal {
+  bottom: 12px;
+  left: 12px;
+  max-width: calc(100% - 36px);
   position: absolute;
   z-index: 3;
   margin: 6px;
@@ -912,15 +1014,21 @@ const startDeviceDrag = (event: PointerEvent, device: BoardSpace['devices'][numb
 }
 
 .scene-device-address,
+.scene-device-marking,
 .scene-device-name {
   /* Type in millimetres, so the marking keeps its size on the panel however the board is scaled. */
   font-family: var(--mono);
-  fill: var(--text);
+  fill: #263c30;
 }
 
 .scene-device-address {
   font-size: 2.6px;
   font-weight: 700;
+}
+
+.scene-device-marking {
+  font-size: 1.9px;
+  font-weight: 600;
 }
 
 .scene-device-name {

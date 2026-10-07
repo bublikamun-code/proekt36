@@ -87,7 +87,6 @@ export interface BoardScene {
   geometry: PanelGeometry
 }
 
-const busX: Record<BusType, number> = { L: 2.5, N: 7, PE: 11.5 }
 
 /**
  * Millimetres between two wires of one bundle, so none of them is drawn on top of another.
@@ -221,35 +220,31 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
   const plans: WirePlan[] = []
   for (const connection of project.connections ?? []) {
     const target = byId.get(connection.toDeviceId)
-    const to = terminalPoint(connection.toDeviceId, connection.fromBus, 'top', connection.terminal)
+    const to = terminalPoint(connection.toDeviceId, connection.fromBus, connection.toSide ?? 'top', connection.terminal)
     if (!to || !target) continue
     // A connection that names another device is a cascade: the feed leaves that device instead of
     // the rail. Those wires are drawn by a different shape, because the same shape would make a
     // cascade and a direct feed indistinguishable.
-    const fromTerminal = connection.fromDeviceId ? terminalPoint(connection.fromDeviceId, connection.fromBus, 'bottom', connection.fromTerminal) : null
-    const sourceDevice = connection.fromDeviceId ? byId.get(connection.fromDeviceId) : undefined
-    // A fork is a rail in its own right: it has no clamps to leave from, and the wire leaves the
-    // bottom edge of the bar. Treating it as a clamp is what put the start of such a wire in the
-    // left margin.
-    const forkStart = !fromTerminal && sourceDevice?.mount === 'busbar'
-      ? { x: sourceDevice.x + sourceDevice.width / 2, y: sourceDevice.y + sourceDevice.height }
-      : null
+    const fromTerminal = connection.fromDeviceId ? terminalPoint(connection.fromDeviceId, connection.fromBus, connection.fromSide ?? 'bottom', connection.fromTerminal) : null
+    // A missing or incompatible source never becomes a feed from the panel bus.
+    if (connection.fromDeviceId && !fromTerminal) continue
+    if (connection.kind === 'busbar' && !connection.fromDeviceId) continue
+    if (connection.kind === 'bus' && connection.fromDeviceId) continue
     const rail = railByBus.get(connection.fromBus)
+    if (!rail) continue
     const tapX = descentFor(to.x, target.row)
-    const start = fromTerminal ?? forkStart ?? { x: tapX, y: rail?.tapY ?? busX[connection.fromBus] }
+    const start = fromTerminal ?? { x: tapX, y: rail.tapY }
     plans.push({
       connection,
       to,
       start,
-      descentX: fromTerminal || forkStart ? undefined : tapX,
+      descentX: fromTerminal ? undefined : tapX,
       source: fromTerminal ? 'device' : 'busbar',
-      fromName: fromTerminal || forkStart ? deviceName(connection.fromDeviceId) : BUS_SHORT_TITLE[connection.fromBus],
+      fromName: fromTerminal ? deviceName(connection.fromDeviceId) : BUS_SHORT_TITLE[connection.fromBus],
       bundle: fromTerminal
         ? `cascade:${connection.fromDeviceId}:${connection.toDeviceId}:${connection.fromBus}`
-        : forkStart
-          ? `fork:${connection.fromDeviceId}:${connection.fromBus}`
-          : `rail:${connection.fromBus}:${target.row}`,
-      axis: fromTerminal || forkStart ? 'y' : 'x',
+        : `rail:${connection.fromBus}:${target.row}`,
+      axis: fromTerminal ? 'y' : 'x',
     })
   }
 
@@ -271,8 +266,27 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
     const spread = (bundle.length - 1) * WIRE_CHANNEL_MM
     for (const [index, plan] of bundle.entries()) {
       const offset = spread / 2 - index * WIRE_CHANNEL_MM
-      const start = plan.axis === 'x' ? { x: plan.start.x + offset, y: plan.start.y } : { x: plan.start.x, y: plan.start.y + offset }
+      // A bundle may move its route, never its clamp.
+      const rail = railByBus.get(plan.connection.fromBus)
+      const start = plan.axis === 'x'
+        ? { x: Math.max(rail?.x ?? 0, Math.min((rail?.x ?? 0) + (rail?.width ?? geometry.plateWidthMm), plan.start.x + offset)), y: plan.start.y }
+        : plan.start
       const connection = plan.connection
+      const target = byId.get(connection.toDeviceId)!
+      const sourceDevice = connection.fromDeviceId ? byId.get(connection.fromDeviceId) : undefined
+      const entryY = connection.toSide === 'bottom' ? target.y + target.height + 3 : target.y - 3
+      const exitY = sourceDevice
+        ? connection.fromSide === 'top' ? sourceDevice.y - 3 : sourceDevice.y + sourceDevice.height + 3
+        : undefined
+      // Use a free vertical boundary across every row traversed by this run.
+      const lowY = Math.min(exitY ?? start.y, entryY)
+      const highY = Math.max(exitY ?? start.y, entryY)
+      const boundaries = Array.from({ length: geometry.capacity + 1 }, (_, slot) => railStartX + slot * pitch)
+      boundaries.sort((a, b) => Math.abs(a - plan.to.x) - Math.abs(b - plan.to.x))
+      const channel = boundaries.find((x) => !devices.some((device) =>
+        device.y < highY && device.y + device.height > lowY
+        && x > device.x + BODY_CLEARANCE_MM && x < device.x + device.width - BODY_CLEARANCE_MM)) ?? railStartX
+      const needsChannel = sourceDevice || connection.toSide === 'bottom'
       wires.push({
         id: connection.id,
         bus: connection.fromBus,
@@ -288,7 +302,8 @@ export const buildBoardScene = (project: PanelProject, definitions: Map<string, 
         toName: deviceName(connection.toDeviceId),
         from: { x: start.x, y: start.y },
         to: plan.to,
-        d: routeWire({ from: start, to: plan.to, source: plan.source, stubMm: 2.4, descentX: plan.descentX }),
+        d: routeWire({ from: start, to: plan.to, source: plan.source, stubMm: 2.4,
+          descentX: needsChannel ? channel : plan.descentX, entryY, exitY, fromSide: connection.fromSide, toSide: connection.toSide }),
       })
     }
   }

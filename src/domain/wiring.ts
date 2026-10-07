@@ -1,5 +1,5 @@
 import { faceSocketGrid, getDeviceFaceMetrics, type DeviceFaceMetrics, type FacePocket } from './faceMetrics'
-import type { BusType, DeviceDefinition } from './types'
+import type { BusType, Connection, DeviceDefinition, PlacedDevice } from './types'
 
 /**
  * Where a wire physically attaches, and how it gets there.
@@ -26,7 +26,7 @@ export type TerminalBus = BusType | 'aux'
  */
 export const WIRE_COLOR = {
   L: '#a44d37',
-  N: '#8a9599',
+  N: '#428bc1',
   PE: '#47a067',
 } as const
 
@@ -53,15 +53,7 @@ export interface FaceTerminals {
   heightMm: number
 }
 
-/**
- * Which bus each column belongs to.
- *
- * A single-pole breaker is the common case and the one that has to be right: two terminals, line
- * and neutral. A multi-pole device has one line per pole and a single shared neutral at the end,
- * which is why the neutral is the last column and not "the second column of each pole". Getting
- * this wrong is not cosmetic — it is the difference between a wire diagram a person can read and
- * one they learn to ignore.
- */
+/** Bus carried by each physical column, based on the device category and pole layout. */
 export const terminalBus = (product: DeviceDefinition, column: number, columns: number): TerminalBus => {
   if (columns <= 0) return 'aux'
   const category = product.category
@@ -100,6 +92,11 @@ const makeTerminal = (pocket: FacePocket, side: 'top' | 'bottom', product: Devic
  * after them, one per column.
  */
 export const faceTerminals = (product: DeviceDefinition, metrics: DeviceFaceMetrics = getDeviceFaceMetrics(product)): FaceTerminals => {
+  if (product.category === 'busbar') {
+    const terminal: Terminal = { side: 'bottom', column: 0, label: product.bus, bus: product.bus,
+      x: metrics.widthMm / 2, y: metrics.heightMm, width: 4, height: 2 }
+    return { top: [], bottom: [terminal], widthMm: metrics.widthMm, heightMm: metrics.heightMm }
+  }
   const pockets = metrics.pockets
   if (!pockets.length) {
     // A terminal block has no top and bottom clamp rows; its connection points are the screws on
@@ -141,29 +138,53 @@ export const faceTerminals = (product: DeviceDefinition, metrics: DeviceFaceMetr
   }
 }
 
-/**
- * Whether the device has a clamp of its own for this bus.
- *
- * `terminalForBus` falls back to the first column so that a device without, say, an earth clamp is
- * still connectable — but a wire drawn into a clamp that does not carry that bus says something the
- * panel does not contain. The rules ask this question and report the difference, instead of letting
- * the drawing be the only evidence.
- */
+/** Whether at least one physical clamp accepts this bus. */
 export const hasTerminalForBus = (product: DeviceDefinition, bus: BusType, metrics?: DeviceFaceMetrics): boolean =>
-  faceTerminals(product, metrics ?? getDeviceFaceMetrics(product)).top.some((terminal) => terminal.bus === bus)
+  Object.values(faceTerminals(product, metrics ?? getDeviceFaceMetrics(product))).some((row) =>
+    Array.isArray(row) && row.some((terminal: Terminal) => terminal.bus === bus || terminal.bus === 'aux'))
 
-/** The terminal a wire of this bus should use: the first column carrying it. */
+/** Resolve a physical clamp without moving an explicitly selected endpoint. */
 export const terminalForBus = (terminals: FaceTerminals, bus: BusType, side: 'top' | 'bottom', column?: number): Terminal | undefined => {
-  const row = side === 'top' ? terminals.top : terminals.bottom
-  // A named column wins over the bus: a terminal block has six screws of the same bus, and only
-  // the person who wired it knows that this circuit is on the third.
-  if (column !== undefined && row[column]) return row[column]
-  const exact = row.find((terminal) => terminal.bus === bus)
-  if (exact) return exact
-  // A device without a neutral terminal — a busbar, an auxiliary contact — still has to be
-  // connectable, so the first column stands in. The fallback is visible in the face: the terminal
-  // that receives the wire is the one drawn under it.
-  return row[0]
+  if ((side !== 'top' && side !== 'bottom') || !['L', 'N', 'PE'].includes(bus)) return undefined
+  const row = terminals[side]
+  const compatible = (terminal: Terminal) => terminal.bus === bus || terminal.bus === 'aux'
+  if (column !== undefined) {
+    const terminal = row.find((candidate) => candidate.column === column)
+    return terminal && compatible(terminal) ? terminal : undefined
+  }
+  // Legacy projects without a column may choose a compatible clamp on the saved side.
+  return row.find((terminal) => terminal.bus === bus) ?? row.find((terminal) => terminal.bus === 'aux')
+}
+
+/** Whether a valid conductor ends on this exact physical clamp, in either drawing direction. */
+export const connectionTouchesTerminal = (
+  connection: Connection,
+  devices: PlacedDevice[],
+  definitions: Map<string, DeviceDefinition>,
+  instanceId: string,
+  bus: BusType,
+  side: 'top' | 'bottom' = 'top',
+  column?: number,
+): boolean => {
+  if (connection.fromBus !== bus) return false
+  if (connection.kind === 'bus' && connection.fromDeviceId) return false
+  if (connection.kind === 'busbar' && !connection.fromDeviceId) return false
+  if (connection.kind !== undefined && !['bus', 'busbar', 'circuit'].includes(connection.kind)) return false
+  const resolve = (id: string, terminalSide: 'top' | 'bottom', terminalColumn?: number) => {
+    const device = devices.find((item) => item.instanceId === id)
+    const product = device && definitions.get(device.productId)
+    return product ? terminalForBus(faceTerminals(product), bus, terminalSide, terminalColumn) : undefined
+  }
+  const requested = resolve(instanceId, side, column)
+  const target = resolve(connection.toDeviceId, connection.toSide ?? 'top', connection.terminal)
+  const source = connection.fromDeviceId
+    ? resolve(connection.fromDeviceId, connection.fromSide ?? 'bottom', connection.fromTerminal)
+    : undefined
+  if (!requested || !target || (connection.fromDeviceId && !source)) return false
+  if (connection.fromDeviceId === connection.toDeviceId && source?.side === target.side && source.column === target.column) return false
+  const matches = (id: string | undefined, terminal: Terminal | undefined) =>
+    id === instanceId && terminal?.side === requested.side && terminal.column === requested.column
+  return matches(connection.toDeviceId, target) || matches(connection.fromDeviceId, source)
 }
 
 export interface WirePoint {
@@ -204,6 +225,10 @@ export interface RouteOptions {
    * rather than passed in from the caller that happened to know.
    */
   upward?: boolean
+  fromSide?: 'top' | 'bottom'
+  toSide?: 'top' | 'bottom'
+  exitY?: number
+  entryY?: number
 }
 
 /**
@@ -216,9 +241,14 @@ export interface RouteOptions {
  * path: a wire that leaves the rail at a slightly different millimetre is still a wire to that
  * clamp, while a route bent around an offset would no longer be the same shape for every wire.
  */
-export const routeWire = ({ from, to, source, stubMm = 2.2, upward, descentX }: RouteOptions) => {
+export const routeWire = ({ from, to, source, stubMm = 2.2, upward, descentX, fromSide, toSide, exitY: sourceExit, entryY: targetEntry }: RouteOptions) => {
   const stub = Math.max(0.8, stubMm)
-  const entryY = to.y - to.height / 2 - stub
+  const entryY = targetEntry ?? (to.y + (toSide === 'bottom' ? 1 : -1) * (to.height / 2 + stub))
+  if (source === 'device' && (sourceExit !== undefined || fromSide !== undefined || toSide !== undefined)) {
+    const exitY = sourceExit ?? from.y + (fromSide === 'top' ? -stub : stub)
+    const channel = descentX ?? (from.x + to.x) / 2
+    return `M ${round(from.x)} ${round(from.y)} V ${round(exitY)} H ${round(channel)} V ${round(entryY)} H ${round(to.x)} L ${round(to.x)} ${round(to.y)}`
+  }
   if (source === 'busbar') {
     // Along the rail, then straight down into the terminal from above.
     const descent = descentX ?? to.x
@@ -239,3 +269,18 @@ export const routeWire = ({ from, to, source, stubMm = 2.2, upward, descentX }: 
 }
 
 const round = (value: number) => Math.round(value * 100) / 100
+
+/** Physical identity includes both clamps; clicking in reverse creates the same conductor. */
+export const connectionKey = (connection: Connection, devices: PlacedDevice[], definitions: Map<string, DeviceDefinition>) => {
+  const endpoint = (id: string, side: 'top' | 'bottom', column?: number) => {
+    const device = devices.find((item) => item.instanceId === id)
+    const product = device && definitions.get(device.productId)
+    const terminal = product ? terminalForBus(faceTerminals(product), connection.fromBus, side, column) : undefined
+    return `${id}:${side}:${column ?? terminal?.column ?? 0}`
+  }
+  const from = connection.fromDeviceId
+    ? endpoint(connection.fromDeviceId, connection.fromSide ?? 'bottom', connection.fromTerminal)
+    : `bus:${connection.fromBus}`
+  const to = endpoint(connection.toDeviceId, connection.toSide ?? 'top', connection.terminal)
+  return JSON.stringify([connection.fromBus, ...[from, to].sort()])
+}

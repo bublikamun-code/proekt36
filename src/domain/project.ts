@@ -89,6 +89,7 @@ export const normalizeCircuit = (value: unknown): Circuit => {
     power: asNumber(raw.power, 0, 0, 10000000),
     phase: asPhase(raw.phase),
     protectionDeviceId: asText(raw.protectionDeviceId),
+    ...(asText(raw.targetDeviceId) ? { targetDeviceId: asText(raw.targetDeviceId) } : {}),
     color: asText(raw.color, '#c65c3b'),
     wireCrossSection: asNumber(raw.wireCrossSection, 1.5, 0, 1000),
     note: asText(raw.note),
@@ -118,6 +119,8 @@ export const normalizeConnection = (value: unknown): Connection => {
     // never heard of the field keeps the landing it always had.
     terminal: raw.terminal === undefined ? undefined : asInteger(raw.terminal, 0, 0, 16),
     fromTerminal: raw.fromTerminal === undefined ? undefined : asInteger(raw.fromTerminal, 0, 0, 16),
+    fromSide: raw.fromSide === 'top' || raw.fromSide === 'bottom' ? raw.fromSide : undefined,
+    toSide: raw.toSide === 'top' || raw.toSide === 'bottom' ? raw.toSide : undefined,
   }
 }
 
@@ -217,8 +220,10 @@ export const autoNumber = (devices: PlacedDevice[], definitions: Map<string, Dev
     const product = definitions.get(item.productId)
     const prefix = product?.category === 'RCCB' ? 'QFD' : product?.category === 'RCBO' ? 'QFI' : product?.category === 'SPD' ? 'SPD' : product?.category === 'busbar' ? 'BUS' : product?.category === 'terminals' ? 'XT' : 'QF'
     const number = (counters.get(prefix) ?? 0) + 1
+    counters.set(prefix, number)
     const address = `${prefix}${String(number).padStart(2, '0')}`
-    return { ...item, address, marking: item.marking || address }
+    const automaticMarking = !item.marking?.trim() || item.marking.trim() === item.address.trim()
+    return { ...item, address, marking: automaticMarking ? address : item.marking }
   })
 }
 

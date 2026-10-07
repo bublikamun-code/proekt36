@@ -13,14 +13,15 @@ import type { DeviceDefinition, PanelProject } from './types'
  * it says so in the same words as every other page that prints a specification.
  */
 
-/** A circuit name fits this at the label's type size; longer is trimmed rather than wrapped. */
+/** Beyond this length the print sheet warns that the label needs more vertical space. */
 export const LABEL_TEXT_MAX = 22
 
 export interface LabelEntry {
   instanceId: string
-  /** What goes on the label. Empty when the position has no address yet. */
+  address: string
+  /** Full user marking, with address/circuit fallback. */
   text: string
-  /** The untrimmed text, kept so the sheet can explain what was shortened. */
+  /** Kept for consumers that need the original label text. */
   fullText: string
   position: string
   row: number
@@ -38,6 +39,7 @@ export interface LabelSheet {
   /** Positions with no address at all. */
   unmarked: number
   duplicated: number
+  longLabels: number
 }
 
 export const positionWord = (count: number) => {
@@ -49,19 +51,9 @@ export const positionWord = (count: number) => {
   return 'позиций'
 }
 
-const trim = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1)}…` : value)
-
-/**
- * The address as it will be written on the panel.
- *
- * What the user typed for the position wins, because it is the one string on this screen they
- * deliberately entered. The circuit name fills the gap when a position has no address of its own:
- * a bare position number would have to be looked up in the project to mean anything, while
- * «Розетки кухни» means what it says. A position that protects nothing — a main breaker, an
- * incoming device — keeps its address.
- */
+/** The user marking and the identifying address are separate, even when initially equal. */
 export const labelTextFor = (device: PanelProject['devices'][number], circuitName: string | undefined) => {
-  const written = (device.marking || device.address || '').trim()
+  const written = device.marking?.trim() || device.address?.trim() || ''
   return written || (circuitName?.trim() ?? '')
 }
 
@@ -82,14 +74,15 @@ export const buildLabelSheet = (project: PanelProject, definitions: Map<string, 
       const fullText = labelTextFor(device, circuitByDevice.get(device.instanceId))
       return {
         instanceId: device.instanceId,
-        text: trim(fullText, LABEL_TEXT_MAX),
+        address: device.address.trim(),
+        text: fullText,
         fullText,
         position: `${device.row + 1}.${device.slot + 1}`,
         row: device.row,
         slot: device.slot,
         name: product?.name || 'Неизвестное изделие',
         brand: product?.brand || '',
-        marked: fullText.length > 0,
+        marked: device.address.trim().length > 0,
         duplicated: false,
       }
     })
@@ -97,14 +90,15 @@ export const buildLabelSheet = (project: PanelProject, definitions: Map<string, 
     .sort((a, b) => a.row - b.row || a.slot - b.slot || a.instanceId.localeCompare(b.instanceId))
 
   const seen = new Map<string, number>()
-  for (const label of labels) if (label.marked) seen.set(label.fullText, (seen.get(label.fullText) ?? 0) + 1)
-  for (const label of labels) if (label.marked && (seen.get(label.fullText) ?? 0) > 1) label.duplicated = true
+  for (const label of labels) if (label.marked) seen.set(label.address, (seen.get(label.address) ?? 0) + 1)
+  for (const label of labels) if (label.marked && (seen.get(label.address) ?? 0) > 1) label.duplicated = true
 
   return {
     labels,
     title: project.name,
     unmarked: labels.filter((label) => !label.marked).length,
     duplicated: labels.filter((label) => label.duplicated).length,
+    longLabels: labels.filter((label) => label.fullText.length > LABEL_TEXT_MAX).length,
   }
 }
 
@@ -113,6 +107,7 @@ export const labelSheetWarning = (sheet: LabelSheet) => {
   const parts: string[] = []
   if (sheet.unmarked) parts.push(`${sheet.unmarked} ${positionWord(sheet.unmarked)} без адреса`)
   if (sheet.duplicated) parts.push(`${sheet.duplicated} ${positionWord(sheet.duplicated)} с повторяющимся адресом`)
-  if (!parts.length) return ''
-  return `Лист неполон: ${parts.join(', ')}. Проставьте адреса на доске и распечатайте заново — этикетки без адреса или с повтором будут перепутаны при монтаже.`
+  const addressWarning = parts.length ? `Лист неполон: ${parts.join(', ')}. Проставьте уникальные адреса на доске перед печатью.` : ''
+  const lengthWarning = sheet.longLabels ? 'Длинные подписи перенесены на несколько строк. Проверьте высоту этикеток перед печатью.' : ''
+  return [addressWarning, lengthWarning].filter(Boolean).join(' ')
 }

@@ -158,11 +158,14 @@ test.describe('провода доски', () => {
     await expect(inspector.locator('.board-wire-route')).toContainText('→')
     await expect(page.locator(`.scene-wire-hit[data-wire-id="${wireId}"]`)).toHaveClass(/is-selected/)
 
-    // Changing the bus repaints the wire: the colour on the board is not decoration, it is how a
-    // reader tells live, neutral and earth apart on a printout that lost its colour anyway.
+    // A conductor cannot be reassigned to a bus its physical clamp does not carry.
     await inspector.getByLabel('Шина провода').click()
     await page.getByRole('option', { name: /^PE/ }).click()
-    await expect(page.locator(`.scene-wire[data-wire-id="${wireId}"]`)).toHaveClass(/scene-wire-pe/)
+    await expect(page.getByRole('alert')).toContainText('нет подключения PE')
+    await expect(page.locator(`.scene-wire[data-wire-id="${wireId}"]`)).toHaveClass(/scene-wire-l/)
+    await inspector.getByLabel('Толщина, мм').fill('3')
+    await inspector.getByLabel('Толщина, мм').press('Tab')
+    await expect(page.locator(`.scene-wire[data-wire-id="${wireId}"]`)).toHaveAttribute('stroke-width', '3')
     await page.getByRole('button', { name: /Отменить/ }).click()
 
     // Delete removes the wire and nothing else; undo brings it back.

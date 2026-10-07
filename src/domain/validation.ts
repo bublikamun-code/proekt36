@@ -1,7 +1,7 @@
 import { circuitLoadCheck, conductorCheck, currentForPowerA, PHASE_IMBALANCE_LIMIT_PERCENT, phaseBalance, phaseImbalance, protectionLoads } from './electrical'
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
 import { pricing } from './pricing'
-import { hasTerminalForBus } from './wiring'
+import { connectionKey as physicalConnectionKey, connectionTouchesTerminal, faceTerminals, terminalForBus } from './wiring'
 import { VALIDATION_REVISION } from './projectSchema'
 import type { DeviceDefinition, PanelProject, ValidationIssue } from './types'
 
@@ -80,7 +80,7 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
   const connectionKeys = new Set<string>()
   // Face geometry per product, not per wire: the same breaker appears in every connection of every
   // circuit, and rebuilding its clamps for each one is work the board has already done.
-  const terminalBusAvailable = new Map<string, Map<string, boolean>>()
+  const terminalsByProduct = new Map<string, ReturnType<typeof faceTerminals>>()
   for (const connection of project.connections ?? []) {
     if (seenConnectionIds.has(connection.id)) issues.push(issue(`duplicate-connection-${connection.id}`, 'error', 'Повторяется идентификатор подключения', `Подключение «${connection.label || connection.id}» встречается несколько раз.`, 'project.ids.duplicate', { kind: 'connection', id: connection.id }))
     seenConnectionIds.add(connection.id)
@@ -97,35 +97,58 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     if (!project.devices.some((device) => device.instanceId === connection.toDeviceId)) issues.push(issue(`connection-device-${connection.id}`, 'error', 'Подключение без устройства', `Подключение «${connection.label || connection.id}» ссылается на удалённое устройство.`, 'connection.device.missing', { connectionId: connection.id, toDeviceId: connection.toDeviceId }, connection.toDeviceId))
     if (!['L', 'N', 'PE'].includes(connection.fromBus)) issues.push(issue(`connection-bus-${connection.id}`, 'error', 'Неизвестная шина', `В подключении «${connection.label || connection.id}» указана неизвестная шина. Выберите L, N или PE.`, 'connection.bus.unknown', { connectionId: connection.id, fromBus: connection.fromBus }))
     if (!connection.label.trim()) issues.push(issue(`connection-label-${connection.id}`, 'warning', 'Подключение без подписи', 'Добавьте понятную подпись к линии на схеме.', 'connection.label.missing', { connectionId: connection.id }))
-    // A wire whose bus has no clamp of its own is drawn into the first column there is, so that a
-    // device without, say, an earth clamp can still be fed. The drawing then shows a conductor in a
-    // clamp that does not carry it, and only the drawing knows that — so it is said out loud.
-    const terminalProduct = project.devices.find((device) => device.instanceId === connection.toDeviceId)
-    const terminalDefinition = terminalProduct ? definitions.get(terminalProduct.productId) : undefined
-    if (terminalDefinition && !terminalBusAvailable.has(terminalDefinition.id)) {
-      terminalBusAvailable.set(terminalDefinition.id, new Map([
-        ['L', hasTerminalForBus(terminalDefinition, 'L')],
-        ['N', hasTerminalForBus(terminalDefinition, 'N')],
-        ['PE', hasTerminalForBus(terminalDefinition, 'PE')],
-      ]))
+    // Validate both physical endpoints with the same resolution used by the drawing and tools.
+    // A bad reference remains in the project for repair, but is never moved to another clamp.
+    for (const [endpoint, id, side, column] of [
+      ['to', connection.toDeviceId, connection.toSide ?? 'top', connection.terminal],
+      ['from', connection.fromDeviceId, connection.fromSide ?? 'bottom', connection.fromTerminal],
+    ] as const) {
+      if (!id) continue
+      const device = project.devices.find((item) => item.instanceId === id)
+      const context = { connectionId: connection.id, endpoint, side, terminal: column, fromBus: connection.fromBus }
+      if (!device) {
+        if (endpoint === 'from' && connection.kind !== 'busbar') {
+          issues.push(issue(`connection-source-missing-${connection.id}`, 'error', 'Устройство-источник удалено',
+            `Подключение «${connection.label || connection.id}» ссылается на удалённый аппарат-источник. Выберите источник заново.`,
+            'connection.source.missing', { ...context, fromDeviceId: id }, id))
+        }
+        continue
+      }
+      const product = definitions.get(device.productId)
+      if (!product) {
+        issues.push(issue(`connection-product-missing-${connection.id}-${endpoint}`, 'error', 'Нельзя определить зажимы устройства',
+          `Подключение «${connection.label || connection.id}»: товар отсутствует в каталоге. Восстановите товар или выберите другой аппарат.`,
+          'connection.product.missing', { ...context, productId: device.productId }, id))
+        continue
+      }
+      let terminals = terminalsByProduct.get(product.id)
+      if (!terminals) {
+        terminals = faceTerminals(product)
+        terminalsByProduct.set(product.id, terminals)
+      }
+      if (side !== 'top' && side !== 'bottom') {
+        issues.push(issue(`connection-side-${connection.id}-${endpoint}`, 'error', 'Неизвестная сторона подключения',
+          `Подключение «${connection.label || connection.id}»: выберите верхнюю или нижнюю сторону аппарата.`,
+          'connection.terminal.side.invalid', context, id))
+        continue
+      }
+      const row = terminals[side]
+      const selected = column === undefined ? undefined : row.find((terminal) => terminal.column === column)
+      if ((column !== undefined && !selected) || row.length === 0) {
+        issues.push(issue(`connection-terminal-${connection.id}-${endpoint}`, 'error', 'Зажима у аппарата нет',
+          `Подключение «${connection.label || connection.id}»: ${column === undefined ? 'зажим' : `зажим ${column + 1}`} (${side === 'top' ? 'сверху' : 'снизу'}) отсутствует. Выберите существующий зажим.`,
+          'connection.terminal.missing', context, id))
+      } else if (selected && selected.bus !== 'aux' && selected.bus !== connection.fromBus) {
+        issues.push(issue(`connection-terminal-bus-${connection.id}-${endpoint}`, 'error', 'Шина не соответствует зажиму',
+          `Провод ${connection.fromBus} указывает на зажим ${selected.bus}. Выберите совместимый зажим.`,
+          'connection.terminal.bus.mismatch', { ...context, terminalBus: selected.bus }, id))
+      } else if (!terminalForBus(terminals, connection.fromBus, side, column)) {
+        issues.push(issue(`connection-clamp-${connection.id}-${endpoint}`, 'error', 'У аппарата нет зажима этой шины',
+          `Подключение «${connection.label || connection.id}»: у «${product.name}» нет зажима ${connection.fromBus} ${side === 'top' ? 'сверху' : 'снизу'}. Выберите совместимый аппарат или другую сторону.`,
+          'connection.clamp.bus.missing', { ...context, productId: product.id }, id))
+      }
     }
-    const hasClamp = terminalBusAvailable.get(terminalDefinition?.id ?? '')?.get(connection.fromBus)
-    if (hasClamp === false) issues.push(issue(`connection-clamp-${connection.id}`, 'warning', 'У аппарата нет зажима этой шины', `Подключение «${connection.label || connection.id}»: у «${terminalDefinition!.name}» нет зажима ${connection.fromBus}, провод приведён к первому. Проверьте, где должна быть эта шина.`, 'connection.clamp.bus.missing', { connectionId: connection.id, fromBus: connection.fromBus, productId: terminalDefinition!.id }, connection.toDeviceId))
-    // A named terminal that the device does not have. Six screws are drawn on a terminal block, so a
-    // wire pointing at the ninth one is a file that disagrees with the panel in front of it, and the
-    // wire is drawn where the first screw is because there is nothing else to draw.
-    if (connection.terminal !== undefined && terminalDefinition && terminalDefinition.category === 'terminals') {
-      const terminalCount = Math.max(2, Math.min(terminalDefinition.terminalCount || 6, 10))
-      if (connection.terminal >= terminalCount) issues.push(issue(`connection-terminal-${connection.id}`, 'warning', 'Зажима у аппарата нет', `Подключение «${connection.label || connection.id}» указывает зажим ${connection.terminal + 1}, а у «${terminalDefinition.name}» их ${terminalCount}. Провод приведён к первому зажиму.`, 'connection.terminal.missing', { connectionId: connection.id, terminal: connection.terminal, terminalCount }, connection.toDeviceId))
-    }
-    // The terminal is part of what makes a wire this wire. Two earth wires from the same bus to the
-    // same terminal block are not a duplicate of each other when they land on different screws —
-    // which is exactly what a six-screw block exists for, and what the key used to forbid.
-    const connectionKey = connection.kind === 'busbar'
-      ? `busbar:${connection.fromDeviceId ?? ''}:${connection.toDeviceId}:${connection.fromTerminal ?? 0}`
-      : connection.kind === 'bus'
-        ? `bus:${connection.fromBus}:${connection.toDeviceId}:${connection.terminal ?? 0}`
-        : `circuit:${connection.circuitId}:${connection.fromBus}:${connection.toDeviceId}:${connection.terminal ?? 0}`
+    const connectionKey = physicalConnectionKey(connection, project.devices, definitions)
     if (connectionKeys.has(connectionKey)) issues.push(issue(`connection-duplicate-${connection.id}`, 'warning', 'Повторяется подключение', `В цепи «${circuit?.name ?? connection.circuitId}» уже есть такая же линия.`, 'connection.duplicate', { connectionKey }))
     connectionKeys.add(connectionKey)
     if (connection.thickness <= 0) issues.push(issue(`connection-thickness-${connection.id}`, 'warning', 'Некорректная толщина линии', `В подключении «${connection.label || connection.id}» укажите толщину больше нуля.`, 'connection.thickness.invalid', { connectionId: connection.id }))
@@ -145,11 +168,29 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     if (project.settings.phase === 1 && circuit.phase !== 1) issues.push(issue(`circuit-phase-${circuit.id}`, 'error', 'Фаза цепи не совпадает с сетью', `${circuit.name} назначена на L${circuit.phase}, а проект однофазный. Укажите L1.`, 'circuit.phase.mismatch', { phase: circuit.phase, projectPhase: project.settings.phase }))
     if (project.settings.phase === 1 && circuit.current > project.settings.inputCurrent) issues.push(issue(`circuit-input-current-${circuit.id}`, 'warning', 'Ток цепи выше вводного', `${circuit.name}: расчётный ток ${circuit.current} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту и нагрузку.`, 'circuit.current.input.preliminary', { current: circuit.current, inputCurrent: project.settings.inputCurrent }))
 
-    const buses = new Set((project.connections ?? []).filter((connection) => carriesCircuit(connection) && connection.circuitId === circuit.id).map((connection) => connection.fromBus))
+    const connections = project.connections ?? []
+    const targetDeviceId = circuit.targetDeviceId
+      ?? connections.find((connection) => connection.circuitId === circuit.id)?.toDeviceId
+      ?? circuit.protectionDeviceId
+    if (circuit.targetDeviceId !== undefined && !project.devices.some((device) => device.instanceId === circuit.targetDeviceId)) {
+      issues.push(issue(`circuit-target-${circuit.id}`, 'error', 'Устройство цепи отсутствует',
+        `Для цепи «${circuit.name}» не найден аппарат подключения. Выберите аппарат заново.`,
+        'circuit.target.missing', { circuitId: circuit.id, targetDeviceId: circuit.targetDeviceId }, circuit.targetDeviceId))
+    }
+    const connected = connections.filter((connection) => {
+      // Historic circuit lines remain associated, provided both saved contacts still resolve.
+      const belongsToCircuit = carriesCircuit(connection) && connection.circuitId === circuit.id
+        && connectionTouchesTerminal(connection, project.devices, definitions, connection.toDeviceId,
+          connection.fromBus, connection.toSide ?? 'top', connection.terminal)
+      // A shared feed need not own this circuitId, but must touch its actual top input clamp.
+      return belongsToCircuit || connectionTouchesTerminal(connection, project.devices, definitions,
+        targetDeviceId, connection.fromBus)
+    })
+    const buses = new Set(connected.map((connection) => connection.fromBus))
     for (const bus of ['L', 'N', 'PE'] as const) {
       if (!buses.has(bus)) issues.push(issue(`circuit-bus-missing-${bus.toLowerCase()}-${circuit.id}`, 'info', `Предварительно: нет шины ${bus}`, `У цепи «${circuit.name}» не найдено подключение ${bus}. Это предварительная проверка комплектности, а не нормативное заключение.`, 'circuit.bus.completeness.preliminary', { circuitId: circuit.id, bus }))
     }
-    if (!project.connections?.some((connection) => carriesCircuit(connection) && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
+    if (!connected.length) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
 
     // A conductor is protected against overload by the same device as its circuit, so the
     // declared cross-section is compared with the rating of that device, not with the load.

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from '../src/data/demoProject'
 import { workspaceCatalog } from '../src/data/catalog'
-import { buildLabelSheet, labelSheetWarning, LABEL_TEXT_MAX, positionWord } from '../src/domain/labelSheet'
+import { buildLabelSheet, labelSheetWarning, positionWord } from '../src/domain/labelSheet'
+import { autoNumber } from '../src/domain/project'
 import type { PanelProject } from '../src/domain/types'
 
 const definitions = new Map(workspaceCatalog.map((product) => [product.id, product]))
@@ -38,7 +39,7 @@ describe('лист маркировки', () => {
       device({ instanceId: 'a', address: '', marking: '' }),
     ], [{ id: 'c1', name: 'Кухня', loadName: 'Кухня', current: 16, power: 0, phase: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
     expect(filled.labels[0]!.text).toBe('Кухня')
-    expect(filled.unmarked).toBe(0)
+    expect(filled.unmarked).toBe(1)
   })
 
   it('считает позиции без адреса и повторы и говорит об этом прямо', () => {
@@ -59,15 +60,40 @@ describe('лист маркировки', () => {
     expect(labelSheetWarning(sheet)).toBe('')
   })
 
-  it('укорочает длинное название, но помнит исходное', () => {
+  it('сохраняет длинное название целиком и предупреждает о переносе', () => {
     const long = 'Розетки кухни, холодильник и посудомоечная машина'
     const built = buildLabelSheet(withDevices([
       device({ instanceId: 'a', address: '', marking: '' }),
     ], [{ id: 'c1', name: long, loadName: long, current: 16, power: 0, phase: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
     const label = built.labels[0]!
-    expect(label.text.length).toBe(LABEL_TEXT_MAX)
-    expect(label.text.endsWith('…')).toBe(true)
+    expect(label.text).toBe(long)
+    expect(built.longLabels).toBe(1)
+    expect(labelSheetWarning(built)).toContain('Длинные подписи перенесены')
     expect(label.fullText).toBe(long)
+  })
+
+  it('разрешает одинаковые подписи при разных адресах, а дубли адресов отмечает независимо от подписи', () => {
+    const repeatedNames = buildLabelSheet(withDevices([
+      device({ instanceId: 'a', address: 'QF1', marking: 'Освещение' }),
+      device({ instanceId: 'b', address: 'QF2', marking: 'Освещение' }),
+    ]), definitions)
+    expect(repeatedNames.duplicated).toBe(0)
+    const repeatedAddresses = buildLabelSheet(withDevices([
+      device({ instanceId: 'a', address: 'QF1', marking: 'Кухня' }),
+      device({ instanceId: 'b', address: ' QF1 ', marking: 'Спальня' }),
+    ]), definitions)
+    expect(repeatedAddresses.duplicated).toBe(2)
+  })
+
+  it('обновляет автоматическую подпись при нумерации, сохраняет ручную и выдаёт уникальные адреса', () => {
+    const numbered = autoNumber([
+      device({ instanceId: 'a', address: 'QF08', marking: 'QF08' }),
+      device({ instanceId: 'b', address: 'QF09', marking: 'Кухня' }),
+      device({ instanceId: 'c', address: '', marking: '' }),
+    ], definitions)
+    expect(numbered.map((item) => item.address)).toEqual(['QF01', 'QF02', 'QF03'])
+    expect(numbered.map((item) => item.marking)).toEqual(['QF01', 'Кухня', 'QF03'])
+    expect(autoNumber(numbered, definitions)).toEqual(numbered)
   })
 
   it('не маркирует шины и устройства вне DIN-рейки', () => {

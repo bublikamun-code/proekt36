@@ -72,13 +72,9 @@ const seededWiredProject = async (page: Page) => {
   }, project)
 }
 
-/**
- * `gate` marks the board that has to pass. The editor is measured, not failed: it is the thing
- * being replaced, and a red test on it would say nothing about whether the new one is fit — it
- * would only repeat the finding that motivated the work.
- */
+/** Both supported views must land every conductor in its physical clamp. */
 const ROUTES = [
-  { name: 'старый редактор', path: '/app/editor', gate: false },
+  { name: 'старый редактор', path: '/app/editor', gate: true },
   { name: 'новая доска', path: '/app/board', gate: true },
 ] as const
 

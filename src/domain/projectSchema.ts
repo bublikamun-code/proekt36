@@ -190,6 +190,7 @@ const validateDevice = (errors: string[], value: unknown, path: string) => {
 const validateCircuit = (errors: string[], value: unknown, path: string) => {
   if (!isRecord(value)) { add(errors, path, 'ожидается объект цепи'); return }
   for (const key of ['id', 'name', 'loadName', 'protectionDeviceId', 'color', 'note']) string(errors, value[key], `${path}.${key}`, { required: true, max: key === 'id' ? PROJECT_LIMITS.id : PROJECT_LIMITS.text, nonEmpty: key !== 'note' })
+  if (value.targetDeviceId !== undefined) string(errors, value.targetDeviceId, `${path}.targetDeviceId`, { max: PROJECT_LIMITS.id, nonEmpty: true })
   finiteNumber(errors, value.current, `${path}.current`, { min: 0, max: PROJECT_LIMITS.current })
   finiteNumber(errors, value.power, `${path}.power`, { min: 0, max: PROJECT_LIMITS.power })
   finiteNumber(errors, value.wireCrossSection, `${path}.wireCrossSection`, { min: 0, max: 1000 })
@@ -209,6 +210,9 @@ const validateConnection = (errors: string[], value: unknown, path: string) => {
   if (value.fromDeviceId !== undefined) string(errors, value.fromDeviceId, `${path}.fromDeviceId`, { max: PROJECT_LIMITS.id })
   // A terminal index is optional and small: it counts screws on a terminal block, and nothing in the
   // panel has more than a handful. A file without it keeps the first terminal.
+  for (const field of ['fromSide', 'toSide'] as const) {
+    enumValue(errors, value[field], `${path}.${field}`, ['top', 'bottom'], false)
+  }
   for (const field of ['terminal', 'fromTerminal'] as const) {
     if (value[field] === undefined) continue
     finiteNumber(errors, value[field], `${path}.${field}`, { min: 0, max: CONNECTION_TERMINAL_LIMIT, integer: true })
@@ -222,6 +226,7 @@ const validateReferences = (errors: string[], project: RecordValue) => {
   const deviceIds = new Set(devices.map((item) => typeof item.instanceId === 'string' ? item.instanceId : ''))
   const circuitIds = new Set(circuits.map((item) => typeof item.id === 'string' ? item.id : ''))
   for (const [index, circuit] of circuits.entries()) {
+    if (typeof circuit.targetDeviceId === 'string' && !deviceIds.has(circuit.targetDeviceId)) add(errors, `circuits[${index}].targetDeviceId`, `ссылается на несуществующее устройство «${circuit.targetDeviceId}»`)
     if (typeof circuit.protectionDeviceId === 'string' && !deviceIds.has(circuit.protectionDeviceId)) add(errors, `circuits[${index}].protectionDeviceId`, `ссылается на несуществующее устройство «${circuit.protectionDeviceId}»`)
   }
   for (const [index, connection] of connections.entries()) {

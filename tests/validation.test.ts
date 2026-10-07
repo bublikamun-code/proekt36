@@ -3,7 +3,7 @@ import { allCatalog, builtinCatalog } from '../src/data/catalog'
 import { createDevice, createProject } from '../src/domain/project'
 import { phaseBalance } from '../src/domain/electrical'
 import { validateProject } from '../src/domain/validation'
-import type { Circuit } from '../src/domain/types'
+import type { Circuit, Connection } from '../src/domain/types'
 
 const definitions = new Map(allCatalog.map((item) => [item.id, item]))
 
@@ -116,5 +116,102 @@ describe('requested ENMAS catalog scope', () => {
     expect(series.has('PSU-DIN-24V-5A')).toBe(true)
     expect(allCatalog.some((item) => item.name.includes('NB1-63DC'))).toBe(false)
     expect(builtinCatalog.some((item) => item.name.includes('NB1-63DC'))).toBe(false)
+  })
+})
+
+
+describe('circuit completeness with shared physical feeders', () => {
+  const setup = () => {
+    const project = createProject('Общий ввод', 'demo')
+    const product = definitions.get('ekf-rccb-4p-40')!
+    const source = { ...createDevice(product, 0, 0), instanceId: 'source' }
+    const target = { ...createDevice(product, 1, 0), instanceId: 'target' }
+    project.devices = [source, target]
+    project.circuits = [circuit({ protectionDeviceId: target.instanceId, targetDeviceId: target.instanceId })]
+    project.connections = [{
+      id: 'shared-feed', kind: 'bus', circuitId: '', fromBus: 'L', toDeviceId: target.instanceId,
+      toSide: 'top', terminal: 0, color: '#a44d37', thickness: 2, label: 'Общий ввод',
+    }]
+    return project
+  }
+  const missing = (project: ReturnType<typeof setup>) => validateProject(project, definitions)
+    .filter((entry) => entry.ruleCode === 'circuit.connection.missing'
+      || (entry.ruleCode === 'circuit.bus.completeness.preliminary' && entry.context.bus === 'L'))
+
+  it('recognizes a shared feed for multiple circuits without changing its owner', () => {
+    const project = setup()
+    project.circuits.push(circuit({ id: 'second', protectionDeviceId: 'target', targetDeviceId: 'target' }))
+    const original = structuredClone(project.connections)
+    expect(missing(project)).toEqual([])
+    expect(project.connections).toEqual(original)
+    project.connections = []
+    expect(missing(project)).toHaveLength(4)
+  })
+
+  it('recognizes a feeder owned by another circuit', () => {
+    const project = setup()
+    project.connections[0]!.kind = 'circuit'
+    project.connections[0]!.circuitId = 'other'
+    project.circuits.push(circuit({ id: 'other', protectionDeviceId: 'target', targetDeviceId: 'target' }))
+    expect(missing(project)).toEqual([])
+  })
+
+  it('recognizes a reverse-drawn wire at the target input', () => {
+    const project = setup()
+    Object.assign(project.connections[0]!, {
+      kind: 'busbar', fromDeviceId: 'target', fromSide: 'top', fromTerminal: 0,
+      toDeviceId: 'source', toSide: 'bottom',
+    })
+    expect(missing(project)).toEqual([])
+  })
+
+  it.each<Partial<Connection>>([
+    { toSide: 'bottom' }, { terminal: 1 }, { toDeviceId: 'source' },
+  ])('does not count an unrelated clamp carrying the same bus: %j', (patch) => {
+    const project = setup()
+    Object.assign(project.connections[0]!, patch)
+    expect(missing(project)).toHaveLength(2)
+  })
+
+  it.each<Partial<Connection>>([
+    { terminal: 99 }, { terminal: 3 }, { fromDeviceId: 'deleted' },
+    { kind: 'busbar', fromDeviceId: 'source', fromTerminal: 99 },
+  ])('does not count an invalid connection even when it names the circuit: %j', (patch) => {
+    const project = setup()
+    Object.assign(project.connections[0]!, { kind: 'circuit', circuitId: project.circuits[0]!.id }, patch)
+    expect(missing(project)).toHaveLength(2)
+  })
+
+  it('keeps valid legacy circuit-owned wires on an explicitly chosen contact', () => {
+    const project = setup()
+    Object.assign(project.connections[0]!, { kind: 'circuit', circuitId: project.circuits[0]!.id, terminal: 1, toSide: 'bottom' })
+    expect(missing(project)).toEqual([])
+  })
+
+  it('falls back to protection when an old circuit has no stored target or own wire', () => {
+    const project = setup()
+    delete project.circuits[0]!.targetDeviceId
+    expect(missing(project)).toEqual([])
+  })
+
+  it('prefers the historical circuit target over its protection device', () => {
+    const project = setup()
+    delete project.circuits[0]!.targetDeviceId
+    project.circuits[0]!.protectionDeviceId = 'source'
+    project.connections.unshift({
+      ...project.connections[0]!, id: 'invalid-old-wire', kind: 'circuit',
+      circuitId: project.circuits[0]!.id, terminal: 99,
+    })
+    expect(missing(project)).toEqual([])
+  })
+
+  it('reports an explicitly missing target instead of silently falling back to protection', () => {
+    const project = setup()
+    project.circuits[0]!.targetDeviceId = 'deleted'
+    const issues = validateProject(project, definitions)
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleCode: 'circuit.target.missing', level: 'error', context: expect.objectContaining({ targetDeviceId: 'deleted' }) }),
+    ]))
+    expect(missing(project)).toHaveLength(2)
   })
 })

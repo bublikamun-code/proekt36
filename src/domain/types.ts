@@ -61,6 +61,8 @@ export interface Circuit {
   power: number
   phase: 1 | 2 | 3
   protectionDeviceId: string
+  /** Physical target retained when a circuit reuses an existing feeder. */
+  targetDeviceId?: string
   color: string
   wireCrossSection: number
   note: string
@@ -97,6 +99,9 @@ export interface Connection {
   terminal?: number
   /** The same choice for the device the wire leaves from, for the same reason. */
   fromTerminal?: number
+  /** Omitted in older projects: source bottom, destination top. */
+  fromSide?: 'top' | 'bottom'
+  toSide?: 'top' | 'bottom'
 }
 
 export interface DeviceDefinition {

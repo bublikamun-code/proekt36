@@ -37,6 +37,7 @@ const viewport = ref({ width: 0, height: 0 })
 const preview = ref<PlacementPreview | null>(null)
 const announcement = ref('')
 let resizeObserver: ResizeObserver | null = null
+let viewportFrame = 0
 let frame = 0
 let rowElements: HTMLElement[] = []
 let railElements: HTMLElement[] = []
@@ -56,7 +57,10 @@ const updateViewport = () => {
 }
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(updateViewport)
+  resizeObserver = new ResizeObserver(() => {
+    window.cancelAnimationFrame(viewportFrame)
+    viewportFrame = window.requestAnimationFrame(updateViewport)
+  })
   if (canvasScroll.value) {
     resizeObserver.observe(canvasScroll.value)
     // Not passive: the handler calls preventDefault, and a passive wheel listener would let the
@@ -68,6 +72,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  window.cancelAnimationFrame(viewportFrame)
   canvasScroll.value?.removeEventListener('wheel', onCanvasWheel)
   setBoardDropHandler(null)
   window.cancelAnimationFrame(frame)
@@ -368,7 +373,7 @@ const wirePaths = computed(() => {
    * metrics the wire lands in, so a connection cannot end up pointing at a place the face has no
    * clamp for.
    */
-  const terminalAt = (instanceId: string, bus: 'L' | 'N' | 'PE', side: 'top' | 'bottom') => {
+  const terminalAt = (instanceId: string, bus: 'L' | 'N' | 'PE', side: 'top' | 'bottom', column?: number) => {
     const device = devicesById.get(instanceId)
     if (!device || device.mount === 'busbar') return null
     const product = definitions.value.get(device.productId)
@@ -378,10 +383,10 @@ const wirePaths = computed(() => {
       terminals = faceTerminals(product)
       terminalsByProduct.set(device.productId, terminals)
     }
-    const terminal = terminalForBus(terminals, bus, side)
+    const terminal = terminalForBus(terminals, bus, side, column)
     if (!terminal) return null
     const leftMm = board.railStartXMm + device.slot * board.modulePitchMm
-    const topMm = board.rowTopMm[device.row]
+    const topMm = board.deviceTopMm(device.row, device.productId) - board.rowTopMm[0]!
     return {
       x: leftMm + terminal.x,
       y: topMm + terminal.y,
@@ -390,9 +395,11 @@ const wirePaths = computed(() => {
   }
 
   for (const connection of currentProject.value.connections ?? []) {
+    if (connection.kind === 'busbar' && !connection.fromDeviceId) continue
+    if (connection.kind === 'bus' && connection.fromDeviceId) continue
     const target = devicesById.get(connection.toDeviceId)
     if (!target) continue
-    const targetPoint = terminalAt(connection.toDeviceId, connection.fromBus, 'top')
+    const targetPoint = terminalAt(connection.toDeviceId, connection.fromBus, connection.toSide ?? 'top', connection.terminal)
     if (!targetPoint) continue
 
     const bus = connection.fromBus
@@ -401,7 +408,7 @@ const wirePaths = computed(() => {
     // used to look like a board with no wiring between its devices.
     const source = connection.fromDeviceId ? 'device' : 'busbar'
     const sourcePoint = source === 'device' && connection.fromDeviceId
-      ? terminalAt(connection.fromDeviceId, bus, 'bottom')
+      ? terminalAt(connection.fromDeviceId, bus, connection.fromSide ?? 'bottom', connection.fromTerminal)
       : null
     if (source === 'device' && !sourcePoint) continue
 
@@ -411,7 +418,7 @@ const wirePaths = computed(() => {
 
     paths.push({
       id: connection.id,
-      d: mmPathToPx(routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4 })),
+      d: mmPathToPx(routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4, fromSide: connection.fromSide, toSide: connection.toSide })),
       bus,
       color: connection.color || wireColor(bus),
       thickness: connection.thickness || 2,
@@ -475,3 +482,12 @@ const wirePaths = computed(() => {
     <div class="canvas-legend"><span><i class="legend-l"></i>L</span><span><i class="legend-n"></i>N</span><span><i class="legend-pe"></i>PE</span><span><i class="legend-phase phase-1"></i>Фаза 1</span><span><i class="legend-phase phase-2"></i>Фаза 2</span><span><i class="legend-phase phase-3"></i>Фаза 3</span><span class="legend-note">Перетащите аппарат в ряд — соседи сдвинутся сами. Стрелки двигают выбранный аппарат.</span><span class="mono">{{ capacity }} мод./ряд</span></div>
   </section>
 </template>
+
+
+<style scoped>
+/* Keep the face at the same physical scale as the wire layer. Labels cannot shrink it. */
+.placed-device { padding: 0; border: 0; overflow: visible; }
+.placed-device :deep(.device-visual) { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+.placed-device b { position: absolute; inset: -16px 0 auto; margin: 0; padding: 0; border: 0; font-size: 9px; line-height: 14px; background: transparent; }
+.din-row { border-top: 0; }
+</style>

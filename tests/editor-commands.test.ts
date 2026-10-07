@@ -193,7 +193,7 @@ describe('transactional editor validation', () => {
 })
 
 describe('connection exhaustion', () => {
-  it('stops after L, N and PE instead of falling back to N or duplicating a device/bus', () => {
+  it('does not invent N or PE clamps on an L terminal block', () => {
     const store = setupStore()
     const p1 = asDevice('protection', protection.id, 0, 0)
     const target = asDevice('target', terminal.id, 0, 2)
@@ -202,15 +202,13 @@ describe('connection exhaustion', () => {
     store.addCircuit(target.instanceId)
     const circuitId = store.currentProject.circuits[0]!.id
 
-    expect(store.addConnection(circuitId)).toBe(true)
-    expect(store.addConnection(circuitId)).toBe(true)
     expect(store.addConnection(circuitId)).toBe(false)
     const circuitConnections = store.currentProject.connections.filter((item) => item.circuitId === circuitId)
-    expect(circuitConnections).toHaveLength(3)
-    expect(circuitConnections.map((item) => item.fromBus)).toEqual(['L', 'N', 'PE'])
-    expect(new Set(circuitConnections.map((item) => `${item.fromBus}:${item.toDeviceId}`)).size).toBe(3)
+    expect(circuitConnections).toHaveLength(1)
+    expect(circuitConnections.map((item) => item.fromBus)).toEqual(['L'])
+    expect(new Set(circuitConnections.map((item) => `${item.fromBus}:${item.toDeviceId}`)).size).toBe(1)
     expect(store.addConnection(circuitId)).toBe(false)
-    expect(store.currentProject.connections).toHaveLength(3)
+    expect(store.currentProject.connections).toHaveLength(1)
     store.$dispose()
   })
 })

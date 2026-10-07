@@ -18,7 +18,7 @@ import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from
 import type { BusType, Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
 import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
 import { CONNECTION_THICKNESS_MM } from '../domain/connectionSpec'
-import { wireColor } from '../domain/wiring'
+import { connectionTouchesTerminal, connectionKey, faceTerminals, terminalForBus, wireColor } from '../domain/wiring'
 import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { usePreferencesStore } from './preferences'
 
@@ -418,28 +418,6 @@ export const useProjectStore = defineStore('project', () => {
   // Busbar wiring is offered only for the devices that were just inserted. An apparatus the
   // user deliberately left unwired must not gain a connection because something else was
   // added, so the scan walks the caller-supplied ids and nothing else.
-  const syncBusbarConnections = (project: PanelProject, addedIds: ReadonlySet<string>) => {
-    const busbars = project.devices.filter((item) => item.mount === 'busbar')
-    if (!busbars.length || !addedIds.size) return 0
-    let created = 0
-    for (const target of project.devices) {
-      if (!addedIds.has(target.instanceId)) continue
-      const category = definitions.value.get(target.productId)?.category
-      if (category !== 'MCB' && category !== 'RCCB' && category !== 'RCBO') continue
-      const source = busbars.find((busbar) => busbar.row === target.row) ?? busbars[0]
-      if (!source) continue
-      const exists = project.connections.some((connection) => connection.kind === 'busbar' && connection.fromDeviceId === source.instanceId && connection.toDeviceId === target.instanceId)
-      if (!exists) {
-        project.connections.push({
-          id: uid(), circuitId: '', fromBus: 'L', toDeviceId: target.instanceId,
-          color: '#aeb8b4', thickness: 2, label: `FORK → ${target.address || 'аппарат'}`,
-          kind: 'busbar', fromDeviceId: source.instanceId,
-        })
-        created += 1
-      }
-    }
-    return created
-  }
 
   /**
    * `row` and `slot` stay optional so that a click in the catalogue, which names no position, can be
@@ -468,13 +446,10 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (result.error) { notify(result.error, 'error'); return { ok: false } }
     const previousIds = new Set(currentProject.value.devices.map((item) => item.instanceId))
-    let linked = 0
     commit((project) => {
       project.devices = autoNumber(result.devices, definitions.value)
-      linked = syncBusbarConnections(project, new Set(project.devices.filter((item) => !previousIds.has(item.instanceId)).map((item) => item.instanceId)))
     })
     selectedDeviceId.value = result.devices.find((item) => !previousIds.has(item.instanceId))?.instanceId ?? null
-    if (linked) notify(`Аппарат добавлен и подключён к шине`)
     return { ok: true, row: landedRow }
   }
 
@@ -515,6 +490,9 @@ export const useProjectStore = defineStore('project', () => {
     if (!selectedDeviceId.value) return
     const removedId = selectedDeviceId.value
     commit((project) => {
+      const dependentIds = new Set(project.circuits.filter((circuit) =>
+        circuit.protectionDeviceId === removedId || circuitTarget(project, circuit) === removedId).map((circuit) => circuit.id))
+      removeCircuits(project, dependentIds)
       project.devices = project.devices.filter((item) => item.instanceId !== removedId)
       project.connections = project.connections.filter((item) => item.toDeviceId !== removedId && item.fromDeviceId !== removedId)
     })
@@ -551,7 +529,11 @@ export const useProjectStore = defineStore('project', () => {
     if ('phase' in values && ![1, 2, 3].includes(values.phase as number)) return rejectCommand('Фаза устройства должна быть 1, 2 или 3.')
     commit((project) => {
       const device = project.devices.find((item) => item.instanceId === selectedDeviceId.value)
-      if (device) Object.assign(device, patch)
+      if (device) {
+        const automaticMarking = !device.marking?.trim() || device.marking.trim() === device.address.trim()
+        if (patch.address !== undefined && patch.marking === undefined && automaticMarking) device.marking = patch.address
+        Object.assign(device, patch)
+      }
     })
     return true
   }
@@ -572,68 +554,74 @@ export const useProjectStore = defineStore('project', () => {
 
   const autoNumberAll = () => commit((project) => { project.devices = autoNumber(project.devices, definitions.value) }, 'Адреса обновлены')
 
-  const addBusbarConnection = (fromDeviceId: string, toDeviceId: string) => {
-    const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
-    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
-    if (!source || source.mount !== 'busbar' || !target) return notify('Выберите шину Fork и аппарат назначения', 'error')
-    if (currentProject.value.connections.some((item) => item.kind === 'busbar' && item.fromDeviceId === fromDeviceId && item.toDeviceId === toDeviceId)) return notify('Такое подключение уже есть', 'error')
-    commit((project) => project.connections.push({ id: uid(), circuitId: '', fromBus: 'L', toDeviceId, color: '#aeb8b4', thickness: 2, label: `FORK → ${target.address || 'аппарат'}`, kind: 'busbar', fromDeviceId }), 'Шина подключена')
+  const endpointKey = (id: string, bus: BusType, side: 'top' | 'bottom', column?: number) => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === id)
+    const product = device && definitions.value.get(device.productId)
+    if (!product) return undefined
+    const terminal = terminalForBus(faceTerminals(product), bus, side, column)
+    return terminal ? `${id}:${terminal.side}:${terminal.column}` : undefined
   }
 
-  /**
-   * Draws a wire between two devices by hand, the way a cascade is recorded: the feed leaves the
-   * bottom of one device and arrives at the top of the other, on the same bus.
-   *
-   * The circuit is left empty, as a busbar feed is. A cascade is a physical run of copper, not a
-   * load, and giving it a circuit would invent a load the person never asked for. The validation
-   * rules already treat a connection without a circuit as a feed rather than a missing field.
-   */
-  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string, terminal?: number): boolean => {
-    if (fromDeviceId === toDeviceId) return rejectCommand('Нельзя соединить аппарат с самим собой.')
-    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
-    const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
-    if (!target || !source) return rejectCommand('Аппарат не найден.')
-    // The terminal is part of what makes a wire this wire: the same run to a terminal block is a
-    // second wire when it lands on the next screw, and refusing it made four screws of every block
-    // unreachable.
-    const duplicate = currentProject.value.connections.some((item) => item.fromDeviceId === fromDeviceId
-      && item.toDeviceId === toDeviceId && item.fromBus === fromBus && (item.terminal ?? 0) === (terminal ?? 0))
-    if (duplicate) return rejectCommand('Такой провод уже проведён.')
-    const label = `${source.address || 'аппарат'} → ${target.address || 'аппарат'}`
-    commit((project) => project.connections.push({
-      id: uid(), circuitId: '', fromBus, toDeviceId,
-      color: wireColor(fromBus), thickness: 2, label, kind: 'busbar', fromDeviceId,
-      ...(terminal === undefined ? {} : { terminal }),
-    }), `Провод ${label} проведён`)
+  const endpointError = (id: string, bus: BusType, side: 'top' | 'bottom', column?: number) => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === id)
+    const product = device && definitions.value.get(device.productId)
+    if (!product) return 'Аппарат не найден.'
+    if (side !== 'top' && side !== 'bottom') return 'Выберите сторону зажима.'
+    const row = faceTerminals(product)[side]
+    if (column !== undefined && (!Number.isInteger(column) || !row.some((terminal) => terminal.column === column))) return 'Зажим у аппарата не найден.'
+    if (!terminalForBus(faceTerminals(product), bus, side, column)) return `У выбранного зажима нет подключения ${bus}.`
+    return ''
+  }
+
+  const duplicateConnection = (candidate: Connection) => currentProject.value.connections.some((item) =>
+    item.id !== candidate.id && connectionKey(item, currentProject.value.devices, definitions.value)
+      === connectionKey(candidate, currentProject.value.devices, definitions.value))
+
+  // Every UI path uses the same endpoint rules before changing the project or its undo history.
+  const connectionError = (connection: Connection, checkDuplicate = true) => {
+    if (!['L', 'N', 'PE'].includes(connection.fromBus)) return 'Выберите провод L, N или PE.'
+    if (connection.kind === 'busbar' && !connection.fromDeviceId) return 'Укажите аппарат или шину источника.'
+    if (connection.kind === 'bus' && connection.fromDeviceId) return 'Питание от общей шины не может иметь аппарат-источник.'
+    const targetError = endpointError(connection.toDeviceId, connection.fromBus, connection.toSide ?? 'top', connection.terminal)
+    if (targetError) return targetError
+    if (connection.fromDeviceId) {
+      const sourceError = endpointError(connection.fromDeviceId, connection.fromBus, connection.fromSide ?? 'bottom', connection.fromTerminal)
+      if (sourceError) return sourceError
+      if (endpointKey(connection.fromDeviceId, connection.fromBus, connection.fromSide ?? 'bottom', connection.fromTerminal)
+        === endpointKey(connection.toDeviceId, connection.fromBus, connection.toSide ?? 'top', connection.terminal)) return 'Нельзя соединить зажим с самим собой.'
+    }
+    return checkDuplicate && duplicateConnection(connection) ? 'Такой провод уже проведён.' : ''
+  }
+
+  const addBoardWire = (connection: Connection): boolean => {
+    const invalid = connectionError(connection)
+    if (invalid) return rejectCommand(invalid)
+    commit((project) => project.connections.push(connection), `Провод ${connection.label} проведён`)
     return true
   }
 
-  /**
-   * Feeds a device from one of the panel buses.
-   *
-   * This is the connection that was impossible to draw by hand: the board had no bus to click, and
-   * the store had no method for it, so a panel could show its cascades but not its own feeds — the
-   * one line every real board starts with. The record is the same as the one an imported project
-   * carries, except that its kind says where it comes from: `bus` is the panel bus, `busbar` is
-   * another device. Without that distinction the two cannot be told apart in the report, and the
-   * check that every cascade names a source would fire on a perfectly ordinary feed.
-   */
-  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number): boolean => {
-    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
-    if (!target) return rejectCommand('Аппарат не найден.')
-    // Two wires of the same bus to the same device are the same wire only if they land on the same
-    // terminal. On a terminal block they do not: a six-screw block takes three earth wires, and the
-    // second one used to be refused as a duplicate of the first.
-    const duplicate = currentProject.value.connections.some((item) => !item.fromDeviceId
-      && item.toDeviceId === toDeviceId && item.fromBus === bus && (item.terminal ?? 0) === (terminal ?? 0))
-    if (duplicate) return rejectCommand(`${bus} → ${target.address || 'аппарат'} уже проведён.`)
-    const label = `${bus} → ${target.address || 'аппарат'}`
-    commit((project) => project.connections.push({
-      id: uid(), circuitId: '', fromBus: bus, toDeviceId,
-      color: wireColor(bus), thickness: 2, label, kind: 'bus',
-      ...(terminal === undefined ? {} : { terminal }),
-    }), `Провод ${label} проведён`)
-    return true
+  const addBusbarConnection = (fromDeviceId: string, toDeviceId: string): boolean => {
+    const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
+    if (!source || source.mount !== 'busbar') return rejectCommand('Выберите шину-источник.')
+    const product = definitions.value.get(source.productId)
+    if (!product) return rejectCommand('Модель шины не найдена.')
+    // This is an explicit flexible conductor. Physical comb teeth are not inferred from row membership.
+    return addBoardWire({ id: uid(), circuitId: '', fromBus: product.bus, toDeviceId,
+      color: wireColor(product.bus), thickness: 2, label: `${source.address || 'Шина'} → аппарат`, kind: 'busbar', fromDeviceId })
+  }
+
+  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string, terminal?: number,
+    endpoints: Pick<Connection, 'fromTerminal' | 'fromSide' | 'toSide'> = {}): boolean => {
+    const name = (id: string) => currentProject.value.devices.find((item) => item.instanceId === id)?.address || 'аппарат'
+    return addBoardWire({ id: uid(), circuitId: '', fromBus, toDeviceId, fromDeviceId,
+      color: wireColor(fromBus), thickness: 2, label: `${name(fromDeviceId)} → ${name(toDeviceId)}`,
+      kind: 'busbar', terminal, ...endpoints })
+  }
+
+  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number, toSide: 'top' | 'bottom' = 'top'): boolean => {
+    const name = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)?.address || 'аппарат'
+    return addBoardWire({ id: uid(), circuitId: '', fromBus: bus, toDeviceId,
+      color: wireColor(bus), thickness: 2, label: `${bus} → ${name}`, kind: 'bus', terminal, toSide })
   }
 
   const isProtectionDevice = (device: PlacedDevice | undefined) => {
@@ -646,6 +634,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!validText(circuit.name, PROJECT_LIMITS.text, true)) return 'Название цепи должно быть непустой строкой.'
     if (!validText(circuit.loadName, PROJECT_LIMITS.text, true)) return 'Нагрузка должна быть непустой строкой.'
     if (!validText(circuit.protectionDeviceId, PROJECT_LIMITS.id, true)) return 'Укажите защитное устройство.'
+    if (circuit.targetDeviceId !== undefined && (!validText(circuit.targetDeviceId, PROJECT_LIMITS.id, true) || !currentProject.value.devices.some((item) => item.instanceId === circuit.targetDeviceId))) return 'Устройство назначения цепи не найдено.'
     if (!validText(circuit.color, 64, true)) return 'Цвет цепи должен быть непустой строкой.'
     if (!validText(circuit.note, PROJECT_LIMITS.text)) return 'Примечание цепи слишком длинное.'
     if (!finiteInRange(circuit.current, 0, PROJECT_LIMITS.current)) return 'Ток цепи должен быть конечным числом от 0 до 10000 А.'
@@ -662,14 +651,14 @@ export const useProjectStore = defineStore('project', () => {
     const target = currentProject.value.devices.find((item) => item.instanceId === targetDeviceId)
     if (!target) return rejectCommand('Устройство назначения не найдено.')
     const selectedProtection = selectedDevice.value
-    const protection = isProtectionDevice(selectedProtection ?? undefined)
-      ? selectedProtection
+    const protection = isProtectionDevice(target) ? target
+      : isProtectionDevice(selectedProtection ?? undefined) ? selectedProtection
       : currentProject.value.devices.find((item) => isProtectionDevice(item))
     if (!protection) return rejectCommand('Для цепи нужен автомат, УЗО или дифавтомат.')
     const circuit: Circuit = {
       id: uid(), name: `Цепь ${currentProject.value.circuits.length + 1}`,
       loadName: target.note || 'Новая нагрузка', current: 0, power: 0, phase: target.phase,
-      protectionDeviceId: protection.instanceId, color: '#c65c3b', wireCrossSection: 1.5, note: '',
+      protectionDeviceId: protection.instanceId, targetDeviceId, color: '#c65c3b', wireCrossSection: 1.5, note: '',
     }
     const invalid = circuitError(circuit)
     if (invalid) return rejectCommand(invalid)
@@ -677,9 +666,13 @@ export const useProjectStore = defineStore('project', () => {
       id: uid(), circuitId: circuit.id, fromBus: 'L', toDeviceId: targetDeviceId,
       color: circuit.color, thickness: 2, label: circuit.name, kind: 'circuit',
     }
+    const invalidConnection = connectionError(connection, false)
+    if (invalidConnection) return rejectCommand(invalidConnection)
+    const alreadyFed = currentProject.value.connections.some((item) =>
+      connectionTouchesTerminal(item, currentProject.value.devices, definitions.value, targetDeviceId, 'L'))
     commit((project) => {
       project.circuits.push(circuit)
-      project.connections.push(connection)
+      if (!alreadyFed) project.connections.push(connection)
     }, 'Цепь добавлена')
     // The circuit is returned so the board can offer its load name for editing straight away,
     // instead of sending the person to a panel to find out what they just created.
@@ -711,25 +704,28 @@ export const useProjectStore = defineStore('project', () => {
     const circuit = currentProject.value.circuits.find((item) => item.id === circuitId)
     if (!circuit) return rejectCommand('Цепь не найдена.')
     const existing = currentProject.value.connections.filter((item) => item.circuitId === circuitId && item.kind !== 'busbar')
-    const usedBuses = new Set(existing.map((item) => item.fromBus))
-    const fromBus = (['L', 'N', 'PE'] as const).find((bus) => !usedBuses.has(bus))
-    if (!fromBus) return rejectCommand('Для этой цепи уже используются все шины L, N и PE.')
-    const toDeviceId = existing[0]?.toDeviceId ?? currentProject.value.devices[0]?.instanceId
-    if (!toDeviceId) return rejectCommand('Сначала разместите устройство в щите.')
-    if (existing.some((item) => item.fromBus === fromBus && item.toDeviceId === toDeviceId)) return rejectCommand('Такое подключение устройства и шины уже есть.')
-    const connection: Connection = {
-      id: uid(), circuitId, fromBus, toDeviceId,
-      color: circuit.color, thickness: 2, label: `${circuit.name} · ${fromBus}`, kind: 'circuit',
+    const usedBuses = new Set(existing.filter((item) => !connectionError(item, false)).map((item) => item.fromBus))
+    const toDeviceId = selectedDeviceId.value ?? circuit.targetDeviceId ?? existing[0]?.toDeviceId ?? circuit.protectionDeviceId
+    if (!toDeviceId) return rejectCommand('Сначала выберите устройство в щите.')
+    for (const fromBus of ['L', 'N', 'PE'] as const) {
+      if (usedBuses.has(fromBus)) continue
+      if (currentProject.value.connections.some((item) =>
+        connectionTouchesTerminal(item, currentProject.value.devices, definitions.value, toDeviceId, fromBus))) continue
+      const connection: Connection = {
+        id: uid(), circuitId, fromBus, toDeviceId,
+        color: wireColor(fromBus), thickness: 2, label: `${circuit.name} · ${fromBus}`, kind: 'circuit',
+      }
+      if (connectionError(connection)) continue
+      return addBoardWire(connection)
     }
-    commit((project) => { project.connections.push(connection) }, 'Подключение добавлено')
-    return true
+    return rejectCommand('У выбранного аппарата нет свободного совместимого подключения L, N или PE для этой цепи. Выберите нужную клемму или шину.')
   }
 
   const updateConnection = (id: string, patch: Partial<Connection>): boolean => {
     const connection = currentProject.value.connections.find((item) => item.id === id)
     if (!connection) return rejectCommand('Подключение не найдено.')
     const values = patch as Record<string, unknown>
-    const allowed = new Set(['circuitId', 'fromBus', 'toDeviceId', 'color', 'thickness', 'label'])
+    const allowed = new Set(['circuitId', 'fromBus', 'toDeviceId', 'color', 'thickness', 'label', 'terminal', 'fromTerminal', 'fromSide', 'toSide'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение подключения содержит недопустимые поля.')
     if ('fromBus' in values && !['L', 'N', 'PE'].includes(values.fromBus as string)) return rejectCommand('Шина должна быть L, N или PE.')
     if ('toDeviceId' in values && !currentProject.value.devices.some((item) => item.instanceId === values.toDeviceId)) return rejectCommand('Подключаемое устройство не найдено.')
@@ -738,7 +734,12 @@ export const useProjectStore = defineStore('project', () => {
     if ('label' in values && !validText(values.label, PROJECT_LIMITS.text)) return rejectCommand('Подпись подключения слишком длинная.')
     if ('circuitId' in values && !currentProject.value.circuits.some((item) => item.id === values.circuitId)) return rejectCommand('Цепь подключения не найдена.')
     const candidate = { ...connection, ...patch }
-    if (currentProject.value.connections.some((item) => item.id !== id && item.circuitId === candidate.circuitId && item.fromBus === candidate.fromBus && item.toDeviceId === candidate.toDeviceId && item.kind === candidate.kind)) return rejectCommand('Такое подключение устройства и шины уже есть.')
+    for (const field of ['fromSide', 'toSide'] as const) {
+      if (field in values && !['top', 'bottom'].includes(values[field] as string)) return rejectCommand('Выберите сторону зажима.')
+    }
+    const invalid = connectionError(candidate)
+    if (invalid) return rejectCommand(invalid)
+    if (patch.fromBus && !patch.color) patch.color = wireColor(patch.fromBus)
     commit((project) => {
       const item = project.connections.find((entry) => entry.id === id)
       if (item) Object.assign(item, patch)
@@ -754,9 +755,25 @@ export const useProjectStore = defineStore('project', () => {
     if (selectedConnectionId.value === id) selectedConnectionId.value = null
   }
 
+  const circuitTarget = (project: PanelProject, circuit: Circuit) => circuit.targetDeviceId
+    ?? project.connections.find((item) => item.circuitId === circuit.id)?.toDeviceId
+    ?? circuit.protectionDeviceId
+
+  const removeCircuits = (project: PanelProject, ids: Set<string>) => {
+    const remaining = project.circuits.filter((item) => !ids.has(item.id))
+    const targets = remaining.map((item) => circuitTarget(project, item))
+    project.connections = project.connections.flatMap((connection) => {
+      if (!ids.has(connection.circuitId)) return [connection]
+      const shared = targets.some((target) => connectionTouchesTerminal(
+        connection, project.devices, definitions.value, target, connection.fromBus))
+      // Retain a physical feed when another logical circuit still uses this exact contact.
+      return shared ? [{ ...connection, circuitId: '', kind: connection.fromDeviceId ? 'busbar' as const : 'bus' as const }] : []
+    })
+    project.circuits = remaining
+  }
+
   const deleteCircuit = (id: string) => commit((project) => {
-    project.circuits = project.circuits.filter((item) => item.id !== id)
-    project.connections = project.connections.filter((item) => item.circuitId !== id)
+    removeCircuits(project, new Set([id]))
   }, 'Цепь удалена')
 
   const undo = () => {

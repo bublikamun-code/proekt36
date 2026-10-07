@@ -63,7 +63,7 @@ export const demoProject: PanelProject = {
     { id: 'demo-connection-light-n', circuitId: 'demo-circuit-light', fromBus: 'N', toDeviceId: 'demo-xt01', color: '#8a9599', thickness: 2, label: 'N → XT01' },
     // Two conductors under one screw is how a real terminal block takes three earth wires: the
     // block offers six screws, and the person wiring it decides which of them each circuit sits on.
-    { id: 'demo-connection-light-pe', circuitId: 'demo-circuit-light', fromBus: 'PE', toDeviceId: 'demo-xt02', color: '#47a067', thickness: 2, label: 'PE → XT02 (1)' },
+    { id: 'demo-connection-light-pe', circuitId: 'demo-circuit-light', fromBus: 'PE', toDeviceId: 'demo-xt02', toSide: 'bottom', terminal: 0, color: '#47a067', thickness: 2, label: 'PE → XT02 (3)' },
     // A cascade: the lighting feed leaves the main breaker rather than the busbar. This is how most
     // real boards are wired, and until the wiring was routed to terminals it could not be drawn.
     { id: 'demo-connection-cascade-light', circuitId: 'demo-circuit-light', fromBus: 'L', toDeviceId: 'demo-qf02', color: '#d65b43', thickness: 2, label: 'QF01 → QF02', kind: 'busbar', fromDeviceId: 'demo-qf01' },

@@ -53,18 +53,30 @@ const belongsToCircuit = computed(() => Boolean(connection.value?.circuitId))
  * this circuit sits on the third. Choosing the screw from the wire is what turns a block of six
  * drawn screws into six connection points.
  */
-const terminals = computed(() => {
+const terminalOptions = (source = false) => {
   const wire = connection.value
   if (!wire) return []
-  const device = store.currentProject.devices.find((item) => item.instanceId === wire.toDeviceId)
-  const product = device ? store.definitions.get(device.productId) : undefined
-  if (!product || product.category !== 'terminals') return []
-  return faceTerminals(product).top.map((terminal, index) => ({ value: String(index), label: `Зажим ${terminal.label}` }))
-})
-
-const setTerminal = (value: string) => {
-  const index = Number(value)
-  update({ terminal: index === 0 ? undefined : index })
+  const id = source ? wire.fromDeviceId : wire.toDeviceId
+  const device = store.currentProject.devices.find((item) => item.instanceId === id)
+  const product = device && store.definitions.get(device.productId)
+  if (!product) return []
+  const terminals = faceTerminals(product)
+  return [...terminals.top, ...terminals.bottom]
+    .filter((terminal) => terminal.bus === wire.fromBus || terminal.bus === 'aux')
+    .map((terminal) => ({ value: `${terminal.side}:${terminal.column}`, label: `${terminal.label} · ${terminal.side === 'top' ? 'сверху' : 'снизу'}` }))
+}
+const terminals = computed(() => terminalOptions())
+const sourceTerminals = computed(() => terminalOptions(true))
+const selectedTerminal = (source = false) => {
+  const wire = connection.value!
+  const side = source ? wire.fromSide ?? 'bottom' : wire.toSide ?? 'top'
+  const column = source ? wire.fromTerminal : wire.terminal
+  return column === undefined ? terminalOptions(source).find((item) => item.value.startsWith(side))?.value ?? '' : `${side}:${column}`
+}
+const setTerminal = (value: string, source = false) => {
+  const [side, column] = value.split(':')
+  if (side !== 'top' && side !== 'bottom') return
+  update(source ? { fromSide: side, fromTerminal: Number(column) } : { toSide: side, terminal: Number(column) })
 }
 
 const update = (patch: Parameters<typeof store.updateConnection>[1]) => {
@@ -109,8 +121,12 @@ defineExpose({ remove })
       />
     </label>
     <label v-if="terminals.length > 1">
-      Зажим
-      <AppSelect label="Зажим провода" :model-value="String(connection.terminal ?? 0)" :options="terminals" @update:model-value="setTerminal" />
+      Куда · зажим
+      <AppSelect label="Зажим провода" :model-value="selectedTerminal()" :options="terminals" @update:model-value="setTerminal($event)" />
+    </label>
+    <label v-if="sourceTerminals.length > 1">
+      Откуда · зажим
+      <AppSelect label="Зажим источника" :model-value="selectedTerminal(true)" :options="sourceTerminals" @update:model-value="setTerminal($event, true)" />
     </label>
     <label>
       Подпись
@@ -146,10 +162,12 @@ defineExpose({ remove })
   z-index: 5;
   top: 8px;
   /* The side panels are fixed overlays; the board already keeps that room clear for itself. */
-  right: calc(var(--panel-overlay-inline, 0px) + 8px);
+  right: 8px;
   display: grid;
   gap: 6px;
-  width: 232px;
+  width: min(260px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text);

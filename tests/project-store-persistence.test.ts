@@ -142,7 +142,7 @@ describe('busbar wiring on insert', () => {
     return project
   }
 
-  it('links only the inserted device and leaves earlier unlinked apparatus untouched', () => {
+  it('places an apparatus without inferring a physical FORK connection', () => {
     const storage = new MemoryStorage()
     storage.set('panel36.projects.v2', [panel()])
     setupBrowserStorage(storage)
@@ -154,8 +154,8 @@ describe('busbar wiring on insert', () => {
 
     const added = store.currentProject.devices.find((item) => item.productId === 'ekf-mcb-1p-b16')
     const links = store.currentProject.connections
-    expect(links).toHaveLength(1)
-    expect(links[0]).toMatchObject({ kind: 'busbar', fromDeviceId: 'bus-1', toDeviceId: added?.instanceId })
+    expect(added).toBeDefined()
+    expect(links).toHaveLength(0)
     expect(links.map((item) => item.toDeviceId)).not.toContain('mcb-1')
     expect(links.map((item) => item.toDeviceId)).not.toContain('mcb-2')
     store.$dispose()
@@ -215,7 +215,7 @@ describe('busbar wiring on insert', () => {
     store.$dispose()
   })
 
-  it('undoes the placement and its busbar link in a single step', () => {
+  it('undoes placement beside a busbar in a single step', () => {
     const storage = new MemoryStorage()
     storage.set('panel36.projects.v2', [panel()])
     setupBrowserStorage(storage)
