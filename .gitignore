@@ -30,3 +30,7 @@ tools/ai-proxy.env
 test-results
 playwright-report
 blob-report
+
+# Отчёт о покрытии vitest — результат прогона, а не исходник
+coverage
+.zcode/
