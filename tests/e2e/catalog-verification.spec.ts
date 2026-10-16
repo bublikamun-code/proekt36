@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor } from './helpers'
+import { gotoEditor, openSidePanels } from './helpers'
 
 /**
  * The catalogue is mostly generated from a series template, so "confirmed" is the exception.
@@ -11,10 +11,7 @@ test.describe('catalogue provenance', () => {
 
   test.beforeEach(async ({ page }) => {
     await gotoEditor(page)
-    // The editor opens in focused mode with the side panels hidden. The toggle's label flips
-    // between "Показать боковые панели" and "Скрыть", so a plain click on the named button is
-    // both the action and the wait — asking whether it exists first races the mount.
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     await expect(page.getByRole('button', { name: 'Только проверенные' })).toBeVisible()
   })
 

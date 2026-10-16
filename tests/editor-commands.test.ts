@@ -198,6 +198,9 @@ describe('connection exhaustion', () => {
     const p1 = asDevice('protection', protection.id, 0, 0)
     const target = asDevice('target', terminal.id, 0, 2)
     store.currentProject.devices = [p1, target]
+    // The demo board arrives with two wires of its own. The totals below are about this circuit,
+    // and those two would otherwise be counted as conductors the store had just invented.
+    store.currentProject.connections = []
     store.selectedDeviceId = target.instanceId
     store.addCircuit(target.instanceId)
     const circuitId = store.currentProject.circuits[0]!.id

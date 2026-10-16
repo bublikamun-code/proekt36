@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { CATALOG_REVISION } from '../../src/data/catalog'
 import { APPLICATION_REVISION } from '../../src/domain/projectSchema'
-import { gotoEditor, pickOption, pickOptionByKeyboard, unlockWorkspace } from './helpers'
+import { gotoEditor, openSidePanels, pickOption, pickOptionByKeyboard, unlockWorkspace } from './helpers'
 
 const project = (id: string, name: string, preset: string, cabinetId: string, railId: 'rail-12' | 'rail-18', updatedAt: string) => ({
   schemaVersion: 3,
@@ -138,7 +138,7 @@ test('editor BOM exposes unknown pricing and the print report works from any tab
     target.print = () => { target.__panel36Printed = true }
   })
 
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await page.getByRole('button', { name: /NB1-63H 1P 6A C/ }).click()
   // The bill lives behind the centre-column «Спецификация» tab.
   await page.getByRole('tab', { name: 'Спецификация' }).click()
@@ -166,7 +166,7 @@ test('editor BOM exposes unknown pricing and the print report works from any tab
 test('keyboard placement controls and demo tabs are operable', async ({ page }) => {
   await unlockWorkspace(page)
   await page.goto('/app/editor')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await page.locator('.placed-device').first().click()
   const controls = page.getByRole('form', { name: 'Перемещение по клавиатуре' })
   // The apartment seed sits on a 2-row NX8-24 cabinet. The pad sits below the fold where

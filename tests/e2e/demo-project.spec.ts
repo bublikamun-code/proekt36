@@ -52,8 +52,9 @@ test.describe('separate read-only demo project', () => {
 
     await page.getByRole('tab', { name: 'Цепи', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Цепи и фазовый баланс' })).toBeVisible()
-    await expect(page.getByText('Розетки гостиной', { exact: true })).toBeVisible()
-    await expect(page.getByText('38 А', { exact: true })).toBeVisible()
+    // Scoped to the panel: the print report's cable journal now lists the same line by name.
+    await expect(page.locator('#demo-panel-circuits').getByText('Розетки гостиной', { exact: true })).toBeVisible()
+    await expect(page.locator('#demo-panel-circuits').getByText('38 А', { exact: true })).toBeVisible()
   })
 
   test('does not expose project or editor mutation controls', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
+import { closeSidePanels, gotoEditor, openSidePanels, seedProject, unlockWorkspace } from './helpers'
 
 /**
  * The working area fits the board to whatever room it has, and the user can also scale it by hand.
@@ -23,22 +23,31 @@ test('a manual zoom is not disturbed by the side panels', async ({ page }) => {
   await expect(fitButton(page)).toHaveAttribute('aria-pressed', 'false')
   const manual = await label(page).textContent()
 
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await closeSidePanels(page)
   await expect(label(page)).toHaveText(manual ?? '')
-  await page.getByRole('button', { name: 'Скрыть боковые панели' }).click()
+  await openSidePanels(page)
   await expect(label(page)).toHaveText(manual ?? '')
 })
 
 test('the buttons, the wheel and the fit button all scale the same board', async ({ page }) => {
+  await unlockWorkspace(page)
+  // The orientation card sits over the working area on a first visit and shrinks it after the
+  // board has already been fitted, so the fit would be measured against a column it no longer
+  // has. The same dismissal `seedProject` does, for the same reason.
+  await page.addInitScript(() => localStorage.setItem('panel36.hints.v1', 'dismissed'))
   await gotoEditor(page)
   const cabinet = page.locator('.cabinet')
   const scroll = page.locator('.canvas-scroll')
-  const before = (await cabinet.boundingBox())?.width ?? 0
-  expect(before).toBeGreaterThan(0)
+  // The board is fitted from the room the working area reports, so it measures zero for a frame
+  // or two after navigation. Every number below is compared against this one, and a zero read
+  // before the fit makes all of them wrong rather than merely early.
+  const width = async () => (await cabinet.boundingBox())?.width ?? 0
+  await expect.poll(width).toBeGreaterThan(0)
+  const before = await width()
 
   await page.getByRole('button', { name: 'Увеличить масштаб' }).click()
-  const grown = (await cabinet.boundingBox())?.width ?? 0
-  expect(grown).toBeGreaterThan(before)
+  await expect.poll(width).toBeGreaterThan(before)
+  const grown = await width()
 
   // Ctrl + wheel is the gesture the working area is expected to answer to, and it zooms in rather
   // than scrolling the page.

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
-import { unlockWorkspace } from './helpers'
+import { openSidePanels, unlockWorkspace } from './helpers'
 
 const SESSION = { kind: 'guest', name: 'Геометрия', createdAt: '2026-01-01T00:00:00.000Z' }
 
@@ -173,7 +173,7 @@ test('every placed device renders a frontal face with per-pole levers and pocket
   expect(faces[2]).toMatchObject({ modules: 2, toggles: 2, pockets: 4 })
 
   const frontView = page.locator('[data-front-view]')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await page.locator('.placed-device').first().click()
   await expect(frontView).toBeVisible()
   await expect(frontView.locator('svg.device-visual')).toBeVisible()

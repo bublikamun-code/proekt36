@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { glb } from './model-fixtures'
-import { dragWithPointer, gotoEditor, pickOption } from './helpers'
+import { dragWithPointer, gotoEditor, openSidePanels, pickOption } from './helpers'
 
 const importFirstFile = async (page: Page, options: { createProduct: boolean; name?: string }) => {
   const input = page.locator('input[type="file"][accept*=".glb"]')
@@ -35,7 +35,7 @@ const clearIndexedDbAssets = (page: Page) => page.evaluate(() => new Promise<voi
 test('re-importing the same file refreshes the asset in place and revives placements', async ({ page }) => {
   test.setTimeout(180_000)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   await importFirstFile(page, { createProduct: true, name: 'Возрождаемый аппарат' })
@@ -54,8 +54,7 @@ test('re-importing the same file refreshes the asset in place and revives placem
   await expect(page.locator('.model-row.is-missing').filter({ hasText: 'Возрождаемый аппарат' })).toBeVisible()
   await expect(page.locator('.placed-device[aria-label*="Возрождаемый аппарат"] svg.device-visual')).toHaveCount(1)
 
-  const reopenPanels = page.getByRole('button', { name: 'Показать боковые панели' })
-  if (await reopenPanels.isVisible()) await reopenPanels.click()
+  await openSidePanels(page)
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   // The same file returns: the dialog offers an in-place refresh instead of a duplicate.
@@ -79,7 +78,7 @@ test('re-importing the same file refreshes the asset in place and revives placem
 test('an asset can live without a product and then bind to a catalogue entry', async ({ page }) => {
   test.setTimeout(180_000)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   await importFirstFile(page, { createProduct: false, name: 'Полка без товара' })
@@ -114,7 +113,7 @@ test('a device whose product left the catalogue can be re-bound to a real produc
     }]))
   })
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const orphan = page.locator('.placed-device.missing-product')
   await expect(orphan).toHaveCount(1)

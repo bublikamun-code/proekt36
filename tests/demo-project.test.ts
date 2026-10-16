@@ -12,7 +12,6 @@ describe('read-only demo project fixture', () => {
     const products = demoProject.devices.map((device) => definitions.get(device.productId))
     expect(products.every(Boolean)).toBe(true)
     expect(products.every((product) => product?.brand === 'ENMAS / CHINT')).toBe(true)
-    expect(demoProject.devices.some((device) => device.productId.includes('city9'))).toBe(false)
     expect(demoProject.devices.some((device) => device.productId.includes('nb1-63dc'))).toBe(false)
   })
 

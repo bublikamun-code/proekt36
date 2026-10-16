@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
+import { closeSidePanels, gotoEditor, openSidePanels, seedProject, unlockWorkspace } from './helpers'
 
 /**
  * A refresh is a pause, not a restart: the user has to come back to the board they were on, at
@@ -21,7 +21,7 @@ test('a refresh keeps the project, the scale and the panels', async ({ page }) =
 
   await page.getByRole('button', { name: 'Увеличить масштаб' }).click()
   await page.getByRole('button', { name: 'Увеличить масштаб' }).click()
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(shell(page)).toHaveClass(/panels-open/)
   const scale = await zoomLabel(page).textContent()
   const url = page.url()
@@ -41,6 +41,10 @@ test('a first visit keeps its project across a refresh', async ({ page }) => {
   // refresh met a different one and dropped the user on the project list.
   await gotoEditor(page)
   await expect(page.locator('.editor-2d')).toBeVisible()
+  // The address-bound shell replaces the bare /app/editor with the project-scoped URL after
+  // the seed lands. Capture the address only after that redirect settles, otherwise the two
+  // sides of the refresh compare different routes and the race flips with machine load.
+  await expect(page).toHaveURL(/\/app\/projects\/[^/]+\/editor$/)
   const url = page.url()
 
   await page.reload()
@@ -54,9 +58,9 @@ test('closing the panels is remembered too', async ({ page }) => {
   await unlockWorkspace(page)
   await seedProject(page, [{ id: 'a', row: 0, slot: 0 }])
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(shell(page)).toHaveClass(/panels-open/)
-  await page.getByRole('button', { name: 'Скрыть боковые панели' }).click()
+  await closeSidePanels(page)
   await expect(shell(page)).not.toHaveClass(/panels-open/)
 
   await page.reload()

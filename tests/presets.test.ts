@@ -22,7 +22,7 @@ const setupStore = () => {
 }
 
 describe('preset product seeding', () => {
-  it('never seeds the City9 test sample or a template entry', () => {
+  it('never seeds a template entry', () => {
     const store = setupStore()
     for (const preset of ['apartment', 'house', 'workshop', 'lighting', 'demo']) {
       store.newProject(`Пресет ${preset}`, preset)
@@ -30,7 +30,6 @@ describe('preset product seeding', () => {
       const placed = store.currentProject.devices
       expect(placed.length).toBeGreaterThan(0)
       for (const device of placed) {
-        expect(device.productId).not.toMatch(/^city9-/)
         const product = store.definitions.get(device.productId)
         expect(product?.verificationStatus).not.toBe('template')
         expect(product?.imported).not.toBe(true)
@@ -47,6 +46,5 @@ describe('preset product seeding', () => {
     const placed = store.currentProject.devices
     const mcb = placed.find((device) => store.definitions.get(device.productId)?.category === 'MCB')
     expect(mcb?.productId).toBe(firstVerified.id)
-    expect(mcb?.productId).not.toBe('city9-mcb-2p-c16')
   })
 })

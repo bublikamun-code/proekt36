@@ -21,6 +21,22 @@ const freeze = async (page: import('@playwright/test').Page) => {
   // The board animates width and transform; a screenshot mid-transition is a coin flip.
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; }' })
   await page.evaluate(() => document.fonts.ready)
+  // The editor fits the board to the room the working area reports, which on a loaded machine
+  // takes a few frames longer than the fixed pause covers. Disabling transitions stops the
+  // animation but not the fit, so wait for the cabinet to stop being measured rather than for a
+  // duration: a shot taken one frame early differs from the baseline in a few thousand pixels
+  // and says nothing about the design.
+  const cabinet = page.locator('.cabinet')
+  if (await cabinet.count()) {
+    let last = -1
+    await expect.poll(async () => {
+      const box = await cabinet.boundingBox()
+      const width = Math.round(box?.width ?? 0)
+      const settled = width > 0 && width === last
+      last = width
+      return settled
+    }, { timeout: 20_000 }).toBe(true)
+  }
   await page.waitForTimeout(400)
 }
 

@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { dragWithPointer, gotoEditor } from './helpers'
+import { closeSidePanels, dragWithPointer, gotoEditor, openSidePanels } from './helpers'
 
 test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) => {
   await gotoEditor(page)
+  // Focused mode is what the toggle reaches, not what the editor now opens on: a first visit
+  // lands on the wide editor, and this test is about what the closed state looks like.
+  await closeSidePanels(page)
 
   await expect(page.getByRole('button', { name: '3D вид' })).toHaveCount(0)
   await expect(page.locator('.viewer-3d')).toHaveCount(0)
@@ -26,8 +29,10 @@ test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) 
     scrollBox.y + scrollBox.height + 1,
   )
 
+  // The comparison is «focused vs. with panels», so both ends are set rather than assumed.
+  await closeSidePanels(page)
   const viewportBeforePanels = await page.locator('.canvas-scroll').boundingBox()
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const viewportAfterPanels = await page.locator('.canvas-scroll').boundingBox()
   if (!viewportBeforePanels || !viewportAfterPanels) throw new Error('Viewport geometry is unavailable')
 
@@ -44,12 +49,19 @@ test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) 
 
 test('center-column tabs switch sections, keep the URL and survive a reload', async ({ page }) => {
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const tabs = page.locator('.editor-tabs [role="tab"]')
-  await expect(tabs).toHaveCount(4)
+  await expect(tabs).toHaveCount(5)
   await expect(page.locator('[data-editor-tab="2d"]')).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.editor-2d')).toBeVisible()
+
+  // The line planner sits between the board and the bill: the plan is where circuits are born,
+  // the board is where they get drawn.
+  await page.locator('[data-editor-tab="lines"]').click()
+  await expect(page.locator('#editor-panel-lines')).toBeVisible()
+  await expect(page.locator('#editor-panel-2d')).toBeHidden()
+  await expect(page).toHaveURL(/tab=lines/)
 
   // The bill tab shows the BOM and only it; the board keeps its DOM (state survives switching).
   await page.locator('[data-editor-tab="bom"]').click()
@@ -77,7 +89,7 @@ test('center-column tabs switch sections, keep the URL and survive a reload', as
 
 test('DIN drag shows a stable insertion preview before committing the move', async ({ page }) => {
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const source = page.locator('.placed-device').first()
   const instanceId = await source.getAttribute('data-instance-id')
@@ -116,7 +128,7 @@ test('2D DIN slots and the position pad use one-based labels', async ({ page }) 
 
 test('a CHINT-bound ENMAS breaker renders the bundled CAD preview in the 2D editor', async ({ page }) => {
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const search = page.getByLabel('Поиск по каталогу')
   await search.fill('NB1-63H 1P 16A C')
   const item = page.locator('.catalog-item').filter({ hasText: 'NB1-63H 1P 16A C' })

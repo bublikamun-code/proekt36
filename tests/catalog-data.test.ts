@@ -1,30 +1,27 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { allCatalog, builtinCatalog, enmasSeriesCatalog, sampleCatalog } from '../src/data/catalog'
+import { allCatalog, builtinCatalog, enmasSeriesCatalog } from '../src/data/catalog'
 import { assertCatalogUniqueness, validateCatalogFile, validateCatalogUniqueness } from '../src/data/catalog/schema'
 
 const generated = JSON.parse(readFileSync(resolve(process.cwd(), 'src/data/catalog/enmas.generated.json'), 'utf8')) as unknown[]
 
 describe('catalog data files', () => {
   it('keeps the expected split between hand-written and generated data', () => {
-    expect(builtinCatalog).toHaveLength(39)
+    expect(builtinCatalog).toHaveLength(48)
     expect(enmasSeriesCatalog).toHaveLength(344)
-    expect(sampleCatalog).toHaveLength(2)
-    expect(allCatalog).toHaveLength(385)
+    expect(allCatalog).toHaveLength(392)
   })
 
   it('passes shape validation for every file', () => {
     expect(validateCatalogFile('builtin.json', builtinCatalog)).toEqual([])
     expect(validateCatalogFile('enmas.generated.json', enmasSeriesCatalog)).toEqual([])
-    expect(validateCatalogFile('sample.json', sampleCatalog)).toEqual([])
   })
 
   it('keeps ids and brand+sku pairs unique across the whole catalogue', () => {
     expect(() => validateCatalogUniqueness([
       { file: 'builtin.json', items: builtinCatalog },
       { file: 'enmas.generated.json', items: enmasSeriesCatalog },
-      { file: 'sample.json', items: sampleCatalog },
     ])).not.toThrow()
   })
 
@@ -45,7 +42,9 @@ describe('catalog data files', () => {
     // The audit baseline: 274 verified + 70 template across the ENMAS combinatorics.
     expect(verified).toHaveLength(274)
     expect(templates).toHaveLength(70)
-    expect(builtinCatalog.every((product) => product.verificationStatus === undefined)).toBe(true)
+    // Built-in entries are either confirmed (no flag) or the nine CHINT drawing templates.
+    expect(builtinCatalog.filter((product) => product.verificationStatus === 'template')).toHaveLength(9)
+    expect(builtinCatalog.every((product) => product.verificationStatus === undefined || product.verificationStatus === 'template')).toBe(true)
   })
 
   it('fails validation on a poisoned record instead of shipping it', () => {

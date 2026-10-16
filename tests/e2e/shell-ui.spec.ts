@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor } from './helpers'
+import { closeSidePanels, gotoEditor, openSidePanels } from './helpers'
 
 test.describe('shell UI', () => {
   test('editor exposes only the 2D board', async ({ page }) => {
@@ -17,14 +17,14 @@ test.describe('shell UI', () => {
     await page.getByRole('button', { name: 'Включить тёмную тему' }).click()
 
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     await expect(page.getByRole('heading', { name: 'Каталог' })).toHaveCSS('color', 'rgb(238, 245, 239)')
     await expect(page.getByRole('region', { name: 'Схема электрощита' })).toBeVisible()
   })
 
   test('undo shortcut is not intercepted by catalog input', async ({ page }) => {
     await gotoEditor(page)
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     const search = page.getByRole('searchbox', { name: 'Поиск по каталогу' })
 
     const prevented = await search.evaluate((input) => {
@@ -55,7 +55,8 @@ test.describe('shell UI', () => {
     await page.setViewportSize({ width: 768, height: 900 })
     await gotoEditor(page)
     await expect(page.getByRole('region', { name: 'Схема электрощита' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Показать боковые панели' })).toBeVisible()
+    // The toggle is what has to survive the narrow viewport, whichever way it is currently set.
+    await expect(page.locator('[data-panel-toggle]')).toBeVisible()
   })
 
   test('project menu is styled, keyboard-driven and closes on an outside press', async ({ page }) => {
@@ -91,7 +92,7 @@ test.describe('shell UI', () => {
 
   test('deleting a device asks for confirmation in the product dialog', async ({ page }) => {
     await gotoEditor(page)
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     const devices = page.locator('.placed-device')
     const before = await devices.count()
     expect(before).toBeGreaterThan(0)

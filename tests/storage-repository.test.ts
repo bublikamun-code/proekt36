@@ -103,6 +103,21 @@ describe('workspace repository', () => {
     expect(result.recovery).toHaveLength(0)
   })
 
+  it('reads a board the previous build wrote into the current key instead of calling it damage', () => {
+    const storage = new MemoryStorage()
+    // The key keeps its name when the schema version moves, so after an upgrade the installed
+    // panel is still sitting there as the version the previous build wrote. Treating that as
+    // corruption would hand the user a recovery snapshot of their own board and an empty panel.
+    const written = project('Щит до линий')
+    storage.set(PROJECTS_KEY, [{ ...written, schemaVersion: 3, rooms: undefined }])
+
+    const result = new WorkspaceRepository(storage).load([project('Fallback')])
+
+    expect(result.projects[0]).toMatchObject({ id: written.id, name: 'Щит до линий', schemaVersion: PROJECT_SCHEMA_VERSION })
+    expect(result.projects[0]!.rooms).toEqual([])
+    expect(result.recovery).toHaveLength(0)
+  })
+
   it('keeps the previous valid snapshot as a backup and reports quota errors', () => {
     const storage = new MemoryStorage()
     const first = project('Первый')

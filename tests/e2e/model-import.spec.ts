@@ -150,13 +150,13 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   await connectionCard.getByLabel('Подпись').fill('PE к QF01')
   await connectionCard.getByLabel('Подпись').press('Tab')
 
+  // The class still names the bus, so the theme keeps owning the palette; the colour the user
+  // typed arrives as an inline stroke on top of it, and the thickness arrives as a stroke width.
   await expect(firstWire).toHaveClass(/wire-pe/)
   await expect(firstWire.locator('title')).toHaveText('PE к QF01')
-  // The board paints a conductor by the bus it comes from, so choosing PE is what turns the
-  // wire green on the plate. The custom colour and thickness stay on the connection itself —
-  // they are what the print report quotes — and the inspector is where they are read back.
-  await expect(connectionCard.getByLabel('Цвет')).toHaveValue('#2c7155')
-  await expect(connectionCard.getByLabel('Толщина')).toHaveValue('4')
+  await expect(firstWire).toHaveCSS('stroke', 'rgb(44, 113, 85)')
+  // 4 mm of conductor at the drawing's 0.4 px/mm — a 2 mm run is the 0.8 px the stylesheet uses.
+  await expect(firstWire).toHaveCSS('stroke-width', '1.6px')
 
   await circuitCard.getByRole('button', { name: '＋ Подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(2)

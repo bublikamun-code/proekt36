@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 const DEMO_SESSION = {
   kind: 'guest',
@@ -11,6 +11,31 @@ export const unlockWorkspace = async (page: Page) => {
     sessionStorage.setItem('panel36.demo-session.v1', JSON.stringify(session))
   }, DEMO_SESSION)
 }
+
+/**
+ * The board-only toggle. Its label is derived from the state — «Показать боковые панели» while
+ * the panels are hidden, «Скрыть…» while they are showing — so a test that clicks it by name is
+ * asserting the starting layout, not just asking for the panels. `aria-pressed` is the state
+ * itself, and it is what these helpers read: a test that needs the catalogue has to be able to
+ * get it whether the editor opened wide or focused, and on whichever side a previous run left
+ * the preference.
+ */
+const panelToggle = async (page: Page) => {
+  const toggle = page.locator('[data-panel-toggle]')
+  await toggle.waitFor()
+  return toggle
+}
+
+const setSidePanels = async (page: Page, open: boolean) => {
+  const toggle = await panelToggle(page)
+  const focused = (await toggle.getAttribute('aria-pressed')) === 'true'
+  if (focused === open) await toggle.click()
+  // Reading the state back is also the wait: the click only lands once the shell re-renders.
+  await expect(toggle).toHaveAttribute('aria-pressed', String(!open))
+}
+
+export const openSidePanels = (page: Page) => setSidePanels(page, true)
+export const closeSidePanels = (page: Page) => setSidePanels(page, false)
 
 export const gotoEditor = async (page: Page) => {
   await unlockWorkspace(page)

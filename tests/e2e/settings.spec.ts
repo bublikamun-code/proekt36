@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { glb } from './model-fixtures'
-import { gotoEditor, pickOption } from './helpers'
+import { gotoEditor, openSidePanels, pickOption } from './helpers'
 
 test('settings are reachable from the persistent nav and manage the workspace', async ({ page }) => {
   await gotoEditor(page)
@@ -13,10 +13,16 @@ test('settings are reachable from the persistent nav and manage the workspace', 
   await expect(nav.getByRole('link', { name: 'Настройки' })).toHaveAttribute('aria-current', 'page')
   await expect(page).toHaveURL(/\/app\/settings$/)
 
-  // The embedded City9 model ships with the app and must not offer deletion.
+  // The screen is a flowing page, not the editor shell's 44px action-bar row:
+  // when the settings content collapses into a sliver, clicks still auto-scroll
+  // and pass, so the guard has to be geometric.
+  const columnHeight = await page.locator('.settings-page').evaluate((el) => el.getBoundingClientRect().height)
+  expect(columnHeight).toBeGreaterThan(300)
+
+  // The embedded CHINT model ships with the app and must not offer deletion.
   const rows = page.locator('.settings-table').first().locator('tbody tr')
-  await expect(rows.filter({ hasText: 'City9 MCB 2P' })).toContainText('встроенная')
-  await expect(rows.filter({ hasText: 'City9 MCB 2P' }).locator('button')).toHaveCount(0)
+  await expect(rows.filter({ hasText: 'CHINT NB1-63 2P' })).toContainText('встроенная')
+  await expect(rows.filter({ hasText: 'CHINT NB1-63 2P' }).locator('button')).toHaveCount(0)
 
   // Theme flips both ways and sticks.
   await page.getByLabel('Тёмная тема').check()
@@ -31,7 +37,7 @@ test('settings are reachable from the persistent nav and manage the workspace', 
 test('an imported model appears in the settings library and a binding can be dropped', async ({ page }) => {
   test.setTimeout(180_000)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   // Import one model without a stub, then bind it to a seeded catalogue product.
   const input = page.locator('input[type="file"][accept*=".glb"]')

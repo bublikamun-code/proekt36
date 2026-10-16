@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test'
-import { unlockWorkspace } from './helpers'
+import { openSidePanels, unlockWorkspace } from './helpers'
 
 const project = {
   schemaVersion: 3,
@@ -26,7 +26,7 @@ const openEditor = async (page: import('@playwright/test').Page) => {
     payload: [project],
   })
   await page.goto('/app/editor')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const assistant = page.locator('.assistant')
   await assistant.getByRole('button', { name: 'ИИ-помощник' }).click()
   return assistant
