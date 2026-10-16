@@ -45,7 +45,8 @@ const mutateCentralDirectory = (archive: Uint8Array, mutate: (view: DataView, of
 describe('model import validation', () => {
   it('accepts a valid GLB v2 container', async () => {
     const prepared = await validateModelFile(file('device.glb', makeGlb()))
-    expect(prepared.metadata.fileType).toBe('glb')
+    expect(prepared.draft.format).toBe('glb')
+    expect(prepared.draft.category).toBe('MCB')
     expect(prepared.mimeType).toBe('model/gltf-binary')
   })
 

@@ -12,18 +12,21 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three'
-import { loadPreviewModel } from './modelCache'
+import type { ModelAsset } from '../../domain/types'
+import { loadModelObject } from '../../services/modelRender'
 
 type PreviewObject = Object3D
 
+/**
+ * The live rotating-canvas preview for the inspector. Lists and boards show raster thumbnails
+ * from the modelRender service; this is the one place that keeps a WebGL context of its own.
+ */
 const props = withDefaults(defineProps<{
-  url?: string
-  assetId?: string
+  model: ModelAsset
   width?: number
   height?: number
   label?: string
-  rotationY?: number
-}>(), { width: 42, height: 66, label: 'CAD-модель устройства', rotationY: 0 })
+}>(), { width: 42, height: 66, label: 'CAD-модель устройства' })
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const state = ref<'loading' | 'ready' | 'error'>('loading')
@@ -36,12 +39,11 @@ let resizeObserver: ResizeObserver | undefined
 let disposed = false
 let renderToken = 0
 
-const loadModel = () => loadPreviewModel({ assetId: props.assetId, url: props.url })
-
 const renderModel = (model: PreviewObject) => {
   if (!renderer || !scene || !camera) return
   root = new Group()
-  root.rotation.y = props.rotationY
+  root.rotation.y = props.model.transform.rotationY
+  root.scale.setScalar(props.model.transform.scale)
   root.add(model.clone(true))
   const box = new Box3().setFromObject(root)
   const center = box.getCenter(new Vector3())
@@ -68,7 +70,7 @@ const render = async () => {
   if (scene && root) scene.remove(root)
   root = undefined
   try {
-    const model = await loadModel()
+    const model = await loadModelObject(props.model)
     if (disposed || token !== renderToken) return
     if (!renderer) {
       renderer = new WebGLRenderer({ canvas: element, antialias: true, alpha: true, powerPreference: 'low-power' })
@@ -87,7 +89,7 @@ const render = async () => {
     resize()
     state.value = 'ready'
   } catch (error) {
-    if (!disposed && token === renderToken) {
+    if (!disposed && token !== renderToken) {
       errorMessage.value = error instanceof Error ? error.message : 'CAD-модель недоступна'
       state.value = 'error'
     }
@@ -105,11 +107,6 @@ const resize = () => {
   if (root) renderer.render(scene!, camera)
 }
 
-/**
- * Frees this preview's own WebGL context and observer. The parsed scene it drew is owned by
- * `modelCache` and shared with every other preview of the same model, so it is deliberately not
- * disposed here — see the note in that module.
- */
 const dispose = () => {
   disposed = true
   resizeObserver?.disconnect()
@@ -122,12 +119,12 @@ const dispose = () => {
 }
 
 onMounted(() => { void render() })
-watch([() => props.url, () => props.assetId], () => { if (!disposed) void render() })
+watch([() => props.model, () => props.width, () => props.height], () => { if (!disposed) void render() })
 onBeforeUnmount(dispose)
 </script>
 
 <template>
-  <div class="model-preview" role="img" :class="`state-${state}`" :style="{ width: `${width}px`, height: `${height}px` }" :data-model-preview="assetId ? `asset:${assetId}` : url" :aria-label="label">
+  <div class="model-preview" role="img" :class="`state-${state}`" :style="{ width: `${width}px`, height: `${height}px` }" :data-model-preview="model.source === 'local' ? `asset:${model.id}` : model.url" :aria-label="label">
     <canvas ref="canvas" aria-hidden="true"></canvas>
     <span v-if="state === 'loading'" class="model-preview-status">загрузка CAD…</span>
     <span v-else-if="state === 'error'" class="model-preview-status error">{{ errorMessage || 'CAD недоступен' }}</span>

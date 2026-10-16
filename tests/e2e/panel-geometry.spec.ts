@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
-import { unlockWorkspace } from './helpers'
+import { openSidePanels, unlockWorkspace } from './helpers'
 
 const device = (productId: string, row: number, slot: number, quantity = 1) => ({
   instanceId: `${productId}-${row}-${slot}`,
@@ -16,7 +16,7 @@ const device = (productId: string, row: number, slot: number, quantity = 1) => (
 })
 
 const project = (name: string, settings: Record<string, unknown>, devices: ReturnType<typeof device>[]) => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: `geometry-${name}`,
   name,
   preset: 'test',
@@ -26,6 +26,8 @@ const project = (name: string, settings: Record<string, unknown>, devices: Retur
   devices,
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 })
 
 const openEditorWith = async (page: Page, value: unknown) => {
@@ -170,7 +172,7 @@ test('every placed device renders a frontal face with per-pole levers and pocket
   expect(faces[2]).toMatchObject({ modules: 2, toggles: 2, pockets: 4 })
 
   const frontView = page.locator('[data-front-view]')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await page.locator('.placed-device').first().click()
   await expect(frontView).toBeVisible()
   await expect(frontView.locator('svg.device-visual')).toBeVisible()

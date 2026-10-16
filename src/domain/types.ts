@@ -1,17 +1,18 @@
+import type { TerminalRef } from './terminals'
+
 export type Phase = 1 | 3
 
-/**
- * Модель каталога (Category, BusType, VerificationStatus, DeviceDefinition,
- * DEVICE_CATEGORIES) определена в самом каталоге и реэкспортируется здесь:
- * источник правды один, домен потребляет.
- */
-import type { Category, BusType, VerificationStatus, DeviceDefinition } from '../data/catalog/types'
-import { DEVICE_CATEGORIES } from '../data/catalog/types'
-export type { Category, BusType, VerificationStatus, DeviceDefinition }
-export { DEVICE_CATEGORIES }
+export const DEVICE_CATEGORIES = [
+  'MCB', 'RCCB', 'RCBO', 'SPD', 'relay', 'terminals', 'busbar', 'meter', 'PSU',
+] as const
+
+export type Category = typeof DEVICE_CATEGORIES[number]
+
+export type BusType = 'L' | 'N' | 'PE'
 
 export type RailSlotCount = 12 | 18
 export type EnclosureMountingType = 'embedded' | 'surface'
+export type VerificationStatus = 'verified' | 'template' | 'legacy'
 
 export interface RailDefinition {
   id: 'rail-12' | 'rail-18'
@@ -40,6 +41,11 @@ export interface CabinetDefinition {
   verificationStatus: VerificationStatus
 }
 
+/** What a line feeds, so the planner and the cable schedule can tell a socket run from lighting. */
+export type CircuitKind = 'power' | 'light' | 'dc' | 'control'
+
+export const CIRCUIT_KINDS: readonly CircuitKind[] = ['power', 'light', 'dc', 'control'] as const
+
 export interface Circuit {
   id: string
   name: string
@@ -51,6 +57,18 @@ export interface Circuit {
   color: string
   wireCrossSection: number
   note: string
+  /** Room grouping for the planner; empty means the line sits outside any room. */
+  roomId?: string
+  kind?: CircuitKind
+  /** Outgoing cable length in metres; 0 or absent means not planned yet. */
+  cableLength?: number
+}
+
+/** A planning group for lines — a room on a floor, the way a estimate worksheet expects. */
+export interface Room {
+  id: string
+  name: string
+  floor: number
 }
 
 export interface Connection {
@@ -61,29 +79,116 @@ export interface Connection {
   color: string
   thickness: number
   label: string
-  /**
-   * Where the wire comes from, which is the one thing a line on a board cannot show by itself.
-   *
-   * `circuit` — a line of a circuit: its colour and its name belong to the circuit.
-   * `busbar`  — a run from another device, a fork or a breaker; `fromDeviceId` names where it
-   *             leaves from.
-   * `bus`     — a feed from the panel bus itself, with no source device because the bus is not a
-   *             device. This is what a feed drawn by hand on the board records, and what an older
-   *             project means by a connection that names no circuit and no source.
-   */
-  kind?: 'circuit' | 'busbar' | 'bus'
+  kind?: 'circuit' | 'busbar' | 'jumper'
   fromDeviceId?: string
-  /**
-   * Which terminal of the device the wire enters, counted within its side, zero-based.
-   *
-   * A breaker decides its own: one column is the line, the next is the neutral, and the bus says
-   * which is which. A terminal block cannot decide — it has six screws of the same bus, and only
-   * the person who wired it knows that this circuit sits on the third. Absent means the first, so a
-   * block wired before this field existed lands exactly where it always did.
-   */
-  terminal?: number
-  /** The same choice for the device the wire leaves from, for the same reason. */
-  fromTerminal?: number
+  /** Terminal the conductor leaves, for a device-to-device jumper. */
+  fromTerminal?: TerminalRef
+  /** Terminal the conductor enters; required for a jumper, absent for a bus-fed line. */
+  toTerminal?: TerminalRef
+  /** Phase the conductor carries, used for the wire colour when no explicit colour is set. */
+  phase?: 1 | 2 | 3
+  /** Board bus the conductor is fed from, instead of the abstract left-hand column. */
+  busId?: string
+}
+
+/** A visible bus running along the top or the bottom of the mounting plate. */
+export interface BusAssembly {
+  id: string
+  kind: BusType
+  placement: 'top' | 'bottom'
+  label?: string
+}
+
+/** A comb busbar bridging the top terminals of a run of devices in one row. */
+export interface RowComb {
+  id: string
+  row: number
+  /** 1, 2, 3 or 4 conductors: a single-phase or a three-phase fork. */
+  poles: 1 | 2 | 3 | 4
+  /** Inclusive slot range the comb covers. */
+  fromSlot: number
+  toSlot: number
+  label?: string
+}
+
+export interface DeviceDefinition {
+  id: string
+  name: string
+  brand: string
+  sku: string
+  category: Category
+  moduleWidth: number
+  poles: number
+  ratedCurrent: number
+  voltage: 230 | 400
+  bus: BusType
+  price: number
+  weight: number
+  height: number
+  depth: number
+  imported?: boolean
+  /** Link to a ModelAsset; visual only, never part of the electrical model. */
+  modelId?: string
+  series?: string
+  tripCurve?: 'B' | 'C' | 'D'
+  residualCurrentMa?: number
+  terminalCount?: number
+  sourceUrl?: string
+  verificationStatus?: VerificationStatus
+}
+
+export type ModelFormat = 'glb' | 'gltf' | 'gltf-zip'
+
+/** Normalization applied at import so every asset renders in metres, front to the viewer. */
+export interface ModelTransform {
+  scale: number
+  rotationY: number
+}
+
+export interface ModelAsset {
+  id: string
+  name: string
+  /** 'embedded' ships with the app from /public; 'local' lives in IndexedDB. */
+  source: 'embedded' | 'local'
+  url?: string
+  format: ModelFormat
+  transform: ModelTransform
+  /** Raster preview generated on import; boards and catalog lists never spawn WebGL for it. */
+  thumbnailDataUrl?: string
+  fileName?: string
+  createdAt: string
+  /** The IndexedDB binary is gone; re-importing the same file restores it in place. */
+  missing?: boolean
+}
+
+export type StoredModelAsset = ModelAsset & { source: 'local' }
+
+/** Everything the model library persists in one localStorage record. */
+export interface StoredModelLibrary {
+  assets: StoredModelAsset[]
+  /** Product stubs created from imports; referenced by PlacedDevice.productId. */
+  products: DeviceDefinition[]
+  /** productId → modelId overrides that attach a model to a built-in product. */
+  bindings: Record<string, string>
+}
+
+/** Form defaults offered when an imported file becomes a catalogue product stub. */
+export interface ImportedProductDraft {
+  name: string
+  brand: string
+  sku: string
+  category: Category
+  moduleWidth: number
+  poles: number
+  ratedCurrent: number
+  voltage: 230 | 400
+  bus: BusType
+  price: number
+  weight: number
+  height: number
+  depth: number
+  fileName: string
+  format: ModelFormat
 }
 
 export interface PlacedDevice {
@@ -122,6 +227,9 @@ export interface PanelProject {
   devices: PlacedDevice[]
   circuits: Circuit[]
   connections: Connection[]
+  busAssemblies?: BusAssembly[]
+  combs?: RowComb[]
+  rooms?: Room[]
 }
 
 export type IssueLevel = 'error' | 'warning' | 'info'
@@ -145,7 +253,8 @@ export interface BomLine {
   name: string
   brand: string
   sku: string
-  category: Category
+  /** Unknown for a device whose product left the catalogue; the line still shows. */
+  category?: Category
   /** Purchase quantity; it is deliberately not a physical footprint. */
   quantity: number
   /** Kept numeric for existing UI callers. Use priceKnown/priceStatus for semantics. */
@@ -156,29 +265,8 @@ export interface BomLine {
   priceStatus: 'known' | 'unknown'
 }
 
-export interface ModelMetadata {
-  id: string
-  name: string
-  brand: string
-  sku: string
-  category: Category
-  moduleWidth: number
-  rows: number
-  height: number
-  depth: number
-  poles: number
-  ratedCurrent: number
-  voltage: 230 | 400
-  bus: BusType
-  price: number
-  weight: number
-  fileName: string
-  fileType: 'glb' | 'gltf'
-  createdAt: string
-}
-
 export interface PreparedModel {
-  metadata: Omit<ModelMetadata, 'id' | 'createdAt'>
+  draft: ImportedProductDraft
   data: ArrayBuffer
   mimeType: string
   fileName: string

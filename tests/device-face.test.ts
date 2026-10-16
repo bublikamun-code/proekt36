@@ -204,13 +204,13 @@ describe('2.5D face relief', () => {
   it('groups catalog devices into a small set of neutral shell families', () => {
     expect(faceShellFamily(product('ekf-mcb-1p-c6'))).toBe('light')
     expect(faceShellFamily(product('ekf-contactor-2p-25'))).toBe('warm')
-    expect(faceShellFamily(product('enmas-nb1-63h-2p-40a-c'))).toBe('light')
+    expect(faceShellFamily(product('enmas-nb1-63h-2p-40a-c'))).toBe('chint')
     expect(faceShellFamily(product('enmas-nu6-iig-2p-440v'))).toBe('graphite')
     expect(faceShellFamily(product('meanwell-psu-24v-10a'))).toBe('psu')
     expect(faceShellFamily(product('ekf-mcb-1p-c6'))).not.toBe(faceShellFamily(product('ekf-contactor-2p-25')))
     const families = new Set(allCatalog.map(faceShellFamily))
     expect(families.size).toBeGreaterThan(1)
-    expect(families.size).toBeLessThanOrEqual(7)
+    expect(families.size).toBeLessThanOrEqual(8)
   })
 })
 

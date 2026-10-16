@@ -43,6 +43,7 @@ export const router = createRouter({
         // it has always had rather than replaced on the spot.
         { path: 'projects/:projectId/board', name: 'project-board', component: () => import('../views/BoardWorkspaceView.vue') },
         { path: 'board', name: 'board', component: () => import('../views/BoardWorkspaceView.vue') },
+        { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', name: 'notFound', component: () => import('../views/NotFoundView.vue') },

@@ -1,32 +1,41 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
-import type { DeviceDefinition } from '../../domain/types'
+import { computed, ref, watch } from 'vue'
+import type { DeviceDefinition, ModelAsset } from '../../domain/types'
+import { getThumbnail } from '../../services/modelRender'
 import DeviceChassis from './deviceFace/DeviceChassis.vue'
 import DeviceFace from './deviceFace/DeviceFace.vue'
-import { getDeviceFaceMetrics, faceShellFamily } from '../../domain/faceMetrics'
+import ChintFace from './deviceFace/ChintFace.vue'
+import { getDeviceFaceMetrics, faceShellFamily } from './deviceFace/metrics'
 
-const ModelPreview = defineAsyncComponent(() => import('./ModelPreview.vue'))
-
-const props = defineProps<{ product: DeviceDefinition; width?: number; height?: number }>()
+const props = defineProps<{ product: DeviceDefinition; model?: ModelAsset | null; width?: number; height?: number }>()
 
 const face = computed(() => getDeviceFaceMetrics(props.product))
+/** The CHINT NB/NL platform follows its own manufacturer drawings. */
+const isChint = computed(() => faceShellFamily(props.product) === 'chint' && ['MCB', 'RCCB', 'RCBO'].includes(props.product.category))
 const isBusbar = computed(() => props.product.category === 'busbar')
 const busbarLabel = computed(() => (props.product.series === 'FORK' ? 'FORK' : 'BUS'))
 const busbarTicks = computed(() => Array.from({ length: Math.max(1, face.value.moduleWidth) }, (_, index) => face.value.body.x + 1.2 + (index * (face.value.body.width - 2.4)) / face.value.moduleWidth))
 const pxWidth = computed(() => Math.max(14, props.width ?? face.value.widthMm))
 const pxHeight = computed(() => Math.max(20, props.height ?? face.value.heightMm))
+
+// The raster preview arrives asynchronously; until it does (or forever, when the CAD file
+// is gone) the procedural face stays on screen, so a list never shows error placeholders.
+const thumbUrl = ref<string | null>(null)
+watch(() => props.model, (asset) => {
+  thumbUrl.value = null
+  if (asset) void getThumbnail(asset).then((url) => { thumbUrl.value = url })
+}, { immediate: true })
 </script>
 
 <template>
-  <ModelPreview
-    v-if="product.modelPreviewUrl || product.modelAssetId"
-    :url="product.modelPreviewUrl"
-    :asset-id="product.modelAssetId"
-    :width="pxWidth"
-    :height="pxHeight"
-    :rotation-y="product.modelPreviewRotationY"
-    :label="`Реальная модель: ${product.name}`"
-  />
+  <span
+    v-if="model && thumbUrl"
+    class="model-thumb"
+    :data-model-preview="model.source === 'local' ? `asset:${model.id}` : model.url"
+    :style="{ width: `${pxWidth}px`, height: `${pxHeight}px` }"
+    role="img"
+    :aria-label="`Реальная модель: ${product.name}`"
+  ><img :src="thumbUrl" alt="" draggable="false" /></span>
   <svg
     v-else
     class="device-visual"
@@ -43,9 +52,31 @@ const pxHeight = computed(() => Math.max(20, props.height ?? face.value.heightMm
       <path class="dv-busbar-tick" :d="busbarTicks.map((x) => `M ${x} ${face.body.y + face.body.height * 0.3} V ${face.body.y + face.body.height * 0.7}`).join(' ')" />
       <text v-if="face.detail !== 'minimal'" class="dv-label" :x="face.widthMm / 2" :y="face.body.y + face.body.height * 0.88" font-size="2.4" font-weight="700" text-anchor="middle">{{ busbarLabel }}</text>
     </g>
+    <template v-else-if="isChint">
+      <ChintFace :product="product" />
+    </template>
     <template v-else>
       <DeviceChassis :product="product" :metrics="face" />
       <DeviceFace :product="product" :metrics="face" />
     </template>
   </svg>
 </template>
+
+<style scoped>
+.model-thumb {
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(70, 83, 76, .22);
+  border-radius: 3px;
+  background: linear-gradient(145deg, #eef0e9, #d9ded7);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .8);
+}
+
+.model-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+</style>

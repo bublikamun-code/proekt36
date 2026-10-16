@@ -17,7 +17,7 @@ test.describe('separate read-only demo project', () => {
     await expect(page.locator('input[type="file"]')).toHaveCount(0)
 
     await expect.poll(() => page.evaluate(() => sessionStorage.getItem('panel36.demo-session.v1'))).toBeNull()
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('panel36.projects.v2'))).toBeNull()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('panel36.projects.v3'))).toBeNull()
     await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).some((database) => database.name === 'panel36-models'))).toBe(false)
   })
 
@@ -41,8 +41,7 @@ test.describe('separate read-only demo project', () => {
 
     await page.getByRole('tab', { name: 'BOM', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'BOM проекта' })).toBeVisible()
-    // Brands come from the working catalogue now; the demo names positions it can actually resolve.
-    await expect(page.getByText(/EKF|IEK/).first()).toBeVisible()
+    await expect(page.getByText(/ENMAS \/ CHINT/).first()).toBeVisible()
     await expect(page.getByText('«уточняется»', { exact: true }).first()).toBeVisible()
 
     await page.getByRole('tab', { name: 'Проверки', exact: true }).click()
@@ -53,8 +52,9 @@ test.describe('separate read-only demo project', () => {
 
     await page.getByRole('tab', { name: 'Цепи', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Цепи и фазовый баланс' })).toBeVisible()
+    // Scoped to the panel: the print report's cable journal now lists the same line by name.
     await expect(page.locator('#demo-panel-circuits').getByText('Розетки гостиной', { exact: true })).toBeVisible()
-    await expect(page.getByText('38 А', { exact: true })).toBeVisible()
+    await expect(page.locator('#demo-panel-circuits').getByText('38 А', { exact: true })).toBeVisible()
   })
 
   test('does not expose project or editor mutation controls', async ({ page }) => {

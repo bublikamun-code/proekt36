@@ -1,9 +1,8 @@
 import { expect, test, type Locator } from '@playwright/test'
-import { ASSISTANT_CONTEXT_REVISION } from '../../src/domain/assistantContext'
-import { unlockWorkspace } from './helpers'
+import { openSidePanels, unlockWorkspace } from './helpers'
 
 const project = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'assistant-project',
   name: 'Квартира-стенд',
   preset: 'apartment',
@@ -16,6 +15,8 @@ const project = {
   ],
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 }
 
 const openEditor = async (page: import('@playwright/test').Page) => {
@@ -25,7 +26,7 @@ const openEditor = async (page: import('@playwright/test').Page) => {
     payload: [project],
   })
   await page.goto('/app/editor')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const assistant = page.locator('.assistant')
   await assistant.getByRole('button', { name: 'ИИ-помощник' }).click()
   return assistant
@@ -92,14 +93,14 @@ test.describe('ИИ-помощник', () => {
     for (const secret of ['Квартира-стенд', 'assistant-project', 'QF01', 'Секретная нагрузка', 'ekf-mcb-1p-c6', 'AVO-10']) {
       expect(bodies[0]).not.toContain(secret)
     }
-    expect(bodies[0]).toContain(ASSISTANT_CONTEXT_REVISION)
+    expect(bodies[0]).toContain('panel36.assistant-context.v1')
     // The proxy forwards `context` only when it is a string and used to drop an object in
     // silence, so the model answered without ever seeing the panel. Assert the type rather
     // than the bytes: a nested object still contains the revision and would pass a substring
     // check, which is why the bug survived this test.
     const sent = JSON.parse(bodies[0]) as { context?: unknown }
     expect(typeof sent.context, 'сводка должна уходить строкой, иначе прокси её отбросит').toBe('string')
-    expect(JSON.parse(sent.context as string)).toMatchObject({ revision: ASSISTANT_CONTEXT_REVISION })
+    expect(JSON.parse(sent.context as string)).toMatchObject({ revision: 'panel36.assistant-context.v1' })
 
     await expect(assistant.getByText(/Отклонено:.*неизвестный код/)).toBeVisible()
 

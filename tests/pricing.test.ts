@@ -55,4 +55,15 @@ describe('CSV export', () => {
     const csv = bomToCsv([createDevice(free, 0, 0)], new Map([['p-free', free]]))
     expect(csv).toContain('уточняется')
   })
+
+  it('keeps a device without a catalogue product visible in the bill', () => {
+    // After a move to another machine the product may not resolve; dropping the line
+    // used to understate totals and weight silently.
+    const lines = buildBom([createDevice(base, 0, 0)], new Map())
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ name: 'Нет в каталоге', sku: base.id, quantity: 1, priceKnown: false, weight: 0 })
+    expect(lines[0]?.category).toBeUndefined()
+    const summary = pricing([createDevice(base, 0, 0)], new Map())
+    expect(summary.hasUnknownPrices).toBe(true)
+  })
 })

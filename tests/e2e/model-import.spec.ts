@@ -1,101 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { strToU8, zipSync } from 'fflate'
 import { categoryLabels } from '../../src/data/catalog'
 import type { Category } from '../../src/domain/types'
+import { glb, standaloneGltf, zipModel } from './model-fixtures'
 import { dragWithPointer, gotoEditor, openSidePanels, pickOption } from './helpers'
-
-const positions = new Float32Array([
-  -0.6, -0.5, 0,
-  0.6, -0.5, 0,
-  0, 0.6, 0,
-])
-const textureCoordinates = new Float32Array([
-  0, 0,
-  1, 0,
-  0.5, 1,
-])
-
-const geometry = () => {
-  const result = new Uint8Array(positions.byteLength + textureCoordinates.byteLength)
-  result.set(new Uint8Array(positions.buffer), 0)
-  result.set(new Uint8Array(textureCoordinates.buffer), positions.byteLength)
-  return result
-}
-
-const dataUri = (bytes: Uint8Array, type: string) =>
-  `data:${type};base64,${Buffer.from(bytes).toString('base64')}`
-
-const pixelPng = Uint8Array.from(Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  'base64',
-))
-
-const gltf = (bufferUri: string, imageUri: string) => ({
-  asset: { version: '2.0', generator: 'Panel36 import test' },
-  scene: 0,
-  scenes: [{ nodes: [0] }],
-  nodes: [{ mesh: 0 }],
-  meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 }] }],
-  materials: [{
-    pbrMetallicRoughness: {
-      baseColorTexture: { index: 0 },
-      metallicFactor: 0.2,
-      roughnessFactor: 0.65,
-    },
-    doubleSided: true,
-  }],
-  textures: [{ source: 0, sampler: 0 }],
-  samplers: [{ magFilter: 9729, minFilter: 9987 }],
-  images: [{ uri: imageUri }],
-  accessors: [
-    { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [-0.6, -0.5, 0], max: [0.6, 0.6, 0] },
-    { bufferView: 1, componentType: 5126, count: 3, type: 'VEC2' },
-  ],
-  bufferViews: [
-    { buffer: 0, byteOffset: 0, byteLength: positions.byteLength, target: 34962 },
-    { buffer: 0, byteOffset: positions.byteLength, byteLength: textureCoordinates.byteLength, target: 34962 },
-  ],
-  buffers: [{ uri: bufferUri, byteLength: geometry().byteLength }],
-})
-
-const pad = (bytes: Uint8Array, fill: number) => {
-  const padded = new Uint8Array(Math.ceil(bytes.length / 4) * 4)
-  padded.set(bytes)
-  padded.fill(fill, bytes.length)
-  return padded
-}
-
-const glb = () => {
-  const binary = pad(geometry(), 0)
-  const json = pad(new TextEncoder().encode(JSON.stringify(gltf(
-    dataUri(geometry(), 'application/octet-stream'),
-    dataUri(pixelPng, 'image/png'),
-  ))), 0x20)
-  const total = 12 + 8 + json.length + 8 + binary.length
-  const result = new Uint8Array(total)
-  const view = new DataView(result.buffer)
-  view.setUint32(0, 0x46546c67, true)
-  view.setUint32(4, 2, true)
-  view.setUint32(8, total, true)
-  view.setUint32(12, json.length, true)
-  view.setUint32(16, 0x4e4f534a, true)
-  result.set(json, 20)
-  view.setUint32(20 + json.length, binary.length, true)
-  view.setUint32(24 + json.length, 0x004e4942, true)
-  result.set(binary, 28 + json.length)
-  return result
-}
-
-const standaloneGltf = () => new TextEncoder().encode(JSON.stringify(gltf(
-  dataUri(geometry(), 'application/octet-stream'),
-  dataUri(pixelPng, 'image/png'),
-)))
-
-const zipModel = () => zipSync({
-  'assets/device.gltf': strToU8(JSON.stringify(gltf('geometry/device.bin', 'textures/pixel.png'))),
-  'assets/geometry/device.bin': geometry(),
-  'assets/textures/pixel.png': pixelPng,
-})
 
 type ImportCase = {
   name: string
@@ -129,7 +36,6 @@ const importModel = async (page: Page, item: ImportCase) => {
   await dialog.getByLabel('Артикул').fill(`P36-${item.name.replaceAll(' ', '-')}`)
   await pickOption(dialog, 'Категория', categoryLabels[item.category])
   await dialog.getByLabel('Модулей').fill('2')
-  await dialog.getByLabel('Рядов').fill('1')
   await dialog.getByLabel('Ток, А').fill(String(item.ratedCurrent))
   await dialog.getByLabel('Цена, ₽').fill(String(item.price))
   await dialog.getByLabel('Вес, кг').fill(String(item.weight))
@@ -164,10 +70,11 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   test.setTimeout(300_000)
   await gotoEditor(page)
   await openSidePanels(page)
+  await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
   for (const item of importCases) await importModel(page, item)
   expect(await countIndexedDbAssets(page)).toBe(3)
-  await expect(page.locator('.model-preview.state-ready[data-model-preview^="asset:"]')).toHaveCount(3)
+  await expect(page.locator('.model-thumb[data-model-preview^="asset:"]')).toHaveCount(3)
 
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
     const request = indexedDB.open('panel36-models', 1)
@@ -184,20 +91,27 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
     }
   }))
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await expect(page.locator('.model-preview.state-error[data-model-preview^="asset:"]')).toHaveCount(3)
-  await expect(page.locator('.model-preview.state-error').first()).toContainText('Локальный CAD-файл не найден')
+  // With the binaries gone the raster preview cannot be produced, so every imported device
+  // falls back to its procedural face instead of an error placeholder — the products and
+  // their placements survive the loss.
+  await expect(page.locator('.model-thumb[data-model-preview^="asset:"]')).toHaveCount(0)
+  for (const item of importCases) {
+    const card = page.locator('.catalog-item').filter({ hasText: item.name })
+    await expect(card.locator('svg.device-visual')).toHaveCount(1)
+    await expect(card.locator('.model-thumb')).toHaveCount(0)
+  }
 
   // The reload closes the side panels again, and a catalogue item that is not on
   // screen cannot be grabbed with a pointer.
   await openSidePanels(page)
+  await expect(page.getByRole('heading', { name: 'Каталог' })).toBeVisible()
 
-  const glbSource = page.locator('.catalog-item').filter({ hasText: 'Импорт GLB' })
-  const dropTarget = page.locator('.din-row').nth(1).locator('.slot-cell').nth(10)
-  await dragWithPointer(page, glbSource, dropTarget)
-  await expect(page.locator('.placed-device[aria-label*="Импорт GLB"]')).toHaveCount(1)
-
-  for (const item of importCases.slice(1)) {
-    await page.locator('.catalog-item').filter({ hasText: item.name }).click()
+  // The seed's first row is full, so every imported device is dragged into row two
+  // (seeded with six 1-module devices, six slots free) at explicit slots.
+  for (const [index, item] of importCases.entries()) {
+    const source = page.locator('.catalog-item').filter({ hasText: item.name })
+    const dropTarget = page.locator('.din-row').nth(1).locator('.slot-cell').nth(6 + index * 2)
+    await dragWithPointer(page, source, dropTarget)
     await expect(page.locator(`.placed-device[aria-label*="${item.name}"]`)).toHaveCount(1)
   }
   await expect(page.locator('.placed-device[aria-label*="Импорт"]')).toHaveCount(3)
@@ -211,14 +125,18 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   const circuitCard = page.locator('.circuit-card')
   await circuitCard.getByLabel('Ток, А').fill('40')
   await circuitCard.getByLabel('Ток, А').press('Tab')
-  await expect(page.locator('.issue-list')).toContainText('Ток цепи выше номинала защиты')
+  // The checks tab renders the same rules in its own list, so the assertion stays scoped
+  // to the inspector copy.
+  await expect(page.locator('.inspector-panel .issue-list')).toContainText('Ток цепи выше номинала защиты')
 
   const connectionCard = circuitCard.locator('.connection-card').first()
   const connectionId = await connectionCard.getAttribute('data-connection-id')
   expect(connectionId).toBeTruthy()
-  const firstWire = page.locator('.wires path').first()
-  await expect(page.locator('.wires path')).toHaveCount(1)
-  await expect(firstWire).toHaveAttribute('data-connection-id', connectionId!)
+  // The board draws a conductor twice — a casing and a core — and the demo board now ships wired,
+  // so a count of every path in `.wires` says nothing about the connection this test just added.
+  // The core is the half that carries the connection id.
+  const firstWire = page.locator(`.wires .wire-core[data-connection-id="${connectionId}"]`)
+  await expect(firstWire).toHaveCount(1)
   await expect(firstWire).toHaveClass(/wire-l/)
 
   await pickOption(connectionCard, 'Шина', 'PE · земля')
@@ -232,21 +150,25 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   await connectionCard.getByLabel('Подпись').fill('PE к QF01')
   await connectionCard.getByLabel('Подпись').press('Tab')
 
+  // The class still names the bus, so the theme keeps owning the palette; the colour the user
+  // typed arrives as an inline stroke on top of it, and the thickness arrives as a stroke width.
   await expect(firstWire).toHaveClass(/wire-pe/)
-  await expect(firstWire).toHaveAttribute('stroke', '#2c7155')
-  await expect(firstWire).toHaveAttribute('style', /stroke-width: 4px/)
   await expect(firstWire.locator('title')).toHaveText('PE к QF01')
+  await expect(firstWire).toHaveCSS('stroke', 'rgb(44, 113, 85)')
+  // 4 mm of conductor at the drawing's 0.4 px/mm — a 2 mm run is the 0.8 px the stylesheet uses.
+  await expect(firstWire).toHaveCSS('stroke-width', '1.6px')
 
   await circuitCard.getByRole('button', { name: '＋ Подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(2)
-  await expect(page.locator('.wires path')).toHaveCount(2)
+  const secondId = await circuitCard.locator('.connection-card').nth(1).getAttribute('data-connection-id')
+  await expect(page.locator(`.wires .wire-core[data-connection-id="${secondId}"]`)).toHaveCount(1)
 
   await circuitCard.getByRole('button', { name: 'Удалить подключение 2 цепи Цепь 1' }).click()
   const connectionDialog = page.getByRole('dialog', { name: 'Удалить подключение?' })
   await expect(connectionDialog).toBeVisible()
   await connectionDialog.getByRole('button', { name: 'Удалить подключение' }).click()
   await expect(circuitCard.locator('.connection-card')).toHaveCount(1)
-  await expect(page.locator('.wires path')).toHaveCount(1)
+  await expect(page.locator(`.wires .wire-core[data-connection-id="${secondId}"]`)).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Удалить модель Импорт GLB' }).click()
   const removeDialog = page.getByRole('dialog', { name: 'Удалить модель?' })

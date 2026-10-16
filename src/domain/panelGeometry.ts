@@ -9,6 +9,11 @@ export const ROW_GAP_MM = 10
 export const PLATE_INSET_MM = 3
 export const PLATE_TOP_MM = 24
 export const PLATE_BOTTOM_MM = 24
+/**
+ * Clear plate above the first row. A conductor reaching a top clamp runs horizontally in this
+ * band, so without it the top row's wires would have to cross the devices themselves.
+ */
+export const PLATE_WIRE_BAND_MM = 14
 export const ROW_LABEL_WIDTH_MM = 14
 
 const mm = (value: number) => value * PANEL_MM_TO_PX
@@ -38,6 +43,8 @@ export interface PanelGeometry {
   plateInsetPx: number
   plateTopMm: number
   plateTopPx: number
+  plateWireBandMm: number
+  plateWireBandPx: number
   plateBottomMm: number
   plateBottomPx: number
   plateWidthMm: number
@@ -77,7 +84,7 @@ export const getPanelGeometry = (project: PanelProject, definitions: Map<string,
     return Math.max(72, Math.max(DEFAULT_DEVICE_HEIGHT_MM, ...deviceHeights) + ROW_DEVICE_CLEARANCE_MM)
   })
   const rowGapMm = ROW_GAP_MM
-  const contentHeightMm = PLATE_TOP_MM + rowHeightsMm.reduce((sum, height) => sum + height, 0)
+  const contentHeightMm = PLATE_TOP_MM + PLATE_WIRE_BAND_MM + rowHeightsMm.reduce((sum, height) => sum + height, 0)
     + Math.max(0, rowHeightsMm.length - 1) * rowGapMm + PLATE_BOTTOM_MM
   const cabinetWidthMm = layout.cabinet?.width ?? settings.enclosureWidth
   const cabinetHeightMm = Math.max(layout.cabinet?.height ?? settings.enclosureHeight, contentHeightMm)
@@ -90,7 +97,7 @@ export const getPanelGeometry = (project: PanelProject, definitions: Map<string,
   )
   const rowTopMm: number[] = []
   const rowTopPx: number[] = []
-  let currentTopMm = PLATE_TOP_MM
+  let currentTopMm = PLATE_TOP_MM + PLATE_WIRE_BAND_MM
   for (const heightMm of rowHeightsMm) {
     rowTopMm.push(currentTopMm)
     rowTopPx.push(mm(currentTopMm))
@@ -127,6 +134,8 @@ export const getPanelGeometry = (project: PanelProject, definitions: Map<string,
     plateInsetPx: mm(PLATE_INSET_MM),
     plateTopMm: PLATE_TOP_MM,
     plateTopPx: mm(PLATE_TOP_MM),
+    plateWireBandMm: PLATE_WIRE_BAND_MM,
+    plateWireBandPx: mm(PLATE_WIRE_BAND_MM),
     plateBottomMm: PLATE_BOTTOM_MM,
     plateBottomPx: mm(PLATE_BOTTOM_MM),
     plateWidthMm,

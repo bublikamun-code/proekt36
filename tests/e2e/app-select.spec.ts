@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { unlockWorkspace } from './helpers'
+import { openSidePanels, unlockWorkspace } from './helpers'
 
 const project = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'select-project',
   name: 'Списки',
   preset: 'test',
@@ -15,6 +15,8 @@ const project = {
   }],
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 }
 
 const openEditor = async (page: import('@playwright/test').Page) => {
@@ -24,7 +26,7 @@ const openEditor = async (page: import('@playwright/test').Page) => {
     payload: [project],
   })
   await page.goto('/app/editor')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await expect(page.locator('.placed-device').first()).toBeVisible()
 }
 

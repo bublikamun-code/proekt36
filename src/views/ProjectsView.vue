@@ -7,11 +7,9 @@ import AppDialog from '../components/ui/AppDialog.vue'
 import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
-import { downloadProject } from '../domain/projectFile'
+import { downloadProject, readProjectFile } from '../domain/projectFile'
+import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { useConfirm } from '../composables/useConfirm'
-import { useWorkspaceBackup } from '../composables/useWorkspaceBackup'
-import { modelWord } from '../domain/plural'
-import { modelsUsedBy, useProjectArchive } from '../composables/useProjectArchive'
 import { cabinetById, railById } from '../data/enclosures'
 import AppSelect, { type AppSelectOption } from '../components/ui/AppSelect.vue'
 import type { PanelProject } from '../domain/types'
@@ -26,6 +24,7 @@ const wizardOpen = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const backupInput = ref<HTMLInputElement | null>(null)
 const importError = ref('')
+const pendingBackup = ref<RestoredWorkspaceBackup | null>(null)
 const query = ref('')
 const presetFilter = ref('all')
 const cabinetFilter = ref('all')
@@ -63,6 +62,14 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('ru-RU', { dateSty
 const cabinetName = (project: PanelProject) => project.settings.cabinetId ? cabinetById.get(project.settings.cabinetId)?.name || 'Legacy-параметры' : 'Legacy-параметры'
 const railName = (project: PanelProject) => project.settings.railId ? railById.get(project.settings.railId)?.name || '17,5 мм legacy' : '17,5 мм legacy'
 const phaseName = (project: PanelProject) => project.settings.phase === 3 ? '3 фазы' : '1 фаза'
+const projectWord = (count: number) => {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
+  if (mod10 === 1) return 'проект'
+  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
+  return 'проектов'
+}
 const projectAge = (project: PanelProject) => {
   const days = Math.floor((Date.now() - (Date.parse(project.updatedAt) || 0)) / 86_400_000)
   if (days <= 0) return 'today'
@@ -105,18 +112,10 @@ const clearFilters = () => {
   liveMessage.value = 'Фильтры сброшены.'
 }
 
-/**
- * Opening a project lands on the board.
- *
- * The editor is still here and still works — it is what the layout tests were written against — but
- * it draws a wire from the busbar to the middle of a device and cannot draw a wire between two
- * devices at all. Sending a person there by default would mean the panel they see is not the panel
- * they built.
- */
 const openProject = (id: string) => {
   if (!projects.value.some((project) => project.id === id)) return
   store.switchProject(id)
-  void router.push({ name: 'project-board', params: { projectId: id } })
+  void router.push({ name: 'editor', params: { projectId: id } })
 }
 const createProject = ({ name, preset }: { name: string; preset: string }) => {
   store.newProject(name, preset); store.applyPreset(preset); wizardOpen.value = false; openProject(currentProjectId.value)
@@ -142,59 +141,74 @@ const confirmDelete = () => {
   deleteTarget.value = null
 }
 const chooseImport = () => { importError.value = ''; importInput.value?.click() }
-/**
- * One picker for both shapes of file: a project arrives either as the JSON envelope or as an
- * archive that also carries the CAD models. The two used to need separate buttons to say the
- * same thing, and the button label had to name the format to be unambiguous.
- */
 const importProject = async (event: Event) => {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
   try {
-    importError.value = ''
-    const result = await importProjectFile(file)
-    openProject(currentProjectId.value)
-    liveMessage.value = result.models
-      ? `Проект «${result.project.name}» импортирован вместе с моделями: ${result.models}.`
-      : `Проект «${result.project.name}» импортирован.`
+    importError.value = ''; store.importProject(await readProjectFile(file)); openProject(currentProjectId.value)
   } catch (error) { importError.value = error instanceof Error ? error.message : 'Не удалось импортировать проект' }
   finally { input.value = '' }
 }
 const exportProject = (project: PanelProject) => { downloadProject(project); liveMessage.value = `Экспорт проекта «${project.name}» начат.` }
-const { importedModels } = storeToRefs(store)
-const { importProjectFile, exportProjectArchive, busy: archiveBusy } = useProjectArchive()
-/** A project that reaches outside the built-in catalogue needs its local model to render at all. */
-const pendingCad = (project: PanelProject) => modelsUsedBy([project], importedModels.value).map((model) => model.name || model.fileName)
-const exportProjectWithCad = async (project: PanelProject) => {
-  const result = await exportProjectArchive(project)
-  // An archive is written in both cases, so the two branches must not promise a JSON file.
-  liveMessage.value = result.missing
-    ? `Архив проекта «${project.name}» выгружен: ${result.archive} ${modelWord(result.archive)}, но ${result.missing} ${modelWord(result.missing)} в библиотеке не найдено и в архив не попало.`
-    : result.archive
-      ? `Архив проекта «${project.name}» выгружен вместе с моделями: ${result.archive} ${modelWord(result.archive)}.`
-      : `Архив проекта «${project.name}» выгружен: локальных CAD-моделей у проекта нет, поэтому в нём только проект.`
+const exportBackup = async () => {
+  const pending = backupNeedsLocalCad(projects.value)
+  if (pending.length) {
+    const sample = pending.slice(0, 3).join(', ') + (pending.length > 3 ? ` и ещё ${pending.length - 3}` : '')
+    const proceed = await confirm({
+      title: 'Копия не включает CAD-модели?',
+      description: `Эти проекты используют локально импортированные модели (${sample}). Их файлы в копию не попадают: после восстановления такие аппараты появятся как «нет в каталоге», пока модель не будет импортирована заново. Продолжить выгрузку копии?`,
+      confirmLabel: 'Выгрузить копию',
+      danger: true,
+    })
+    if (!proceed) return
+  }
+  downloadWorkspaceBackup(projects.value, store.modelLibrary, currentProjectId.value)
+  liveMessage.value = 'Экспорт резервной копии начат.'
 }
-
-const {
-  pendingBackup,
-  archiveBusy: backupBusy,
-  exportBackup,
-  exportBackupWithCad,
-  chooseBackupRestore,
-  prepareBackupRestore,
-  confirmBackupRestore,
-  backupDescription,
-  downloadRecoverySnapshot,
-  rollbackToSnapshot,
-} = useWorkspaceBackup({
-  projects,
-  importedModels: computed(() => store.importedModels),
-  currentProjectId,
-  backupInput,
-  confirm,
-  announce: (text) => { liveMessage.value = text },
-  reportError: (text) => { importError.value = text },
-  beforeChoose: () => { importError.value = '' },
+const chooseBackupRestore = () => { importError.value = ''; backupInput.value?.click() }
+const prepareBackupRestore = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    importError.value = ''
+    pendingBackup.value = await readWorkspaceBackup(file)
+  } catch (error) {
+    pendingBackup.value = null
+    importError.value = error instanceof Error ? error.message : 'Не удалось прочитать резервную копию'
+  } finally {
+    input.value = ''
+  }
+}
+const confirmBackupRestore = async () => {
+  if (!pendingBackup.value) return
+  const restored = pendingBackup.value
+  pendingBackup.value = null
+  await store.restoreWorkspaceBackup(restored)
+  liveMessage.value = restored.pendingLocalCad.length
+    ? `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}. ${restored.pendingLocalCad.length} позиций ждут повторного импорта CAD-модели.`
+    : `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}.`
+}
+const backupDescription = computed(() => {
+  const backup = pendingBackup.value
+  if (!backup) return ''
+  const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
+  if (!backup.pendingLocalCad.length) return base
+  const sample = backup.pendingLocalCad.slice(0, 3).join(', ') + (backup.pendingLocalCad.length > 3 ? ` и ещё ${backup.pendingLocalCad.length - 3}` : '')
+  return `${base} В копии ${backup.pendingLocalCad.length} ${backup.pendingLocalCad.length === 1 ? 'позиция опирается' : 'позиций опираются'} на локально импортированные CAD-модели (${sample}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
 })
+const downloadRecoverySnapshot = () => {
+  if (store.downloadStorageSnapshot()) liveMessage.value = 'Снимок повреждённых данных сохранён в файл.'
+}
+const rollbackToSnapshot = async () => {
+  const ok = await confirm({
+    title: 'Откатиться к предыдущему снимку?',
+    description: 'Текущие проекты будут заменены снимком, сохранённым перед последней удачной записью. Действие можно отменить через Ctrl+Z.',
+    confirmLabel: 'Откатиться',
+    danger: true,
+  })
+  if (!ok) return
+  if (await store.restoreStorageBackup()) liveMessage.value = 'Восстановлен предыдущий снимок локального хранилища.'
+}
 const signOut = async () => { await auth.signOut(); await router.push('/') }
 </script>
 
@@ -217,11 +231,10 @@ const signOut = async () => { await auth.signOut(); await router.push('/') }
           <p>Проекты и импортированные модели хранятся в этом браузере. Demo-профиль не создаёт отдельное серверное хранилище.</p>
         </div>
         <div class="projects-primary-actions">
-          <input ref="importInput" class="sr-only" tabindex="-1" aria-label="Файл проекта: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="importProject" />
-          <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="prepareBackupRestore" />
-          <button class="toolbar-button" @click="chooseImport">Импортировать файл</button>
+          <input ref="importInput" class="sr-only" tabindex="-1" aria-label="Файл проекта JSON" type="file" accept=".json,application/json" @change="importProject" />
+          <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии" type="file" accept=".json,application/json" @change="prepareBackupRestore" />
+          <button class="toolbar-button" @click="chooseImport">Импортировать JSON</button>
           <button class="toolbar-button" @click="exportBackup">Создать копию</button>
-          <button v-if="importedModels.length" class="toolbar-button" :disabled="backupBusy" @click="exportBackupWithCad">Копия с моделями</button>
           <button class="toolbar-button" @click="chooseBackupRestore">Восстановить копию</button>
           <button class="primary-button" @click="wizardOpen = true">＋ Создать панель</button>
         </div>
@@ -250,9 +263,6 @@ const signOut = async () => { await auth.signOut(); await router.push('/') }
         <article v-for="project in filteredProjects" :key="project.id" class="home-project-card" :class="{ current: project.id === currentProject.id }">
           <div class="project-card-top"><span class="project-card-kind">{{ presetTitles[project.preset] || 'Проект' }}</span><span v-if="project.id === currentProject.id" class="current-badge">Текущий</span></div>
           <h2>{{ project.name }}</h2>
-          <p v-if="pendingCad(project).length" class="project-card-cad">
-            <b>Локальная CAD-модель:</b> {{ pendingCad(project).join(', ') }}. Обычный JSON её не содержит — сохраните проект архивом.
-          </p>
           <div class="project-card-metrics"><span><b>{{ project.devices.length }}</b> устройств</span><span><b>{{ project.circuits.length }}</b> цепей</span><span><b>{{ project.settings.rows }}</b> рядов</span></div>
           <dl class="project-card-specs"><div><dt>Корпус</dt><dd>{{ cabinetName(project) }}</dd></div><div><dt>Рейка</dt><dd>{{ railName(project) }}</dd></div><div><dt>Сеть</dt><dd>{{ phaseName(project) }} · {{ project.settings.inputCurrent }} А</dd></div></dl>
           <footer class="project-card-footer">
@@ -260,7 +270,6 @@ const signOut = async () => { await auth.signOut(); await router.push('/') }
             <div class="project-card-actions">
               <button class="icon-button" :aria-label="`Открыть проект ${project.name}`" title="Открыть" @click="openProject(project.id)">↗</button>
               <button class="icon-button" :aria-label="`Экспортировать проект ${project.name}`" title="Экспортировать" @click="exportProject(project)">↧</button>
-              <button v-if="pendingCad(project).length" class="icon-button" :aria-label="`Экспортировать архив проекта ${project.name} с моделями`" title="Экспортировать с моделями" :disabled="archiveBusy" @click="exportProjectWithCad(project)">⇩</button>
               <button class="icon-button" :aria-label="`Переименовать проект ${project.name}`" title="Переименовать" @click="askRename(project.id)">✎</button>
               <button class="icon-button" :aria-label="`Дублировать проект ${project.name}`" title="Дублировать" @click="duplicateProject(project.id)">⧉</button>
               <button class="icon-button danger" :aria-label="`Удалить проект ${project.name}`" title="Удалить" @click="deleteTarget = project">×</button>

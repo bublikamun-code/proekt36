@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import { CATALOG_REVISION } from '../../src/data/catalog'
 import { APPLICATION_REVISION } from '../../src/domain/projectSchema'
-import { gotoEditor, pickOption, pickOptionByKeyboard, unlockWorkspace } from './helpers'
+import { gotoEditor, openSidePanels, pickOption, pickOptionByKeyboard, unlockWorkspace } from './helpers'
 
 const project = (id: string, name: string, preset: string, cabinetId: string, railId: 'rail-12' | 'rail-18', updatedAt: string) => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id,
   name,
   preset,
@@ -24,11 +24,13 @@ const project = (id: string, name: string, preset: string, cabinetId: string, ra
   devices: [],
   circuits: [],
   connections: [],
+  busAssemblies: [],
+  combs: [],
 })
 
 const seedProjects = async (page: Page) => {
   await page.addInitScript(({ first, second }) => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([first, second]))
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([first, second]))
     localStorage.setItem('panel36.currentProjectId.v1', first.id)
   }, {
     first: project('project-alpha', 'Alpha щит', 'apartment', 'enmas-nx8-12-embedded', 'rail-12', '2026-09-24T10:00:00.000Z'),
@@ -128,7 +130,7 @@ test('workspace backup restores projects only after explicit confirmation', asyn
   await expect(page.getByText('Резервная копия восстановлена: 1 проект.')).toBeAttached()
 })
 
-test('editor BOM exposes unknown pricing and shared print report without tab dependency', async ({ page }) => {
+test('editor BOM exposes unknown pricing and the print report works from any tab', async ({ page }) => {
   await gotoEditor(page)
   await page.evaluate(() => {
     const target = window as Window & { __panel36Printed?: boolean }
@@ -136,17 +138,17 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
     target.print = () => { target.__panel36Printed = true }
   })
 
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
-  // The one working-catalogue position with no confirmed price. The test needs a line that reads
-  // «уточняется», and inventing a price to get one would defeat the thing it checks.
-  await page.getByRole('button', { name: /DV-T1 1P\+N 25kA/ }).click()
+  await openSidePanels(page)
+  await page.getByRole('button', { name: /NB1-63H 1P 6A C/ }).click()
+  // The bill lives behind the centre-column «Спецификация» tab.
+  await page.getByRole('tab', { name: 'Спецификация' }).click()
   const bom = page.getByRole('region', { name: 'Сводная ведомость' })
   await expect(bom).toContainText('«уточняется»')
   await expect(bom).toContainText('Коммерческая сумма не рассчитана')
-  // No position in the short working catalogue carries a source URL, so the report must not claim
-  // one. The wording that would have been a lie is the assertion.
-  expect(await bom.getByText('Источник указан').count()).toBe(0)
+  await expect(bom).toContainText('Источник указан')
 
+  // Printing must not depend on the active section, so the board tab is restored first.
+  await page.getByRole('tab', { name: 'Схема 2D' }).click()
   await page.getByRole('button', { name: 'Печать', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as Window & { __panel36Printed?: boolean }).__panel36Printed)).toBe(true)
   await page.emulateMedia({ media: 'print' })
@@ -156,7 +158,6 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
   await expect(report).toContainText('Освещение квартиры')
   await expect(report).toContainText('Сводка 2D-компоновки')
   await expect(report).toContainText('«уточняется»')
-  expect(await report.getByText('Источник указан').count()).toBe(0)
   await expect(report).toContainText('Коммерческая сумма не рассчитана')
   await expect(report).toContainText('Диагностика и проверки')
   await expect(report).toContainText('Редакции:')
@@ -165,13 +166,28 @@ test('editor BOM exposes unknown pricing and shared print report without tab dep
 test('keyboard placement controls and demo tabs are operable', async ({ page }) => {
   await unlockWorkspace(page)
   await page.goto('/app/editor')
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   await page.locator('.placed-device').first().click()
   const controls = page.getByRole('form', { name: 'Перемещение по клавиатуре' })
-  await pickOption(controls, 'Ряд', '3')
-  await pickOption(controls, 'Модуль', '4')
-  await controls.getByRole('button', { name: 'Переместить с клавиатуры' }).click()
-  await expect(page.getByText('Позиция', { exact: false }).locator('.mono')).toHaveText('3.4')
+  // The apartment seed sits on a 2-row NX8-24 cabinet. The pad sits below the fold where
+  // the fixed panels can cover a pointer target, so the choices stay on the keyboard —
+  // which is what this test is about in the first place. Opening a select makes the
+  // current value active, so the target option is reached with arrow keys.
+  const rowSelect = controls.getByLabel('Ряд')
+  await rowSelect.focus()
+  await rowSelect.press('Enter')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  const slotSelect = controls.getByLabel('Модуль')
+  await slotSelect.focus()
+  await slotSelect.press('Enter')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await controls.getByRole('button', { name: 'Переместить с клавиатуры' }).focus()
+  await controls.getByRole('button', { name: 'Переместить с клавиатуры' }).press('Enter')
+  await expect(page.getByText('Позиция', { exact: false }).locator('.mono')).toHaveText('2.4')
 
   await page.goto('/demo/project')
   const bomTab = page.getByRole('tab', { name: '2D схема' })

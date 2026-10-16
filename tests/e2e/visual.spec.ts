@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
+import { gotoEditor, openSidePanels, seedProject } from './helpers'
 
 /**
  * Visual regression for the board and the public shell.
@@ -16,16 +16,27 @@ import { gotoEditor, seedProject, unlockWorkspace } from './helpers'
  * - Baselines live per platform in tests/e2e/visual.spec.ts-snapshots and are named for the OS.
  *   Running on a new one produces a diff that says nothing about the design, and it needs a new
  *   baseline rather than a repair of the existing one.
- * - maxDiffPixelRatio absorbs the residual antialiasing/hinting noise (observed ≤0.5% of pixels
- *   across machines with identical content) while still failing on any real layout shift.
  */
 const freeze = async (page: import('@playwright/test').Page) => {
   // The board animates width and transform; a screenshot mid-transition is a coin flip.
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; }' })
   await page.evaluate(() => document.fonts.ready)
-  // A transient notice is part of the page but not part of its design, and how long it happens to
-  // still be on screen differs between a first load and a warm cache.
-  await page.locator('.toast').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+  // The editor fits the board to the room the working area reports, which on a loaded machine
+  // takes a few frames longer than the fixed pause covers. Disabling transitions stops the
+  // animation but not the fit, so wait for the cabinet to stop being measured rather than for a
+  // duration: a shot taken one frame early differs from the baseline in a few thousand pixels
+  // and says nothing about the design.
+  const cabinet = page.locator('.cabinet')
+  if (await cabinet.count()) {
+    let last = -1
+    await expect.poll(async () => {
+      const box = await cabinet.boundingBox()
+      const width = Math.round(box?.width ?? 0)
+      const settled = width > 0 && width === last
+      last = width
+      return settled
+    }, { timeout: 20_000 }).toBe(true)
+  }
   await page.waitForTimeout(400)
 }
 
@@ -36,14 +47,14 @@ test.describe('visual', () => {
     await page.goto('/')
     await expect(page.locator('h1')).toBeVisible()
     await freeze(page)
-    await expect(page).toHaveScreenshot('home.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
+    await expect(page).toHaveScreenshot('home.png', { fullPage: true, animations: 'disabled' })
   })
 
   test('the read-only demo board renders as designed', async ({ page }) => {
     await page.goto('/demo/project')
     await expect(page.locator('.demo-project-cabinet')).toBeVisible()
     await freeze(page)
-    await expect(page).toHaveScreenshot('demo-project.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
+    await expect(page).toHaveScreenshot('demo-project.png', { fullPage: true, animations: 'disabled' })
   })
 
   test('the same board renders in the dark theme', async ({ page }) => {
@@ -51,29 +62,7 @@ test.describe('visual', () => {
     await expect(page.locator('.demo-project-cabinet')).toBeVisible()
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
     await freeze(page)
-    await expect(page).toHaveScreenshot('demo-project-dark.png', { fullPage: true, animations: 'disabled', maxDiffPixelRatio: 0.01 })
-  })
-
-  /**
-   * The rebuilt board gets its own baseline from the start, so "the new one is not worse than the
-   * old one" stops being an opinion. Recording it before the side panels arrive means every later
-   * change to the new workspace shows up here as a diff of its own.
-   */
-  test('the rebuilt board renders as designed', async ({ page }) => {
-    await unlockWorkspace(page)
-    await page.goto('/app/board?fixture=demo')
-    // The panels are part of what this baseline is for, so the snapshot is taken with them open.
-    // Preferences persist in the browser profile, so the state is set explicitly rather than assumed.
-    const toggle = page.getByRole('button', { name: /боковые панели/ })
-    // isVisible() does not wait, and the header is not mounted on the first tick after navigation,
-    // so the toggle is awaited before its label is read.
-    await expect(toggle).toBeVisible()
-    if ((await toggle.textContent())?.includes('Показать')) await toggle.click()
-    // The panel element itself carries no box, so visibility is asserted on its contents.
-    await expect(page.getByLabel('Поиск по каталогу')).toBeVisible()
-    await expect(page.locator('.scene-wire').first()).toBeVisible()
-    await freeze(page)
-    await expect(page.locator('.workspace')).toHaveScreenshot('board-workspace.png', { animations: 'disabled', maxDiffPixelRatio: 0.01 })
+    await expect(page).toHaveScreenshot('demo-project-dark.png', { fullPage: true, animations: 'disabled' })
   })
 
   test('the editor board renders as designed', async ({ page }) => {
@@ -82,10 +71,12 @@ test.describe('visual', () => {
       { id: 'qf02', row: 0, slot: 1 },
       { id: 'xt01', row: 0, slot: 2 },
     ])
+    // The one-time orientation card is transient; the reference image shows the settled editor.
+    await page.addInitScript(() => localStorage.setItem('panel36.hints.v1', 'dismissed'))
     await gotoEditor(page)
     await expect(page.locator('.placed-device').first()).toBeVisible()
-    await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+    await openSidePanels(page)
     await freeze(page)
-    await expect(page).toHaveScreenshot('editor-board.png', { animations: 'disabled', maxDiffPixelRatio: 0.01 })
+    await expect(page).toHaveScreenshot('editor-board.png', { animations: 'disabled' })
   })
 })

@@ -3,13 +3,15 @@ import { createProject } from '../src/domain/project'
 import { createWorkspaceBackup, describeBackupRestore, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../src/domain/projectBackup'
 import { modelWord } from '../src/domain/plural'
 
+const emptyLibrary = { assets: [], products: [], bindings: {} }
+
 const jsonFile = (value: unknown) => new File([JSON.stringify(value)], 'panel36-backup.json', { type: 'application/json' })
 
 describe('workspace backup', () => {
   it('round-trips built-in projects and the selected project', async () => {
     const first = createProject('Квартира', 'apartment', { phase: 1, inputCurrent: 40 })
     const second = createProject('Дом', 'house', { phase: 3, inputCurrent: 63 })
-    const backup = createWorkspaceBackup([first, second], [], second.id, '2026-09-24T12:00:00.000Z')
+    const backup = createWorkspaceBackup([first, second], emptyLibrary, second.id, '2026-09-24T12:00:00.000Z')
 
     const restored = await readWorkspaceBackup(jsonFile(backup))
 
@@ -31,7 +33,7 @@ describe('workspace backup', () => {
       note: '',
       mount: 'din',
     })
-    const backup = createWorkspaceBackup([project], [], project.id)
+    const backup = createWorkspaceBackup([project], emptyLibrary, project.id)
 
     // The archive carries no CAD binaries, but the editor draws an unknown product as a
     // labelled placeholder, so refusing the whole file would strand the user's other work.
@@ -42,13 +44,13 @@ describe('workspace backup', () => {
 
   it('reports no pending CAD for a project built from the catalogue', async () => {
     const project = createProject('Квартира', 'apartment', { phase: 1, inputCurrent: 40 })
-    const backup = createWorkspaceBackup([project], [], project.id)
+    const backup = createWorkspaceBackup([project], emptyLibrary, project.id)
     expect((await readWorkspaceBackup(jsonFile(backup))).pendingLocalCad).toEqual([])
   })
 
   it('rejects an unreadable application or catalog revision', async () => {
     const project = createProject('Квартира', 'apartment', { phase: 1, inputCurrent: 40 })
-    const backup = createWorkspaceBackup([project], [], project.id)
+    const backup = createWorkspaceBackup([project], emptyLibrary, project.id)
 
     await expect(readWorkspaceBackup(jsonFile({ ...backup, application: { name: 'Panel36', revision: 'other' } }))).rejects.toThrow('другой версией')
     await expect(readWorkspaceBackup(jsonFile({ ...backup, catalogRevision: 'other' }))).rejects.toThrow('другой ревизии каталога')
@@ -56,7 +58,7 @@ describe('workspace backup', () => {
 
   it('accepts an older release but refuses a newer one', async () => {
     const project = createProject('Квартира', 'apartment', { phase: 1, inputCurrent: 40 })
-    const backup = createWorkspaceBackup([project], [], project.id)
+    const backup = createWorkspaceBackup([project], emptyLibrary, project.id)
 
     // Every catalogue change bumps CATALOG_REVISION, so demanding equality would make
     // yesterday's backup permanently unreadable — the one moment the user needs it.

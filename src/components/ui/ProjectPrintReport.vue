@@ -4,10 +4,10 @@ import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDe
 import { buildBom } from '../../domain/pricing'
 import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
-import SingleLineDiagram from './SingleLineDiagram.vue'
-import { claimsASource, verificationLabel as verificationLabelFor } from '../../domain/provenance'
-import { buildLabelSheet, labelSheetWarning } from '../../domain/labelSheet'
-import type { Connection, DeviceDefinition, PanelProject, VerificationStatus } from '../../domain/types'
+import { formatDropPercent, voltageDrop } from '../../domain/voltageDrop'
+import type { CircuitKind } from '../../domain/types'
+import { verificationLabel } from '../../domain/verification'
+import type { DeviceDefinition, PanelProject } from '../../domain/types'
 
 const props = defineProps<{
   project: PanelProject
@@ -19,38 +19,36 @@ const props = defineProps<{
 const printedAt = computed(() => props.generatedAt || new Date().toISOString())
 const layout = computed(() => resolveLayout(props.project))
 const lines = computed(() => buildBom(props.project.devices, props.definitions))
-/** Address lookup for the connection list, so a large report does not rescan the board per wire. */
-const addressByInstanceId = computed(() => new Map(props.project.devices.map((device) => [device.instanceId, device.address])))
-
-/**
- * Where a wire comes from, in the words the report uses elsewhere.
- *
- * Every run from a fork was printed as "FORK-шина" whatever fed it, and a feed from the panel bus
- * was printed as a bare bus letter with no source at all. On a sheet somebody builds from, "откуда
- * этот провод" is the first question asked of it.
- */
-const wireSource = (connection: Connection): string => {
-  if (connection.kind === 'bus') return `шина ${connection.fromBus}`
-  if (connection.kind === 'busbar') {
-    return connection.fromDeviceId
-      ? addressByInstanceId.value.get(connection.fromDeviceId) || 'FORK-шина'
-      : 'FORK-шина'
-  }
-  return `шина ${connection.fromBus}`
-}
-
-/** The terminal a wire enters, when the panel does not decide it by itself. */
-const wireTerminal = (connection: Connection) => (connection.terminal === undefined ? '' : `зажим ${connection.terminal + 1}`)
 const issues = computed(() => validateProject(props.project, props.definitions))
-const labelSheet = computed(() => buildLabelSheet(props.project, props.definitions))
-const labelWarning = computed(() => labelSheetWarning(labelSheet.value))
 // The summary must count modules exactly the way the per-row table does, so a
 // missing product or a fractional import width cannot make the two disagree.
 const modules = computed(() => props.project.devices.filter(isDinDevice).reduce((sum, device) => sum + getFootprintModules(device, props.definitions), 0))
 const capacity = computed(() => getRowCapacity(props.project) * props.project.settings.rows)
 const rows = computed(() => Array.from({ length: props.project.settings.rows }, (_, index) => index))
 const productFor = (productId: string) => props.definitions.get(productId)
-const verificationLabel = (status: VerificationStatus | undefined) => verificationLabelFor(status, { sentence: true })
+
+/** The schedule prints one row per line, with the drop the rough-in crew will check. */
+const CABLE_CORES: Record<CircuitKind, number> = { power: 3, light: 3, dc: 2, control: 2 }
+const schedule = computed(() => props.project.circuits.map((circuit, index) => {
+  const room = (props.project.rooms ?? []).find((item) => item.id === circuit.roomId)
+  const drop = voltageDrop({
+    lengthM: circuit.cableLength ?? 0,
+    currentA: circuit.current,
+    crossSectionMm2: circuit.wireCrossSection,
+    system: props.project.settings.phase === 3 ? 3 : 1,
+  })
+  return {
+    number: index + 1,
+    name: circuit.name,
+    room: room?.name ?? '—',
+    cable: `${CABLE_CORES[circuit.kind ?? 'power']}×${String(circuit.wireCrossSection).replace('.', ',')} мм²`,
+    length: circuit.cableLength ?? 0,
+    current: circuit.current,
+    dropText: formatDropPercent(drop.dropPercent),
+    status: (circuit.cableLength ?? 0) > 0 ? (drop.ok ? 'в норме' : 'выше 4 %') : 'нет длины',
+    ok: drop.ok,
+  }
+}))
 </script>
 
 <template>
@@ -74,11 +72,6 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
       <div><span>Свободно</span><strong>{{ getFreeSlots(project, definitions) }} мод.</strong></div>
       <div><span>Ёмкость</span><strong>{{ capacity }} мод.</strong></div>
       <div><span>Модульный шаг</span><strong>{{ layout.modulePitchMm }} мм</strong></div>
-    </section>
-
-    <section class="print-single-line" aria-label="Однолинейная схема">
-      <h2>Однолинейная схема</h2>
-      <SingleLineDiagram :project="project" :definitions="definitions" />
     </section>
 
     <section class="print-rack-summary">
@@ -107,33 +100,10 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
             <td>{{ productFor(device.productId)?.name || 'Неизвестное изделие' }}</td>
             <td>{{ productFor(device.productId)?.series || productFor(device.productId)?.sku || '—' }}</td>
             <td>{{ device.marking || device.address }}</td>
-            <td>{{ verificationLabel(productFor(device.productId)?.verificationStatus) }}<template v-if="claimsASource(productFor(device.productId)?.verificationStatus) && productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
+            <td>{{ verificationLabel(productFor(device.productId)) }}<template v-if="productFor(device.productId)?.sourceUrl"> · источник указан в каталоге</template></td>
           </tr>
         </tbody>
       </table>
-    </section>
-
-    <section class="print-labels" aria-label="Лист маркировки">
-      <h2>Лист маркировки</h2>
-      <p class="print-labels-note">
-        По одной этикетке на позицию, в порядке монтажа. Это лист для печати и вырезки, а не заказ:
-        поставщик, цена и сроки здесь не указаны.
-      </p>
-      <p v-if="labelWarning" class="print-labels-warning">{{ labelWarning }}</p>
-      <p v-if="!labelSheet.labels.length">На доске нет аппаратов — маркировать нечего.</p>
-      <div v-else class="print-label-grid">
-        <div
-          v-for="label in labelSheet.labels"
-          :key="label.instanceId"
-          class="print-label"
-          :class="{ 'is-unmarked': !label.marked, 'is-duplicated': label.duplicated }"
-        >
-          <span class="print-label-text">{{ label.text || '—' }}</span>
-          <span class="print-label-meta">{{ label.position }} · {{ label.name }}</span>
-          <span v-if="label.duplicated" class="print-label-flag">адрес повторяется</span>
-          <span v-else-if="!label.marked" class="print-label-flag">адрес не проставлен</span>
-        </div>
-      </div>
     </section>
 
     <section class="print-connections">
@@ -142,9 +112,29 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
       <ol>
         <li v-for="connection in project.connections" :key="connection.id">
           <strong>{{ connection.label || 'Без подписи' }}</strong>
-          <span>{{ wireSource(connection) }} → {{ addressByInstanceId.get(connection.toDeviceId) || 'устройство' }}{{ wireTerminal(connection) ? `, ${wireTerminal(connection)}` : '' }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
+          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${project.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
         </li>
       </ol>
+    </section>
+
+    <section class="print-cable-schedule" v-if="schedule.length">
+      <h2>Кабельный журнал</h2>
+      <table>
+        <thead><tr><th>№</th><th>Линия</th><th>Помещение</th><th>Кабель</th><th>Длина, м</th><th>Ток, А</th><th>ΔU</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr v-for="row in schedule" :key="row.number" :class="{ 'print-row-bad': row.length > 0 && !row.ok }">
+            <td>{{ row.number }}</td>
+            <td>{{ row.name }}</td>
+            <td>{{ row.room }}</td>
+            <td>{{ row.cable }}</td>
+            <td>{{ String(row.length).replace('.', ',') }}</td>
+            <td>{{ row.current }}</td>
+            <td>{{ row.dropText }}</td>
+            <td>{{ row.status }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="print-price-note">Потери рассчитаны для меди (ρ 0,0175 Ом·мм²/м) при заданной длине и токе линии; проверка предварительная.</p>
     </section>
 
     <section class="print-bom">
@@ -153,13 +143,13 @@ const verificationLabel = (status: VerificationStatus | undefined) => verificati
         <thead><tr><th>Категория / наименование</th><th>Бренд</th><th>Артикул</th><th>Кол-во</th><th>Цена</th><th>Сумма</th><th>Проверка / источник</th></tr></thead>
         <tbody>
           <tr v-for="line in lines" :key="line.productId">
-            <td><strong>{{ line.name }}</strong><small>{{ line.category }}</small></td>
+            <td><strong>{{ line.name }}</strong><small>{{ line.category ?? 'нет в каталоге' }}</small></td>
             <td>{{ line.brand }}</td>
             <td>{{ line.sku }}</td>
             <td>{{ line.quantity }}</td>
             <td>{{ line.priceKnown ? `${line.unitPrice.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
             <td>{{ line.priceKnown ? `${line.total.toLocaleString('ru-RU')} ₽` : '«уточняется»' }}</td>
-            <td>{{ verificationLabel(productFor(line.productId)?.verificationStatus) }}<template v-if="claimsASource(productFor(line.productId)?.verificationStatus) && productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
+            <td>{{ verificationLabel(productFor(line.productId)) }}<template v-if="productFor(line.productId)?.sourceUrl"> · источник указан</template></td>
           </tr>
         </tbody>
       </table>

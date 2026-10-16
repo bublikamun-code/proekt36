@@ -6,9 +6,21 @@ export const buildBom = (placed: PlacedDevice[], definitions: Map<string, Device
   const grouped = new Map<string, BomLine>()
   for (const item of placed) {
     const product = definitions.get(item.productId)
-    if (!product) continue
     // quantity is the purchase quantity. It must not be used as a layout width.
     const quantity = Math.max(1, Math.floor(item.quantity))
+    if (!product) {
+      // A device whose product left the catalogue must not vanish from the bill:
+      // silent omission understates the totals and hides the gap from the user.
+      const missing = grouped.get(item.productId)
+      if (missing) missing.quantity += quantity
+      else {
+        grouped.set(item.productId, {
+          productId: item.productId, name: 'Нет в каталоге', brand: '', sku: item.productId,
+          quantity, unitPrice: 0, total: 0, weight: 0, priceKnown: false, priceStatus: 'unknown',
+        })
+      }
+      continue
+    }
     const priceKnown = isKnownPrice(product.price)
     const existing = grouped.get(product.id)
     if (existing) {
@@ -24,7 +36,7 @@ export const buildBom = (placed: PlacedDevice[], definitions: Map<string, Device
       })
     }
   }
-  return [...grouped.values()].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name, 'ru'))
+  return [...grouped.values()].sort((a, b) => (a.category ?? '').localeCompare(b.category ?? '') || a.name.localeCompare(b.name, 'ru'))
 }
 
 export const pricing = (placed: PlacedDevice[], definitions: Map<string, DeviceDefinition>) => {

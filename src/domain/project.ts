@@ -1,39 +1,12 @@
-import { builtinCatalog } from '../data/catalog'
 import { cabinetById, railById } from '../data/enclosures'
-import type { Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings } from './types'
-import { CONNECTION_THICKNESS_MM } from './connectionSpec'
+import type { BusAssembly, Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings, Room, RowComb } from './types'
+import { CIRCUIT_KINDS } from './types'
+import type { TerminalRef } from './terminals'
+import { terminalDisplayName, terminalMarkedName } from './terminals'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
 
 export { PROJECT_SCHEMA_VERSION } from './projectSchema'
-/**
- * RFC 4122 version 4 identifier.
- *
- * `crypto.randomUUID()` exists only in a secure context, and this application is deliberately
- * server-less: it is opened from whatever address the machine happens to have. `localhost` counts
- * as secure, but `http://192.168.1.10:5173` and any plain public address do not — there
- * `crypto.randomUUID` is `undefined`, and the page used to die with
- * "crypto.randomUUID is not a function" the moment it tried to create its first project. Nothing
- * in the product needs a secure context, so the identifier cannot depend on one either.
- *
- * `crypto.getRandomValues` is available outside secure contexts, so the fallback assembles the same
- * shape by hand and sets the version and variant bits that make it a valid v4.
- */
-export const uid = () => {
-  const source = globalThis.crypto
-  if (typeof source?.randomUUID === 'function') return source.randomUUID()
-  if (typeof source?.getRandomValues !== 'function') {
-    // Reached only on browsers without Web Crypto at all. Saying so beats an opaque crash: an
-    // identifier that silently degrades to Math.random would collide between two records, and a
-    // broken project file is worse than an application that explains why it cannot start.
-    throw new Error('Браузер не умеет генерировать идентификаторы: нет crypto.getRandomValues')
-  }
-  const bytes = new Uint8Array(16)
-  source.getRandomValues(bytes)
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-}
+export const uid = () => crypto.randomUUID()
 export const DEFAULT_CABINET_ID = 'enmas-nx8-24-embedded'
 export const DEFAULT_RAIL_ID = 'rail-12' as const
 
@@ -92,33 +65,88 @@ export const normalizeCircuit = (value: unknown): Circuit => {
     color: asText(raw.color, '#c65c3b'),
     wireCrossSection: asNumber(raw.wireCrossSection, 1.5, 0, 1000),
     note: asText(raw.note),
+    // v4 planner fields: a line that predates rooms sits outside any room, keeps its old
+    // «power» behaviour and has no cable planned yet — 0 means «not measured», not «on the spot».
+    roomId: asText(raw.roomId) || undefined,
+    kind: (CIRCUIT_KINDS as readonly string[]).includes(String(raw.kind)) ? raw.kind as Circuit['kind'] : 'power',
+    cableLength: asNumber(raw.cableLength, 0, 0, 1000),
   }
+}
+
+/** Normalize a planner room; a record without a name is not a group worth showing. */
+export const normalizeRoom = (value: unknown): Room | null => {
+  const raw = asRecord(value)
+  const id = asText(raw.id)
+  const name = asText(raw.name)
+  if (!id || !name) return null
+  return { id, name, floor: asInteger(raw.floor, 1, 0, 100) }
 }
 
 /** Normalize a connection, including old records that did not have kind. */
 export const normalizeConnection = (value: unknown): Connection => {
   const raw = asRecord(value)
-  // An older file says nothing about where a wire comes from, and its two shapes still mean what
-  // they meant: a connection that names a device is a run from that device, one that names a
-  // circuit is a line of it. A file that does say `bus` is a feed from the panel bus, and it is not
-  // promoted to a run from a device just because a stray source id rode along.
-  const kind: Connection['kind'] = raw.kind === 'bus' && !raw.fromDeviceId ? 'bus'
-    : raw.kind === 'busbar' || raw.fromDeviceId ? 'busbar' : 'circuit'
+  const kind = raw.kind === 'busbar' || raw.kind === 'jumper' || raw.fromDeviceId ? 'busbar' : 'circuit'
   return {
     id: asText(raw.id, uid()),
     circuitId: asText(raw.circuitId),
     fromBus: raw.fromBus === 'N' || raw.fromBus === 'PE' ? raw.fromBus : 'L',
     toDeviceId: asText(raw.toDeviceId),
     color: asText(raw.color, '#c65c3b'),
-    thickness: asNumber(raw.thickness, CONNECTION_THICKNESS_MM.default, CONNECTION_THICKNESS_MM.min, CONNECTION_THICKNESS_MM.max),
+    thickness: asNumber(raw.thickness, 2, 0.5, 8),
     label: asText(raw.label),
-    kind,
+    kind: raw.kind === 'jumper' && raw.fromTerminal && raw.toTerminal ? 'jumper' : kind,
     fromDeviceId: asText(raw.fromDeviceId) || undefined,
-    // Zero is the first terminal, so it is written only when the file named a later one. A file that
-    // never heard of the field keeps the landing it always had.
-    terminal: raw.terminal === undefined ? undefined : asInteger(raw.terminal, 0, 0, 16),
-    fromTerminal: raw.fromTerminal === undefined ? undefined : asInteger(raw.fromTerminal, 0, 0, 16),
+    fromTerminal: normalizeTerminalRef(raw.fromTerminal),
+    toTerminal: normalizeTerminalRef(raw.toTerminal),
+    phase: asPhase(raw.phase),
+    busId: asText(raw.busId) || undefined,
   }
+}
+
+/** A terminal reference is only meaningful with a device, a pole and a side. */
+const normalizeTerminalRef = (value: unknown): TerminalRef | undefined => {
+  const raw = asRecord(value)
+  const deviceId = asText(raw.deviceId)
+  if (!deviceId) return undefined
+  const pole = asInteger(raw.pole, 1, 0, 12)
+  const side = raw.side === 'bottom' ? 'bottom' : 'top'
+  return { deviceId, pole, side }
+}
+
+/** Normalize a board bus, dropping records without a known bus kind. */
+export const normalizeBusAssembly = (value: unknown): BusAssembly | null => {
+  const raw = asRecord(value)
+  const kind = raw.kind
+  if (kind !== 'L' && kind !== 'N' && kind !== 'PE') return null
+  return { id: asText(raw.id, uid()), kind, placement: raw.placement === 'top' ? 'top' : 'bottom', label: asText(raw.label) }
+}
+
+/** Normalize a comb busbar, keeping the slot range ordered and inside the rail. */
+export const normalizeRowComb = (value: unknown): RowComb | null => {
+  const raw = asRecord(value)
+  const row = asInteger(raw.row, 0, 0, 29)
+  const fromSlot = asInteger(raw.fromSlot, 0, 0, 999)
+  const toSlot = asInteger(raw.toSlot, fromSlot, 0, 999)
+  const poles = asInteger(raw.poles, 1, 1, 4)
+  return {
+    id: asText(raw.id, uid()),
+    row,
+    poles: (poles === 2 || poles === 3 || poles === 4 ? poles : 1) as 1 | 2 | 3 | 4,
+    fromSlot: Math.min(fromSlot, toSlot),
+    toSlot: Math.max(fromSlot, toSlot),
+    label: asText(raw.label),
+  }
+}
+
+/**
+ * The buses a v2 project gains: N and PE along the bottom plate, where they are drawn. A v2 board
+ * predates the bars, so it has none to inherit and takes the standard pair whole — deciding from
+ * the old lines which kinds were "in use" would leave a panel whose only line was fed from L with
+ * no bar at all, which is a drawing with nowhere to anchor anything.
+ */
+const migrateBusAssemblies = (value: unknown): BusAssembly[] => {
+  const existing = Array.isArray(value) ? value.map(normalizeBusAssembly).filter((item): item is BusAssembly => Boolean(item)) : []
+  return existing.length ? existing : DEFAULT_BUS_ASSEMBLIES()
 }
 
 const normalizeSettings = (value: unknown): ProjectSettings => {
@@ -151,26 +179,24 @@ const normalizeSettings = (value: unknown): ProjectSettings => {
 }
 
 /**
- * What migration is allowed to receive. A v1 payload predates `inputCurrent`, `phase` and
- * `reserveModules`, so requiring a full `ProjectSettings` here would describe the one input this
- * function exists to handle as impossible. `normalizeSettings` is the single place that fills the
- * gaps.
- */
-export type LegacyPanelProject = Omit<Partial<PanelProject>, 'settings'> & {
-  settings?: Partial<ProjectSettings>
-}
-
-/**
  * Migrate legacy payloads to the current schema. v1 is not merely cast: every
  * collection is normalized, and future schemas are rejected explicitly.
  */
-export const migrateProject = (input: LegacyPanelProject | null | undefined): PanelProject => {
+export const migrateProject = (input: Partial<PanelProject> | null | undefined): PanelProject => {
   const source = asRecord(input)
   const sourceVersion = source.schemaVersion === undefined ? 1 : source.schemaVersion
   if (typeof sourceVersion !== 'number' || !Number.isInteger(sourceVersion) || sourceVersion > PROJECT_SCHEMA_VERSION) {
     throw new Error(`Схема проекта версии ${String(sourceVersion)} новее поддерживаемой версии ${PROJECT_SCHEMA_VERSION}`)
   }
   const now = new Date().toISOString()
+  const connections = Array.isArray(source.connections) ? source.connections.map(normalizeConnection) : []
+  const busAssemblies = migrateBusAssemblies(source.busAssemblies)
+  // A v2 line came out of the abstract left-hand column; a v3 line names the bus it is fed
+  // from, so the drawing can anchor it to a real bar instead of a decorative strip.
+  const knownBus = new Map(busAssemblies.map((bus) => [bus.kind, bus.id]))
+  for (const connection of connections) {
+    if (!connection.busId && connection.kind !== 'jumper') connection.busId = knownBus.get(connection.fromBus)
+  }
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     id: asText(source.id, uid()),
@@ -181,16 +207,19 @@ export const migrateProject = (input: LegacyPanelProject | null | undefined): Pa
     settings: normalizeSettings(source.settings),
     devices: Array.isArray(source.devices) ? source.devices.map(normalizeDevice).filter((item): item is PlacedDevice => Boolean(item)) : [],
     circuits: Array.isArray(source.circuits) ? source.circuits.map(normalizeCircuit) : [],
-    connections: Array.isArray(source.connections) ? source.connections.map(normalizeConnection) : [],
+    connections,
+    busAssemblies,
+    combs: Array.isArray(source.combs) ? source.combs.map(normalizeRowComb).filter((item): item is RowComb => Boolean(item)) : [],
+    rooms: Array.isArray(source.rooms) ? source.rooms.map(normalizeRoom).filter((item): item is Room => Boolean(item)) : [],
   }
 }
 
-export const migrateProjectV1ToV2 = (input: LegacyPanelProject | null | undefined): PanelProject =>
-  migrateProject({ ...(asRecord(input) as LegacyPanelProject), schemaVersion: 1 })
+export const migrateProjectV1ToV2 = (input: Partial<PanelProject> | null | undefined): PanelProject =>
+  migrateProject({ ...(asRecord(input) as Partial<PanelProject>), schemaVersion: 1 })
 
 export const migrateProjectList = (input: unknown): PanelProject[] => {
   if (!Array.isArray(input) || !input.length) return []
-  return input.map((project) => migrateProject(project as LegacyPanelProject))
+  return input.map((project) => migrateProject(project as Partial<PanelProject>))
 }
 
 export const createDevice = (product: DeviceDefinition, row: number, slot: number): PlacedDevice => ({
@@ -208,8 +237,15 @@ export const createProject = (name = 'Демо-панель', preset = 'demo', s
     id: uid(), name, preset, createdAt: now, updatedAt: now,
     settings: { ...merged, enclosureWidth: cabinet.width, enclosureHeight: cabinet.height, enclosureDepth: cabinet.depth, rows: cabinet.rows, cabinetId: cabinet.id, railId: rail.id },
     devices: [], circuits: [], connections: [],
+    busAssemblies: DEFAULT_BUS_ASSEMBLIES(), combs: [], rooms: [],
   }
 }
+
+/** Every new board starts with the neutral and protective bars along its bottom edge. */
+export const DEFAULT_BUS_ASSEMBLIES = (): BusAssembly[] => [
+  { id: 'bus-n-bottom', kind: 'N', placement: 'bottom', label: 'N' },
+  { id: 'bus-pe-bottom', kind: 'PE', placement: 'bottom', label: 'PE' },
+]
 
 export const autoNumber = (devices: PlacedDevice[], definitions: Map<string, DeviceDefinition>) => {
   const counters = new Map<string, number>()
@@ -217,9 +253,44 @@ export const autoNumber = (devices: PlacedDevice[], definitions: Map<string, Dev
     const product = definitions.get(item.productId)
     const prefix = product?.category === 'RCCB' ? 'QFD' : product?.category === 'RCBO' ? 'QFI' : product?.category === 'SPD' ? 'SPD' : product?.category === 'busbar' ? 'BUS' : product?.category === 'terminals' ? 'XT' : 'QF'
     const number = (counters.get(prefix) ?? 0) + 1
+    counters.set(prefix, number)
     const address = `${prefix}${String(number).padStart(2, '0')}`
     return { ...item, address, marking: item.marking || address }
   })
+}
+
+const terminalText = (ref: TerminalRef, devices: Map<string, PlacedDevice>, definitions: Map<string, DeviceDefinition>) => {
+  const device = devices.get(ref.deviceId)
+  const product = device ? definitions.get(device.productId) : undefined
+  const address = device?.address || ref.deviceId
+  return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
+}
+
+/**
+ * What a wire drawn on the board should read: «QF01:1 верх → QF03:1 верх». A wire that names
+ * clamps is only as good as the addresses it quotes, which is why this is recomputed rather than
+ * written once — see `autoNumberConnections`.
+ */
+export const autoConnectionLabel = (
+  connection: Connection, devices: Map<string, PlacedDevice>, definitions: Map<string, DeviceDefinition>,
+): string => {
+  if (!connection.toTerminal) return connection.label
+  const target = terminalText(connection.toTerminal, devices, definitions)
+  if (connection.fromTerminal) return `${terminalText(connection.fromTerminal, devices, definitions)} → ${target}`
+  return `${connection.fromBus} → ${target}`
+}
+
+/**
+ * Renumbering devices silently invalidates every wire label that quotes an address: the badge
+ * keeps naming QF01 after the breaker that used to be QF01 is now QF03. Wiring drawn on the board
+ * is therefore relabelled with the same pass, and only that wiring — a line an installer named by
+ * hand keeps the text they gave it.
+ */
+export const autoNumberConnections = (
+  connections: Connection[], devices: PlacedDevice[], definitions: Map<string, DeviceDefinition>,
+): Connection[] => {
+  const byId = new Map(devices.map((item) => [item.instanceId, item]))
+  return connections.map((connection) => ({ ...connection, label: autoConnectionLabel(connection, byId, definitions) }))
 }
 
 export const presetProducts = (preset: string): { settings: Partial<ProjectSettings>; catalog: Category[] } => {
@@ -231,5 +302,3 @@ export const presetProducts = (preset: string): { settings: Partial<ProjectSetti
     default: return { settings: { phase: 1, inputCurrent: 63, cabinetId: DEFAULT_CABINET_ID, railId: DEFAULT_RAIL_ID }, catalog: ['MCB', 'RCCB', 'SPD', 'terminals', 'meter'] }
   }
 }
-
-export const demoProductIds = builtinCatalog.map((product) => product.id)

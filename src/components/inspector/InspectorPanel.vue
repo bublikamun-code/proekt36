@@ -1,27 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from '../../domain/layout'
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { cabinetDefinitions, cabinetSpecLabel, railDefinitions } from '../../data/enclosures'
-import { phaseBalance } from '../../domain/electrical'
-import { validateProject } from '../../domain/validation'
+import { phaseBalance, validateProject } from '../../domain/validation'
+import { deviceTerminals as deviceTerminalList, sameTerminal, terminalDisplayName, terminalMarkedName } from '../../domain/terminals'
+import type { TerminalRef } from '../../domain/terminals'
 import { useProjectStore } from '../../stores/project'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
-import { getDeviceFaceMetrics } from '../../domain/faceMetrics'
+import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
 import AssistantPanel from '../assistant/AssistantPanel.vue'
 import { useConfirm } from '../../composables/useConfirm'
-import { CONNECTION_THICKNESS_MM } from '../../domain/connectionSpec'
-import { CONDUCTOR_SECTIONS_MM2 } from '../../domain/conductorSpec'
-import type { Category, RailDefinition } from '../../domain/types'
+import type { Category, RailDefinition, RowComb } from '../../domain/types'
 
 const emit = defineEmits<{ focusCategory: [Category] }>()
-
-/** The number input hands over `NaN` for an empty field; the range comes from the domain, not from here. */
-const clampThickness = (value: number) => Number.isFinite(value)
-  ? Math.min(CONNECTION_THICKNESS_MM.max, Math.max(CONNECTION_THICKNESS_MM.min, value))
-  : CONNECTION_THICKNESS_MM.default
 
 const PHASE_OPTIONS: AppSelectOption[] = [
   { value: '1', label: 'L1' },
@@ -37,12 +31,7 @@ const BUS_OPTIONS: AppSelectOption[] = [
   { value: 'N', label: 'N · нейтраль' },
   { value: 'PE', label: 'PE · земля' },
 ]
-/**
- * The list of real cross-sections, taken from the domain rather than written out here. A free
- * number field used to offer any half-millimetre step, so 3.5 mm² — which does not exist — was
- * one keystroke away, and the conductor check had nothing sensible to say about it.
- */
-const CONDUCTOR_OPTIONS: AppSelectOption[] = CONDUCTOR_SECTIONS_MM2.map((value) => ({ value: String(value), label: String(value) }))
+const COMB_POLE_OPTIONS: AppSelectOption[] = [1, 2, 3, 4].map((poles) => ({ value: String(poles), label: `${poles}P` }))
 
 const store = useProjectStore()
 const { confirm } = useConfirm()
@@ -104,6 +93,33 @@ const selectedFrontView = computed(() => {
     widthMm: Math.round(face.widthMm * 10) / 10,
   }
 })
+const selectedModel = computed(() => (selectedProduct.value ? store.resolveProductModel(selectedProduct.value) : undefined))
+const ModelPreview = defineAsyncComponent(() => import('../catalog/ModelPreview.vue'))
+
+const { modelLibrary } = storeToRefs(store)
+const modelOptions = computed<AppSelectOption[]>(() => [
+  { value: '', label: 'Нет · процедурная морда' },
+  ...[...store.modelAssetsById.values()].map((asset) => ({ value: asset.id, label: `${asset.name}${asset.missing ? ' · файл потерян' : ''}` })),
+])
+const boundModelId = computed(() => {
+  const product = selectedProduct.value
+  if (!product || product.imported) return ''
+  return modelLibrary.value.bindings[product.id] ?? ''
+})
+const onBindModel = (value: string) => {
+  const product = selectedProduct.value
+  if (product) store.bindProductModel(product.id, value || null)
+}
+
+/** A device whose product left the catalogue gets a replacement picker instead of a dead card. */
+const replaceOptions = computed<AppSelectOption[]>(() =>
+  [...definitions.value.values()]
+    .filter((product) => !product.imported)
+    .sort((a, b) => a.brand.localeCompare(b.brand, 'ru') || a.name.localeCompare(b.name, 'ru'))
+    .map((product) => ({ value: product.id, label: `${product.brand} · ${product.name} · ${product.moduleWidth} мод.` })))
+const onReplaceProduct = (value: string) => {
+  if (selectedDevice.value && value) store.replaceDeviceProduct(selectedDevice.value.instanceId, value)
+}
 const errorCount = computed(() => issues.value.filter((item) => item.level === 'error').length)
 const warningCount = computed(() => issues.value.filter((item) => item.level === 'warning').length)
 const statusLabel = computed(() => errorCount.value
@@ -118,6 +134,41 @@ const busbars = computed(() => currentProject.value.devices.filter((item) => ite
 const protectionTargets = computed(() => currentProject.value.devices.filter((item) => ['MCB', 'RCCB', 'RCBO'].includes(definitions.value.get(item.productId)?.category ?? '')))
 const busbarLinkExists = (busbarId: string, deviceId: string) =>
   currentProject.value.connections.some((connection) => connection.kind === 'busbar' && connection.fromDeviceId === busbarId && connection.toDeviceId === deviceId)
+/** How many devices a comb actually reaches, mirroring the renderer's own span test. */
+const combCovers = (comb: RowComb) => {
+  const from = Math.min(comb.fromSlot, comb.toSlot)
+  const to = Math.max(comb.fromSlot, comb.toSlot)
+  return currentProject.value.devices.filter((device) => device.row === comb.row && device.slot >= from && device.slot <= to)
+}
+/** Slot inputs are one-based on screen and zero-based in the model; the range is clamped to the rail. */
+const changeCombSpan = (id: string, key: 'fromSlot' | 'toSlot', event: Event) => {
+  const slot = Math.round(Number((event.target as HTMLInputElement).value)) - 1
+  if (!Number.isFinite(slot)) return
+  store.updateComb(id, { [key]: Math.min(metrics.value.capacity - 1, Math.max(0, slot)) })
+}
+const removeComb = (id: string) => store.removeComb(id)
+/** Wiring drawn on the board. A line with no clamp is a circuit feed from the old schema, and the
+ *  circuits section below already lists those. */
+const drawnWires = computed(() => currentProject.value.connections.filter((item) => item.toTerminal))
+const deviceTerminals = computed(() => (selectedProduct.value ? deviceTerminalList(selectedProduct.value) : []))
+/** The wire clamped into one hole, whichever end of it that hole is. */
+const wireAt = (ref: TerminalRef) => drawnWires.value.find((item) => sameTerminal(item.toTerminal, ref) || sameTerminal(item.fromTerminal, ref)) ?? null
+const terminalWire = (pole: number, side: 'top' | 'bottom') =>
+  (selectedDevice.value ? wireAt({ deviceId: selectedDevice.value.instanceId, pole, side }) : null)
+const terminalText = (ref: TerminalRef) => {
+  const device = currentProject.value.devices.find((item) => item.instanceId === ref.deviceId)
+  const product = device ? definitions.value.get(device.productId) : undefined
+  const address = device?.address || ref.deviceId
+  return product ? terminalMarkedName(product, ref, address) : terminalDisplayName(ref, address)
+}
+const removeWire = async (id: string, label: string) => {
+  if (await confirm({
+    title: 'Снять провод?',
+    description: `Провод «${label}» будет удалён, а его клеммы снова станут свободными.`,
+    confirmLabel: 'Снять провод',
+    danger: true,
+  })) store.deleteConnection(id)
+}
 const removeCircuit = async (id: string, circuitName: string) => {
   if (await confirm({
     title: 'Удалить цепь?',
@@ -126,30 +177,6 @@ const removeCircuit = async (id: string, circuitName: string) => {
     danger: true,
   })) store.deleteCircuit(id)
 }
-/**
- * The wires that belong to no circuit: feeds from the panel bus and runs between two devices.
- *
- * They were recorded but listed nowhere — the panel showed a connection only under the circuit it
- * belonged to, and these belong to none. So a wire drawn on the board could not be renamed, cannot
- * be changed to another bus, and could only be removed by deleting one of the two devices it
- * touches. That is the same hole the board's wire card closes, from the other side.
- */
-const standaloneConnections = computed(() => currentProject.value.connections.filter((item) => item.kind !== 'circuit'))
-const connectionSource = (connection: (typeof currentProject.value.connections)[number]) => {
-  if (connection.kind === 'bus' || !connection.fromDeviceId) return `шина ${connection.fromBus}`
-  return currentProject.value.devices.find((device) => device.instanceId === connection.fromDeviceId)?.address || 'удалённый аппарат'
-}
-const connectionTarget = (connection: (typeof currentProject.value.connections)[number]) =>
-  currentProject.value.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'удалённый аппарат'
-const removeStandaloneConnection = async (connection: (typeof currentProject.value.connections)[number]) => {
-  if (await confirm({
-    title: 'Удалить провод?',
-    description: `Провод «${connection.label || connection.id}» (${connectionSource(connection)} → ${connectionTarget(connection)}) будет удалён. Действие можно отменить через Ctrl+Z.`,
-    confirmLabel: 'Удалить провод',
-    danger: true,
-  })) store.deleteConnection(connection.id)
-}
-
 const removeConnection = async (id: string, circuitName: string) => {
   if (await confirm({
     title: 'Удалить подключение?',
@@ -173,7 +200,7 @@ const changeSelectedQuantity = (event: Event) => {
   const input = event.target as HTMLInputElement
   if (!store.updateSelected({ quantity: input.valueAsNumber })) input.value = String(selectedDevice.value?.quantity ?? 1)
 }
-const changeCircuitNumber = (id: string, key: 'current' | 'power', event: Event) => {
+const changeCircuitNumber = (id: string, key: 'current' | 'power' | 'wireCrossSection', event: Event) => {
   const input = event.target as HTMLInputElement
   if (!store.updateCircuit(id, { [key]: input.valueAsNumber })) {
     const circuit = currentProject.value.circuits.find((item) => item.id === id)
@@ -226,7 +253,8 @@ const migrationIssueLabel = (code: string) => ({
       <div class="section-title"><h3>Выбранное устройство</h3><span class="mono">{{ selectedDevice?.address || '—' }}</span></div>
       <template v-if="selectedDevice && selectedProduct">
         <div class="selected-product"><div class="product-monogram">{{ selectedProduct.brand.slice(0, 2).toUpperCase() }}</div><div><strong>{{ selectedProduct.name }}</strong><small>{{ selectedProduct.brand }} · {{ selectedProduct.sku }}</small></div></div>
-        <figure v-if="selectedFrontView" class="selected-front-view" data-front-view><DeviceVisual :product="selectedProduct" :width="selectedFrontView.width" :height="selectedFrontView.height" /><figcaption>фронтальный вид · {{ selectedFrontView.widthMm }} мм</figcaption></figure>
+        <figure v-if="selectedModel && selectedFrontView" class="selected-front-view" data-front-view><ModelPreview :model="selectedModel" :width="selectedFrontView.width" :height="selectedFrontView.height" :label="`CAD-модель: ${selectedProduct.name}`" /><figcaption>CAD-модель · привязана к товару</figcaption></figure>
+        <figure v-else-if="selectedFrontView" class="selected-front-view" data-front-view><DeviceVisual :product="selectedProduct" :width="selectedFrontView.width" :height="selectedFrontView.height" /><figcaption>фронтальный вид · {{ selectedFrontView.widthMm }} мм</figcaption></figure>
         <div class="form-grid compact-form">
           <label>Позиция<input :value="selectedDevice.row + 1 + ' ряд / ' + (selectedDevice.slot + 1)" disabled /></label>
           <label>Адрес<input :value="selectedDevice.address" @change="store.updateSelected({ address: ($event.target as HTMLInputElement).value })" /></label>
@@ -236,6 +264,7 @@ const migrationIssueLabel = (code: string) => ({
           <label v-if="selectedPhysical">Габариты<input :value="`${selectedPhysical.widthMm} × ${selectedPhysical.heightMm} × ${selectedPhysical.depthMm} мм`" disabled /></label>
           <label>Фаза<AppSelect label="Фаза" :model-value="String(selectedDevice.phase)" :options="PHASE_OPTIONS" @update:model-value="store.updateSelected({ phase: Number($event) as 1 | 2 | 3 })" /></label>
           <label class="wide">Примечание<input :value="selectedDevice.note" placeholder="Нагрузка, помещение, кабель" @change="store.updateSelected({ note: ($event.target as HTMLInputElement).value })" /></label>
+          <label v-if="!selectedProduct.imported" class="wide">CAD-модель<AppSelect label="CAD-модель" :model-value="boundModelId" :options="modelOptions" @update:model-value="onBindModel" /></label>
         </div>
         <div class="button-row">
           <button @click="store.moveSelected(selectedDevice.row, selectedDevice.slot + getFootprintModules(selectedDevice, definitions))">Сдвинуть →</button>
@@ -244,6 +273,10 @@ const migrationIssueLabel = (code: string) => ({
           <button class="danger" aria-label="Удалить устройство" @click="removeSelected">Удалить</button>
         </div>
       </template>
+      <div v-else-if="selectedDevice" class="missing-product-card" role="alert">
+        <p><b>Товар «{{ selectedDevice.productId }}» больше нет в каталоге.</b> Устройство двигается как один модуль; выберите замену, чтобы вернуть настоящий footprint.</p>
+        <AppSelect label="Заменить товар" model-value="" :options="replaceOptions" @update:model-value="onReplaceProduct" />
+      </div>
       <div v-else class="inspector-empty"><span>↖</span><p>Выберите аппарат на DIN-рейке, чтобы изменить его параметры.</p></div>
     </section>
 
@@ -260,22 +293,47 @@ const migrationIssueLabel = (code: string) => ({
       <p v-if="!busbars.length" class="connection-empty">Добавьте FORK из каталога «Шины».</p>
     </section>
 
-    <section class="inspector-section" aria-labelledby="wire-title">
-      <div class="section-title"><h3 id="wire-title">Провода щита</h3><span class="mono">{{ standaloneConnections.length }}</span></div>
-      <p class="microcopy">Запитки от шин и каскады между аппаратами. Их нельзя отнести к цепи: это провода, а не линии нагрузки.</p>
-      <div v-for="connection in standaloneConnections" :key="connection.id" class="connection-card" :data-standalone-connection="connection.id">
-        <div class="connection-card-head">
-          <strong>{{ connectionSource(connection) }} → {{ connectionTarget(connection) }}</strong>
-          <button class="icon-button danger" :aria-label="`Удалить провод ${connection.label || connection.id}`" @click="removeStandaloneConnection(connection)">×</button>
-        </div>
+    <section class="inspector-section" aria-labelledby="comb-title">
+      <div class="section-title"><h3 id="comb-title">Гребёнки на рейке</h3><span class="mono">{{ currentProject.combs?.length ?? 0 }}</span></div>
+      <p class="microcopy">Гребёнка соединяет верхние клеммы аппаратов ряда между собой. Ширина задаётся охватом слотов: пустой слот оставляет разрыв в шине.</p>
+      <div v-for="comb in currentProject.combs ?? []" :key="comb.id" class="connection-card" :data-comb-card="comb.id">
+        <div class="connection-card-head"><strong>{{ comb.label || 'Гребёнка' }}</strong><button class="icon-button danger" :aria-label="`Удалить ${comb.label || 'гребёнку'}`" @click="removeComb(comb.id)">×</button></div>
         <div class="form-grid compact-form">
-          <label>Шина<AppSelect label="Шина провода" :model-value="connection.fromBus" :options="BUS_OPTIONS" @update:model-value="store.updateConnection(connection.id, { fromBus: $event as 'L' | 'N' | 'PE' })" /></label>
-          <label>Цвет<input :value="connection.color" type="color" @change="store.updateConnection(connection.id, { color: ($event.target as HTMLInputElement).value })" /></label>
-          <label>Толщина<input :value="connection.thickness" type="number" :min="CONNECTION_THICKNESS_MM.min" :max="CONNECTION_THICKNESS_MM.max" :step="CONNECTION_THICKNESS_MM.step" @change="store.updateConnection(connection.id, { thickness: clampThickness(Number(($event.target as HTMLInputElement).value)) })" /></label>
-          <label class="wide">Подпись<input :value="connection.label" placeholder="Например, PE → XT02" @change="store.updateConnection(connection.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+          <label>Подпись<input :value="comb.label" @change="store.updateComb(comb.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+          <label>Полюсов<AppSelect label="Полюсов" :model-value="String(comb.poles)" :options="COMB_POLE_OPTIONS" @update:model-value="store.updateComb(comb.id, { poles: Number($event) as 1 | 2 | 3 | 4 })" /></label>
+          <label>Слот от<input :value="comb.fromSlot + 1" type="number" min="1" :max="comb.toSlot + 1" step="1" @change="changeCombSpan(comb.id, 'fromSlot', $event)" /></label>
+          <label>Слот до<input :value="comb.toSlot + 1" type="number" min="1" :max="metrics.capacity" step="1" @change="changeCombSpan(comb.id, 'toSlot', $event)" /></label>
+        </div>
+        <p v-if="combCovers(comb).length < comb.poles" class="connection-warn">Ряду не хватает {{ comb.poles - combCovers(comb).length }} аппарат(а) — часть зубцов пустая.</p>
+      </div>
+      <p v-if="!(currentProject.combs ?? []).length" class="connection-empty">Кнопка «Гребёнка» в жёлобе ряда добавляет гребёнку на весь ряд.</p>
+    </section>
+
+    <section class="inspector-section" aria-labelledby="wires-title">
+      <div class="section-title"><h3 id="wires-title">Клеммы и провода</h3><span class="mono">{{ drawnWires.length }}</span></div>
+      <p class="microcopy">Инструмент «Провод» (клавиша W) соединяет клеммы на доске. Здесь видно, что в какую клемму входит; щелчок по строке подсвечивает провод на щите.</p>
+      <div v-if="selectedProduct" class="terminal-grid" data-terminal-grid>
+        <div v-for="info in deviceTerminals" :key="info.pole + info.side" class="terminal-row" :class="{ busy: terminalWire(info.pole, info.side) }" :data-terminal-row="`${selectedDevice!.instanceId}:${info.pole}:${info.side}`">
+          <span class="terminal-mark">{{ info.label }} <i>{{ info.side === 'top' ? 'верх' : 'низ' }}</i></span>
+          <button v-if="terminalWire(info.pole, info.side)" class="wire-link" :class="{ selected: store.selectedConnectionId === terminalWire(info.pole, info.side)!.id }" :aria-label="`Показать провод ${terminalWire(info.pole, info.side)!.label} на доске`" @click="store.selectConnection(terminalWire(info.pole, info.side)!.id)">{{ terminalWire(info.pole, info.side)!.label }}</button>
+          <span v-else class="terminal-free">свободна</span>
         </div>
       </div>
-      <p v-if="!standaloneConnections.length" class="connection-empty">Прямых проводов нет.</p>
+      <div v-for="wire in drawnWires" :key="wire.id" class="connection-card wire-card" :class="{ selected: store.selectedConnectionId === wire.id }" :data-wire-row="wire.id">
+        <div class="connection-card-head">
+          <strong>{{ wire.label }}</strong>
+          <span class="wire-phase" :class="`bus-${wire.fromBus.toLowerCase()}`">{{ wire.fromBus === 'L' ? `L${wire.phase ?? 1}` : wire.fromBus }}</span>
+          <button class="icon-button danger" :aria-label="`Снять провод ${wire.label}`" @click="removeWire(wire.id, wire.label)">×</button>
+        </div>
+        <div class="wire-ends">
+          <span v-if="wire.fromTerminal">{{ terminalText(wire.fromTerminal) }}</span>
+          <span v-else class="bus-chip">шина {{ wire.fromBus }}</span>
+          <span class="wire-arrow">→</span>
+          <span v-if="wire.toTerminal">{{ terminalText(wire.toTerminal) }}</span>
+        </div>
+        <label class="wide wire-rename">Подпись<input :value="wire.label" placeholder="Например, L1 → QF03" @change="store.updateConnection(wire.id, { label: ($event.target as HTMLInputElement).value })" /></label>
+      </div>
+      <p v-if="!drawnWires.length" class="connection-empty">Проводов пока нет. Нажмите «Провод» в панели доски и щёлкните две клеммы подряд.</p>
     </section>
 
     <section class="inspector-section circuits-section">
@@ -290,7 +348,7 @@ const migrationIssueLabel = (code: string) => ({
           <label>Мощность, Вт<input :value="circuit.power" type="number" min="0" step="1" @change="changeCircuitNumber(circuit.id, 'power', $event)" /></label>
           <label>Фаза<AppSelect label="Фаза" :model-value="String(circuit.phase)" :options="PHASE_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { phase: Number($event) as 1 | 2 | 3 })" /></label>
           <label>Защита<AppSelect label="Защита" :model-value="circuit.protectionDeviceId" :options="protectionOptions()" placeholder="Выберите аппарат" @update:model-value="store.updateCircuit(circuit.id, { protectionDeviceId: $event })" /></label>
-          <label>Провод, мм²<AppSelect label="Провод, мм²" :model-value="String(circuit.wireCrossSection)" :options="CONDUCTOR_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { wireCrossSection: Number($event) })" /></label>
+          <label>Провод, мм²<input :value="circuit.wireCrossSection" type="number" min="0.5" step="0.5" @change="changeCircuitNumber(circuit.id, 'wireCrossSection', $event)" /></label>
           <label>Цвет<input :value="circuit.color" type="color" @change="store.updateCircuit(circuit.id, { color: ($event.target as HTMLInputElement).value })" /></label>
         </div>
         <div class="connection-heading"><span>Подключения <b>{{ connectionsFor(circuit.id).length }}</b></span><button class="text-button" :disabled="!currentProject.devices.length" @click="store.addConnection(circuit.id)">＋ Подключение</button></div>
@@ -300,7 +358,7 @@ const migrationIssueLabel = (code: string) => ({
             <label>Шина<AppSelect label="Шина" :model-value="connection.fromBus" :options="BUS_OPTIONS" @update:model-value="store.updateConnection(connection.id, { fromBus: $event as 'L' | 'N' | 'PE' })" /></label>
             <label>Устройство<AppSelect label="Устройство" :model-value="connection.toDeviceId" :options="deviceOptions" placeholder="Выберите аппарат" @update:model-value="store.updateConnection(connection.id, { toDeviceId: $event })" /></label>
             <label>Цвет<input :value="connection.color" type="color" @change="store.updateConnection(connection.id, { color: ($event.target as HTMLInputElement).value })" /></label>
-            <label>Толщина<input :value="connection.thickness" type="number" :min="CONNECTION_THICKNESS_MM.min" :max="CONNECTION_THICKNESS_MM.max" :step="CONNECTION_THICKNESS_MM.step" @change="store.updateConnection(connection.id, { thickness: clampThickness(Number(($event.target as HTMLInputElement).value)) })" /></label>
+            <label>Толщина<input :value="connection.thickness" type="number" min="0.5" max="8" step="0.5" @change="store.updateConnection(connection.id, { thickness: Math.min(8, Math.max(0.5, Number(($event.target as HTMLInputElement).value))) })" /></label>
             <label class="wide">Подпись<input :value="connection.label" placeholder="Например, L1 → QF01" @change="store.updateConnection(connection.id, { label: ($event.target as HTMLInputElement).value })" /></label>
           </div>
         </div>
@@ -330,6 +388,7 @@ const migrationIssueLabel = (code: string) => ({
         <div><span>Свободно</span><strong>{{ metrics.free }}<small> мод.</small></strong></div>
         <div><span>Заполнено</span><strong>{{ metrics.modules }} / {{ metrics.capacity * currentProject.settings.rows }}<small> мод.</small></strong></div>
         <div><span>Разброс фаз</span><strong>{{ metrics.balance.spread }}<small> %</small></strong></div>
+        <div><span>Соединения</span><strong>{{ currentProject.connections.length }}<small> шт.</small></strong></div>
       </div>
       <div class="phase-bar" role="img" :aria-label="`Нагрузка фаз: ${metrics.balance.totals.join(', ')} ампер`"><i v-for="(value, index) in metrics.balance.totals" :key="index" :class="`phase-${index}`" :style="{ flex: Math.max(1, value) }"></i></div>
       <p class="microcopy">Расчёт предварительный. Нормативное соответствие не подтверждается.</p>

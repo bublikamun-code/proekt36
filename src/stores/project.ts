@@ -1,48 +1,48 @@
-import { computed, ref, toRaw, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { workspaceCatalog } from '../data/catalog'
+import { builtinCatalog, enmasSeriesCatalog } from '../data/catalog'
+import { embeddedModelById } from '../data/models'
 import {
   compactRow,
   evaluateCabinetMigration,
   getFootprintModules,
   getRowCapacity,
-  MAX_ROWS,
   placeProduct,
   resolveDeviceMove,
   type LayoutMigrationPlan,
 } from '../domain/layout'
-import { autoNumber, createProject, migrateProject, presetProducts, uid } from '../domain/project'
+import { autoConnectionLabel, autoNumber, autoNumberConnections, createProject, migrateProject, presetProducts, uid } from '../domain/project'
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
-import type { BusType, Circuit, Connection, DeviceDefinition, ModelMetadata, PanelProject, PlacedDevice, ProjectSettings } from '../domain/types'
-import { clearModelAssets, deleteModelAsset, putModelAsset } from '../storage/modelDb'
-import { CONNECTION_THICKNESS_MM } from '../domain/connectionSpec'
-import { wireColor } from '../domain/wiring'
-import { actionableStorageError, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
+import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, Room, RowComb, StoredModelAsset, StoredModelLibrary } from '../domain/types'
+import { CIRCUIT_KINDS } from '../domain/types'
+import { terminalOccupied } from '../domain/wireRouting'
+import { deviceTerminals, sameTerminal, terminalColumnForPole, terminalColumns, terminalType } from '../domain/terminals'
+import type { TerminalInfo, TerminalRef, TerminalType } from '../domain/terminals'
+import { clearModelAssets, deleteModelAsset, listModelAssetIds, putModelAsset } from '../storage/modelDb'
+import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
+import { invalidateModelCaches } from '../services/modelRender'
 import { usePreferencesStore } from './preferences'
 
 const HISTORY_LIMIT = 50
 const COALESCE_WINDOW_MS = 800
-/**
- * Autosave debounce. Kept short on purpose: this is the longest a single edit can exist only in
- * memory, and the store flushes the pending write on `pagehide` and on tab hiding anyway.
- */
-export const PERSIST_DELAY_MS = 200
+const PERSIST_DELAY_MS = 450
 type ProjectHistory = { undo: PanelProject[]; redo: PanelProject[] }
 type StorageStatus = 'saving' | 'saved' | 'save-failed' | 'storage-unavailable'
 
-// structuredClone beats the JSON round-trip, but it refuses to walk a reactive proxy:
-// devices can carry nested proxies (e.g. a definition straight from the reactive catalog),
-// while toRaw only peels the top level. Raw payloads take the fast path; anything that
-// still holds a proxy falls back to JSON, which reads through the getters.
-const clone = <T>(value: T): T => {
-  const raw = toRaw(value as object)
-  try {
-    return structuredClone(raw) as T
-  } catch {
-    return JSON.parse(JSON.stringify(raw)) as T
-  }
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+/** What the planner needs to know to add a line; everything else gets a sensible default. */
+export interface NewLineInput {
+  name: string
+  roomId?: string
+  kind?: Circuit['kind']
+  phase?: 1 | 2 | 3
+  protectionProductId: string
+  current?: number
+  power?: number
+  wireCrossSection?: number
 }
 
 const seedProject = () => {
@@ -55,8 +55,11 @@ const seedProject = () => {
   // what the app promises.
   project.id = 'sample-apartment'
   project.schemaVersion = PROJECT_SCHEMA_VERSION
-  project.settings = { inputCurrent: 40, phase: 1, enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9, reserveModules: 8 }
-  const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
+  // Only the demo's electrical inputs are overridden; the cabinet geometry that
+  // createProject derived from the apartment preset (NX8-24, rail-12) has to survive.
+  // The old literal replacement silently degraded the seed to the 17.5 mm legacy layout.
+  project.settings = { ...project.settings, inputCurrent: 40, phase: 1, reserveModules: 8 }
+  const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
   const products = [
     definitions.get('ekf-spd-t1-3p-n-pe')!, definitions.get('ekf-mcb-4p-b32')!,
     definitions.get('ekf-rccb-4p-40')!, definitions.get('ekf-mcb-1p-c6')!,
@@ -64,13 +67,49 @@ const seedProject = () => {
     definitions.get('ekf-mcb-1p-c6')!, definitions.get('ekf-terminal-1p-gray')!,
     definitions.get('iek-terminal-1p-blue')!,
   ]
+  // Three 4-module apparatus fill a 12-slot rail exactly (slots 0/4/8); everything else
+  // starts row two. Preferred slots are the final ones — an insert into a packed middle
+  // would demand a row shift the full rail cannot grant.
   let devices: PlacedDevice[] = []
   for (const [index, product] of products.entries()) {
-    const result = placeProduct(devices, product, index < 4 ? 0 : 1, index < 4 ? index : index - 4, getRowCapacity(project), uid, definitions)
+    const row = index < 3 ? 0 : 1
+    const slot = index < 3 ? index * 4 : index - 3
+    const result = placeProduct(devices, product, row, slot, getRowCapacity(project), uid, definitions)
     devices = result.devices
   }
   project.devices = autoNumber(devices, definitions)
+  wireDemo(project, definitions)
   return project
+}
+
+/**
+ * A distribution board is not a row of devices. The phase reaches the breakers through a comb, the
+ * earth through its own bar, and the main runs on to the RCCB as a drawn conductor. The demo is
+ * therefore shipped wired: an empty rail teaches nothing about what the board is for, and every
+ * screenshot of the editor would show an unfinished panel.
+ */
+const wireDemo = (project: PanelProject, definitions: Map<string, DeviceDefinition>) => {
+  const nth = (productId: string, index = 0) => project.devices.filter((item) => item.productId === productId)[index]
+  const main = nth('ekf-mcb-4p-b32')
+  const rccb = nth('ekf-rccb-4p-40')
+  const earth = nth('ekf-terminal-1p-gray')
+  project.combs = [{ id: 'demo-comb-3p', row: 1, poles: 3, fromSlot: 0, toSlot: 2, label: 'Гребёнка 3P' }]
+  const wires: Connection[] = []
+  // A 4P device numbers its poles in staggered rows, so the first clamp underneath is pole 2.
+  if (main && rccb) wires.push({
+    id: 'demo-main-rccb', circuitId: '', fromBus: 'L', toDeviceId: rccb.instanceId, color: '', thickness: 2,
+    kind: 'jumper', phase: 1,
+    fromTerminal: { deviceId: main.instanceId, pole: 2, side: 'bottom' },
+    toTerminal: { deviceId: rccb.instanceId, pole: 1, side: 'top' },
+    label: '',
+  })
+  if (earth) wires.push({
+    id: 'demo-earth', circuitId: '', fromBus: 'PE', toDeviceId: earth.instanceId, color: '', thickness: 2,
+    kind: 'circuit', busId: 'bus-pe-bottom',
+    toTerminal: { deviceId: earth.instanceId, pole: 1, side: 'top' },
+    label: '',
+  })
+  project.connections = autoNumberConnections(wires, project.devices, definitions)
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -81,8 +120,15 @@ export const useProjectStore = defineStore('project', () => {
   const projects = ref<PanelProject[]>(loaded.projects.length ? loaded.projects : [fallbackProject])
   const currentProjectId = ref(loaded.currentProjectId && projects.value.some((project) => project.id === loaded.currentProjectId) ? loaded.currentProjectId : projects.value[0]!.id)
   const selectedDeviceId = ref<string | null>(null)
+  const selectedConnectionId = ref<string | null>(null)
+  // The line the planner tab is looking at, so the board can highlight its conductors; null when
+  // no row is selected. Kept here for the same reason as selectedConnectionId: two views, one state.
+  const selectedLineId = ref<string | null>(null)
+  const selectLine = (id: string | null) => {
+    selectedLineId.value = selectedLineId.value === id ? null : id
+  }
   const cabinetMigration = ref<LayoutMigrationPlan | null>(null)
-  const importedModels = ref<ModelMetadata[]>(loaded.models)
+  const modelLibrary = ref<StoredModelLibrary>(loaded.models)
   const histories = ref<Record<string, ProjectHistory>>({})
   const lastCoalesce = new Map<string, { key: string; at: number }>()
   const undoStack = computed(() => histories.value[currentProjectId.value]?.undo ?? [])
@@ -101,6 +147,7 @@ export const useProjectStore = defineStore('project', () => {
   let persistTimer: ReturnType<typeof setTimeout> | undefined
   let projectsDirty = false
   let currentProjectDirty = false
+  let modelsDirty = false
   let persistenceError: string | null = storageError.value
 
   const updateStorageState = () => {
@@ -116,39 +163,37 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   const currentProject = computed(() => projects.value.find((item) => item.id === currentProjectId.value) ?? projects.value[0]!)
-  const definitions = computed(() => new Map<string, DeviceDefinition>([
-    ...workspaceCatalog.map((item) => [item.id, item] as const),
-    ...importedModels.value.map((model) => [model.id, {
-      id: model.id, name: model.name, brand: model.brand, sku: model.sku, category: model.category,
-      moduleWidth: model.moduleWidth, poles: model.poles, ratedCurrent: model.ratedCurrent,
-      voltage: model.voltage, bus: model.bus, price: model.price, weight: model.weight,
-      height: model.height, depth: model.depth, color: '#d9ded8', imported: true, modelAssetId: model.id,
-      // The numbers came from the import dialog, not from a datasheet, so the position is
-      // unverified. The field is required precisely so this cannot be left out.
-      verificationStatus: 'unverified',
-    }] as const),
-  ]))
+  /** Embedded assets ship with the app; local ones come from imports and live in IndexedDB. */
+  const modelAssetsById = computed<Map<string, ModelAsset>>(() => {
+    const map = new Map<string, ModelAsset>(embeddedModelById)
+    for (const asset of modelLibrary.value.assets) map.set(asset.id, asset)
+    return map
+  })
+  const resolveProductModel = (product: DeviceDefinition): ModelAsset | undefined =>
+    product.modelId ? modelAssetsById.value.get(product.modelId) : undefined
+  const definitions = computed(() => {
+    const map = new Map<string, DeviceDefinition>([
+      ...builtinCatalog.map((item) => [item.id, item] as const),
+      ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
+      ...modelLibrary.value.products.map((item) => [item.id, item] as const),
+    ])
+    // Bindings attach a model to a built-in product without cloning it into the library.
+    for (const [productId, modelId] of Object.entries(modelLibrary.value.bindings)) {
+      const product = map.get(productId)
+      if (product && modelAssetsById.value.has(modelId)) map.set(productId, { ...product, modelId })
+    }
+    return map
+  })
+  /**
+   * Addresses and the wire labels that quote them are one thing. Renumbering the devices and
+   * leaving the wiring alone would leave every conductor pointing at an address that moved.
+   */
+  const renumber = (project: PanelProject, devices: PlacedDevice[] = project.devices) => {
+    project.devices = autoNumber(devices, definitions.value)
+    project.connections = autoNumberConnections(project.connections ?? [], project.devices, definitions.value)
+  }
   const selectedDevice = computed(() => currentProject.value.devices.find((item) => item.instanceId === selectedDeviceId.value) ?? null)
   const selectedProduct = computed(() => selectedDevice.value ? definitions.value.get(selectedDevice.value.productId) ?? null : null)
-
-  /**
-   * The selected wire.
-   *
-   * A wire was previously untouchable: it could be drawn and it could be undone, but there was
-   * nothing to click, so the only way to get rid of one was to delete a device it happened to
-   * touch. Selection is part of the same store state as the selected device and is deliberately not
-   * written to storage — nobody returns to a page expecting a wire to still be picked.
-   */
-  const selectedConnectionId = ref<string | null>(null)
-  const selectedConnection = computed(() => currentProject.value.connections.find((item) => item.id === selectedConnectionId.value) ?? null)
-  const selectDevice = (instanceId: string | null) => {
-    selectedDeviceId.value = instanceId
-    if (instanceId) selectedConnectionId.value = null
-  }
-  const selectConnection = (connectionId: string | null) => {
-    selectedConnectionId.value = connectionId
-    if (connectionId) selectedDeviceId.value = null
-  }
 
   const persistNow = async () => {
     if (!repository.available) {
@@ -156,9 +201,10 @@ export const useProjectStore = defineStore('project', () => {
       return false
     }
     try {
-      repository.save({ projects: projects.value, models: importedModels.value, currentProjectId: currentProjectId.value })
+      repository.save({ projects: projects.value, models: modelLibrary.value, currentProjectId: currentProjectId.value }, { modelsDirty })
       projectsDirty = false
       currentProjectDirty = false
+      modelsDirty = false
       persistenceError = null
       storageError.value = null
       storageRecovery.value = repository.recoveryData
@@ -224,26 +270,15 @@ export const useProjectStore = defineStore('project', () => {
   // closed inside the debounce window used to drop the last edit. `pagehide` is the one
   // event a browser still delivers on close and on bfcache navigation, and the write it
   // triggers is synchronous, so it completes before the document goes away.
-  //
-  // `visibilitychange` covers the case `pagehide` misses: a phone that backgrounds the tab and
-  // then reclaims its memory sends no close event at all, and there the debounced write was the
-  // only thing standing between the user and their last edit.
-  if (typeof window !== 'undefined') {
-    window.addEventListener('pagehide', () => { void flushPersistence() })
-    // Guarded rather than assumed: the store is also built in headless tests, where `window`
-    // exists as a stub without a document to listen on.
-    if (typeof document?.addEventListener === 'function') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') void flushPersistence()
-      })
-    }
-  }
+  if (typeof window !== 'undefined') window.addEventListener('pagehide', () => { void flushPersistence() })
 
-  watch([projects, importedModels], schedulePersistence, { deep: true })
+  // Registered before the persistence watcher so a library change is flagged before the
+  // debounced save decides whether the models key needs to be written at all.
+  watch(modelLibrary, () => { modelsDirty = true }, { deep: true })
+  watch([projects, modelLibrary], schedulePersistence, { deep: true })
 
   watch(currentProjectId, (id) => {
     selectedDeviceId.value = null
-    selectedConnectionId.value = null
     cabinetMigration.value = null
     currentProjectDirty = true
     if (repository.available) {
@@ -336,8 +371,14 @@ export const useProjectStore = defineStore('project', () => {
     Object.assign(project.settings, config.settings)
     project.preset = preset
     const allowed = new Set(config.catalog)
-    const products = definitions.value ? [...definitions.value.values()].filter((item) => allowed.has(item.category) && !item.imported) : []
-    const unique = Array.from(new Map(products.map((item) => [item.category, item])).values()).slice(0, Math.min(7, config.settings.rows ?? project.settings.rows))
+    // First product of the category wins, and template entries never seed a board.
+    // Last-wins used to hand every preset the same late-catalogue breaker regardless of brand.
+    const picked = new Map<string, DeviceDefinition>()
+    for (const item of definitions.value.values()) {
+      if (!allowed.has(item.category) || item.imported || item.verificationStatus === 'template') continue
+      if (!picked.has(item.category)) picked.set(item.category, item)
+    }
+    const unique = [...picked.values()].slice(0, Math.min(7, project.settings.rows))
     const productsMap = new Map(definitions.value)
     let devices: PlacedDevice[] = []
     unique.forEach((product, index) => {
@@ -345,7 +386,7 @@ export const useProjectStore = defineStore('project', () => {
       const result = placeProduct(devices, product, row, 0, getRowCapacity(project), uid, productsMap)
       devices = result.devices
     })
-    project.devices = autoNumber(devices, definitions.value)
+    renumber(project, devices)
   }, 'Пресет применён')
 
   const rejectCommand = (message: string) => {
@@ -441,50 +482,37 @@ export const useProjectStore = defineStore('project', () => {
     return created
   }
 
-  /**
-   * `row` and `slot` stay optional so that a click in the catalogue, which names no position, can be
-   * told apart from a drop, which does.
-   *
-   * A click searches rows from the top for the first one that will take the device. Refusing because
-   * row 1 is full while row 2 is half empty is not a rule anyone would write on purpose — the person
-   * clicking wanted the device on the board, and where it lands is bookkeeping. A drop, on the other
-   * hand, lands exactly where it was dropped or not at all, so it never searches.
-   */
-  /**
-   * Places a device and reports where it went, so a caller that can do better than "it failed" —
-   * duplicating next to an original, for one — can try somewhere else without having to parse a
-   * notice it cannot clear.
-   */
-  const addDevice = (productId: string, row?: number, slot = 0): { ok: boolean; row?: number; error?: string } => {
+  const addDevice = (productId: string, row = 0, slot = 0) => {
     const product = definitions.value.get(productId)
-    if (!product) { notify('Товар не найден', 'error'); return { ok: false } }
+    if (!product) return notify('Товар не найден', 'error')
     const capacity = getRowCapacity(currentProject.value)
-    const candidates = row === undefined ? Array.from({ length: MAX_ROWS }, (_, index) => index) : [row]
-    let result: ReturnType<typeof placeProduct> = { devices: currentProject.value.devices, slot }
-    let landedRow = row
-    for (const candidate of candidates) {
-      result = placeProduct(currentProject.value.devices, product, candidate, slot, capacity, uid, definitions.value)
-      if (!result.error) { landedRow = candidate; break }
+    let result = placeProduct(currentProject.value.devices, product, row, slot, capacity, uid, definitions.value)
+    // A catalogue click means "put it anywhere sensible". With the requested rail packed,
+    // the device used to be refused even when the next row was completely empty.
+    if (result.error && row === 0 && slot === 0) {
+      for (let candidateRow = 1; candidateRow < currentProject.value.settings.rows && result.error; candidateRow += 1) {
+        result = placeProduct(currentProject.value.devices, product, candidateRow, 0, capacity, uid, definitions.value)
+      }
     }
-    if (result.error) { notify(result.error, 'error'); return { ok: false } }
+    if (result.error) return notify(result.error, 'error')
     const previousIds = new Set(currentProject.value.devices.map((item) => item.instanceId))
     let linked = 0
     commit((project) => {
-      project.devices = autoNumber(result.devices, definitions.value)
+      renumber(project, result.devices)
       linked = syncBusbarConnections(project, new Set(project.devices.filter((item) => !previousIds.has(item.instanceId)).map((item) => item.instanceId)))
     })
     selectedDeviceId.value = result.devices.find((item) => !previousIds.has(item.instanceId))?.instanceId ?? null
     if (linked) notify(`Аппарат добавлен и подключён к шине`)
-    return { ok: true, row: landedRow }
   }
 
   const moveDeviceById = (instanceId: string, row: number, slot: number, options?: { coalesce?: string }) => {
     const device = currentProject.value.devices.find((item) => item.instanceId === instanceId)
-    const product = device ? definitions.value.get(device.productId) : undefined
-    if (!device || !product) return notify('Устройство не найдено', 'error')
+    if (!device) return notify('Устройство не найдено', 'error')
     if (device.mount === 'busbar' && (!Number.isInteger(row) || row < 0 || row >= currentProject.value.settings.rows)) {
       return rejectCommand('Позиция за пределами ряда')
     }
+    // A device whose product left the catalogue still moves on a one-module footprint from
+    // getFootprintModules; freezing it in place only made the placeholder impossible to tidy up.
     const result = resolveDeviceMove(currentProject.value.devices, instanceId, row, slot, getRowCapacity(currentProject.value), definitions.value)
     if (result.error) return notify(result.error, 'error')
     selectedDeviceId.value = instanceId
@@ -496,7 +524,7 @@ export const useProjectStore = defineStore('project', () => {
         return Boolean(before) && before!.row === item.row && before!.slot === item.slot
       })
     if (unchanged) return
-    commit((project) => { project.devices = autoNumber(result.devices, definitions.value) }, undefined, { coalesce: options?.coalesce })
+    commit((project) => { renumber(project, result.devices) }, undefined, { coalesce: options?.coalesce })
   }
 
   const moveSelected = (row: number, slot: number) => {
@@ -522,21 +550,10 @@ export const useProjectStore = defineStore('project', () => {
     notify('Устройство удалено')
   }
 
-  /**
-   * A copy belongs next to its original. When the row has no room beside it, the next row that
-   * does is still a copy — refusing outright and leaving the board untouched is the one outcome
-   * that serves nobody, and the notice about it arrives after the person has waited.
-   */
   const duplicateSelected = () => {
     const selected = selectedDevice.value
     if (!selected) return
-    const beside = selected.slot + getFootprintModules(selected, definitions.value)
-    const placed = addDevice(selected.productId, selected.row, beside)
-    if (placed.ok) return
-    const anywhere = addDevice(selected.productId)
-    if (anywhere.ok && anywhere.row !== undefined && anywhere.row !== selected.row) {
-      notify(`Копия поставлена в ряд ${anywhere.row + 1}: ряд ${selected.row + 1} занят.`)
-    }
+    addDevice(selected.productId, selected.row, selected.slot + getFootprintModules(selected, definitions.value))
   }
 
   const updateSelected = (patch: Partial<PlacedDevice>): boolean => {
@@ -570,7 +587,38 @@ export const useProjectStore = defineStore('project', () => {
     }, 'Ряды уплотнены')
   }
 
-  const autoNumberAll = () => commit((project) => { project.devices = autoNumber(project.devices, definitions.value) }, 'Адреса обновлены')
+  const autoNumberAll = () => commit((project) => renumber(project), 'Адреса и подписи проводов обновлены')
+
+  /** The slot span a new comb on this row should cover: every device already in the row. */
+  const addComb = (row: number, poles: 1 | 2 | 3 | 4 = 1) => {
+    const inRow = currentProject.value.devices.filter((item) => item.row === row).sort((a, b) => a.slot - b.slot)
+    if (!inRow.length) return notify('В ряду нет аппаратов — гребёнке нечего соединять', 'error')
+    // A comb is a physical part of a fixed length: its teeth span as many devices as it has
+    // poles, starting at the leftmost one. Covering the whole row would draw a one-tooth comb
+    // across nine devices, which no installer would recognise.
+    const fed = inRow.slice(0, poles)
+    const fromSlot = Math.min(...fed.map((item) => item.slot))
+    const toSlot = Math.max(...fed.map((item) => item.slot + getFootprintModules(item, definitions.value) - 1))
+    commit((project) => {
+      project.combs = [...(project.combs ?? []), { id: uid(), row, poles, fromSlot, toSlot, label: `Гребёнка ${poles}P` }]
+    }, `Гребёнка ${poles}P добавлена`)
+  }
+
+  const updateComb = (id: string, patch: Partial<RowComb>) => {
+    if (!currentProject.value.combs?.some((comb) => comb.id === id)) return
+    commit((project) => {
+      project.combs = (project.combs ?? []).map((comb) => {
+        if (comb.id !== id) return comb
+        const next = { ...comb, ...patch }
+        return { ...next, fromSlot: Math.min(next.fromSlot, next.toSlot), toSlot: Math.max(next.fromSlot, next.toSlot) }
+      })
+    }, 'Гребёнка обновлена', { coalesce: `comb:${id}` })
+  }
+
+  const removeComb = (id: string) => {
+    if (!currentProject.value.combs?.some((comb) => comb.id === id)) return
+    commit((project) => { project.combs = (project.combs ?? []).filter((comb) => comb.id !== id) }, 'Гребёнка удалена')
+  }
 
   const addBusbarConnection = (fromDeviceId: string, toDeviceId: string) => {
     const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
@@ -580,59 +628,62 @@ export const useProjectStore = defineStore('project', () => {
     commit((project) => project.connections.push({ id: uid(), circuitId: '', fromBus: 'L', toDeviceId, color: '#aeb8b4', thickness: 2, label: `FORK → ${target.address || 'аппарат'}`, kind: 'busbar', fromDeviceId }), 'Шина подключена')
   }
 
-  /**
-   * Draws a wire between two devices by hand, the way a cascade is recorded: the feed leaves the
-   * bottom of one device and arrives at the top of the other, on the same bus.
-   *
-   * The circuit is left empty, as a busbar feed is. A cascade is a physical run of copper, not a
-   * load, and giving it a circuit would invent a load the person never asked for. The validation
-   * rules already treat a connection without a circuit as a feed rather than a missing field.
-   */
-  const connectOnBoard = (fromDeviceId: string, fromBus: BusType, toDeviceId: string, terminal?: number): boolean => {
-    if (fromDeviceId === toDeviceId) return rejectCommand('Нельзя соединить аппарат с самим собой.')
-    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
-    const source = currentProject.value.devices.find((item) => item.instanceId === fromDeviceId)
-    if (!target || !source) return rejectCommand('Аппарат не найден.')
-    // The terminal is part of what makes a wire this wire: the same run to a terminal block is a
-    // second wire when it lands on the next screw, and refusing it made four screws of every block
-    // unreachable.
-    const duplicate = currentProject.value.connections.some((item) => item.fromDeviceId === fromDeviceId
-      && item.toDeviceId === toDeviceId && item.fromBus === fromBus && (item.terminal ?? 0) === (terminal ?? 0))
-    if (duplicate) return rejectCommand('Такой провод уже проведён.')
-    const label = `${source.address || 'аппарат'} → ${target.address || 'аппарат'}`
-    commit((project) => project.connections.push({
-      id: uid(), circuitId: '', fromBus, toDeviceId,
-      color: wireColor(fromBus), thickness: 2, label, kind: 'busbar', fromDeviceId,
-      ...(terminal === undefined ? {} : { terminal }),
-    }), `Провод ${label} проведён`)
-    return true
+  const terminalDevice = (ref: TerminalRef) => currentProject.value.devices.find((item) => item.instanceId === ref.deviceId)
+
+  const deviceMap = (project: PanelProject) => new Map(project.devices.map((item) => [item.instanceId, item]))
+
+  /** What a clamp is: the marking on the device, not the pole number, decides it. */
+  const terminalMarking = (ref: TerminalRef): TerminalType | null => {
+    const product = terminalProduct(ref)
+    if (!product) return null
+    const columns = terminalColumns(product)
+    return terminalType(product, terminalColumnForPole(product, ref.pole), columns, ref.side === 'bottom')
+  }
+
+  const terminalProduct = (ref: TerminalRef) => {
+    const device = terminalDevice(ref)
+    return device ? definitions.value.get(device.productId) : undefined
   }
 
   /**
-   * Feeds a device from one of the panel buses.
-   *
-   * This is the connection that was impossible to draw by hand: the board had no bus to click, and
-   * the store had no method for it, so a panel could show its cascades but not its own feeds — the
-   * one line every real board starts with. The record is the same as the one an imported project
-   * carries, except that its kind says where it comes from: `bus` is the panel bus, `busbar` is
-   * another device. Without that distinction the two cannot be told apart in the report, and the
-   * check that every cascade names a source would fire on a perfectly ordinary feed.
+   * A wire drawn by hand between two clamps. The pair decides the rest of the record: a terminal
+   * marked N makes the conductor a neutral, one marked PE an earth, and anything else takes the
+   * phase colour of the pole it leaves from — which is what an installer reads off the board.
    */
-  const connectFromBus = (bus: BusType, toDeviceId: string, terminal?: number): boolean => {
-    const target = currentProject.value.devices.find((item) => item.instanceId === toDeviceId)
-    if (!target) return rejectCommand('Аппарат не найден.')
-    // Two wires of the same bus to the same device are the same wire only if they land on the same
-    // terminal. On a terminal block they do not: a six-screw block takes three earth wires, and the
-    // second one used to be refused as a duplicate of the first.
-    const duplicate = currentProject.value.connections.some((item) => !item.fromDeviceId
-      && item.toDeviceId === toDeviceId && item.fromBus === bus && (item.terminal ?? 0) === (terminal ?? 0))
-    if (duplicate) return rejectCommand(`${bus} → ${target.address || 'аппарат'} уже проведён.`)
-    const label = `${bus} → ${target.address || 'аппарат'}`
-    commit((project) => project.connections.push({
-      id: uid(), circuitId: '', fromBus: bus, toDeviceId,
-      color: wireColor(bus), thickness: 2, label, kind: 'bus',
-      ...(terminal === undefined ? {} : { terminal }),
-    }), `Провод ${label} проведён`)
+  const addWire = (from: TerminalRef, to: TerminalRef): boolean => {
+    const source = terminalDevice(from)
+    const target = terminalDevice(to)
+    if (!source || !target) return rejectCommand('Клемма не найдена: устройство удалено или не то, что нарисовано.')
+    if (sameTerminal(from, to)) return rejectCommand('Провод не может начинаться и заканчиваться на одной клемме.')
+    if (terminalOccupied(currentProject.value, from) || terminalOccupied(currentProject.value, to))
+      return rejectCommand('Клемма уже занята другим проводом.')
+    const marking = terminalMarking(from)
+    const connection: Connection = {
+      id: uid(), circuitId: '', fromBus: marking === 'neutral' ? 'N' : marking === 'pe' ? 'PE' : 'L',
+      toDeviceId: to.deviceId, color: '', thickness: 2, kind: 'jumper',
+      fromTerminal: from, toTerminal: to, label: '',
+    }
+    if (marking === 'phase') connection.phase = (((from.pole - 1) % 3) + 1) as 1 | 2 | 3
+    // The label quotes addresses, so it comes from the same rule the renumbering pass uses rather
+    // than from a second spelling of it that could drift.
+    connection.label = autoConnectionLabel(connection, deviceMap(currentProject.value), definitions.value)
+    commit((project) => { project.connections.push(connection) }, 'Провод добавлен')
+    return true
+  }
+
+  /** Feeds a clamp from one of the visible board bars rather than from another device. */
+  const addBusWire = (busId: string, to: TerminalRef): boolean => {
+    const bus = currentProject.value.busAssemblies?.find((item) => item.id === busId)
+    const target = terminalDevice(to)
+    if (!bus || !target) return rejectCommand('Шина или клемма не найдена.')
+    if (terminalOccupied(currentProject.value, to)) return rejectCommand('Клемма уже занята другим проводом.')
+    const connection: Connection = {
+      id: uid(), circuitId: '', fromBus: bus.kind, toDeviceId: to.deviceId,
+      color: '', thickness: 2, kind: 'circuit', busId, toTerminal: to, label: '',
+    }
+    connection.label = autoConnectionLabel(connection, deviceMap(currentProject.value), definitions.value)
+    if (bus.kind === 'L') connection.phase = 1
+    commit((project) => { project.connections.push(connection) }, 'Провод от шины добавлен')
     return true
   }
 
@@ -681,17 +732,19 @@ export const useProjectStore = defineStore('project', () => {
       project.circuits.push(circuit)
       project.connections.push(connection)
     }, 'Цепь добавлена')
-    // The circuit is returned so the board can offer its load name for editing straight away,
-    // instead of sending the person to a panel to find out what they just created.
-    return circuit
   }
 
   const updateCircuit = (id: string, patch: Partial<Circuit>): boolean => {
     const current = currentProject.value.circuits.find((item) => item.id === id)
     if (!current) return rejectCommand('Цепь не найдена.')
     const values = patch as Record<string, unknown>
-    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'protectionDeviceId', 'color', 'wireCrossSection', 'note'])
+    // Planner fields ride the same command: a row edit in the lines tab is a circuit edit, and
+    // letting them through one door keeps the inspector and the worksheet from drifting apart.
+    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение цепи содержит недопустимые поля.')
+    if ('roomId' in values && values.roomId && !currentProject.value.rooms?.some((item) => item.id === values.roomId)) return rejectCommand('Помещение цепи не найдено.')
+    if ('kind' in values && !CIRCUIT_KINDS.includes(String(values.kind) as typeof CIRCUIT_KINDS[number])) return rejectCommand('Вид линии должен быть силовым, освещением, DC или управлением.')
+    if ('cableLength' in values && !finiteInRange(values.cableLength, 0, PROJECT_LIMITS.cableLength)) return rejectCommand('Длина кабеля должна быть числом от 0 до 1000 м.')
     const candidate = { ...current, ...patch }
     const invalid = circuitError(candidate)
     if (invalid) return rejectCommand(invalid)
@@ -734,7 +787,7 @@ export const useProjectStore = defineStore('project', () => {
     if ('fromBus' in values && !['L', 'N', 'PE'].includes(values.fromBus as string)) return rejectCommand('Шина должна быть L, N или PE.')
     if ('toDeviceId' in values && !currentProject.value.devices.some((item) => item.instanceId === values.toDeviceId)) return rejectCommand('Подключаемое устройство не найдено.')
     if ('color' in values && !validText(values.color, 64, true)) return rejectCommand('Цвет подключения должен быть непустой строкой.')
-    if ('thickness' in values && !finiteInRange(values.thickness, CONNECTION_THICKNESS_MM.min, CONNECTION_THICKNESS_MM.max)) return rejectCommand(`Толщина подключения должна быть конечным числом от ${CONNECTION_THICKNESS_MM.min} до ${CONNECTION_THICKNESS_MM.max} мм.`)
+    if ('thickness' in values && !finiteInRange(values.thickness, 0.5, 8)) return rejectCommand('Толщина подключения должна быть конечным числом от 0,5 до 8 мм.')
     if ('label' in values && !validText(values.label, PROJECT_LIMITS.text)) return rejectCommand('Подпись подключения слишком длинная.')
     if ('circuitId' in values && !currentProject.value.circuits.some((item) => item.id === values.circuitId)) return rejectCommand('Цепь подключения не найдена.')
     const candidate = { ...connection, ...patch }
@@ -748,16 +801,190 @@ export const useProjectStore = defineStore('project', () => {
 
 
   const deleteConnection = (id: string) => {
+    if (selectedConnectionId.value === id) selectedConnectionId.value = null
     commit((project) => {
       project.connections = project.connections.filter((item) => item.id !== id)
     }, 'Подключение удалено')
-    if (selectedConnectionId.value === id) selectedConnectionId.value = null
+  }
+
+  /**
+   * Which conductor the user is looking at. It lives in the store, not in the board, because the
+   * inspector lists the same wires and has to be able to point at one: a selection the board owns
+   * would leave the list blind to the click, and Delete would remove nothing the panel shows.
+   */
+  const selectConnection = (id: string | null) => {
+    selectedConnectionId.value = selectedConnectionId.value === id ? null : id
   }
 
   const deleteCircuit = (id: string) => commit((project) => {
     project.circuits = project.circuits.filter((item) => item.id !== id)
     project.connections = project.connections.filter((item) => item.circuitId !== id)
   }, 'Цепь удалена')
+
+  // ── Планировщик линий ──────────────────────────────────────────────────────────────────────
+  // A line is planned as a row in a worksheet and lands on the board the same moment: the
+  // protection device is placed, the circuit is created and a conductor from the phase bus is
+  // already drawn. The board stays the place to fine-tune what the planner produced.
+
+  const addRoom = (name: string, floor = 1): Room | null => {
+    const refuse = (message: string): null => { rejectCommand(message); return null }
+    if (!validText(name, PROJECT_LIMITS.text, true)) return refuse('Название помещения должно быть непустой строкой.')
+    if (!finiteInRange(floor, 0, PROJECT_LIMITS.floor, true)) return refuse('Этаж должен быть целым числом от 0 до 100.')
+    const room: Room = { id: uid(), name: name.trim(), floor }
+    commit((project) => { project.rooms = [...(project.rooms ?? []), room] }, 'Помещение добавлено')
+    return room
+  }
+
+  const updateRoom = (id: string, patch: Partial<Room>): boolean => {
+    const current = currentProject.value.rooms?.find((item) => item.id === id)
+    if (!current) return rejectCommand('Помещение не найдено.')
+    const values = patch as Record<string, unknown>
+    const allowed = new Set(['name', 'floor'])
+    if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение помещения содержит недопустимые поля.')
+    if ('name' in values && !validText(values.name, PROJECT_LIMITS.text, true)) return rejectCommand('Название помещения должно быть непустой строкой.')
+    if ('floor' in values && !finiteInRange(values.floor, 0, PROJECT_LIMITS.floor, true)) return rejectCommand('Этаж должен быть целым числом от 0 до 100.')
+    commit((project) => {
+      const room = project.rooms?.find((item) => item.id === id)
+      if (room) Object.assign(room, patch)
+    })
+    return true
+  }
+
+  /** Deleting a room keeps its lines — they simply sit outside any room until regrouped. */
+  const deleteRoom = (id: string) => commit((project) => {
+    project.rooms = (project.rooms ?? []).filter((item) => item.id !== id)
+    for (const circuit of project.circuits) if (circuit.roomId === id) circuit.roomId = undefined
+  }, 'Помещение удалено')
+
+  /**
+   * Plans a line: places its protection device on the first row with room (top row first, the
+   * way a board fills left to right), creates the circuit and feeds it a conductor from the
+   * phase bus, so the plan and the board never tell two different stories.
+   */
+  const addLine = (input: NewLineInput): string | null => {
+    // rejectCommand has already shown its toast by the time it returns; collapsing its false to
+    // null keeps the signature honest — the caller only wants the new id or its absence.
+    const refuse = (message: string): null => { rejectCommand(message); return null }
+    if (input.roomId && !currentProject.value.rooms?.some((item) => item.id === input.roomId)) return refuse('Помещение не найдено.')
+    const product = definitions.value.get(input.protectionProductId)
+    if (!product) return refuse('Аппарат защиты не найден в каталоге.')
+    if (product.category !== 'MCB' && product.category !== 'RCCB' && product.category !== 'RCBO') {
+      return refuse('Линию защищает автомат, УЗО или дифавтомат.')
+    }
+    const capacity = getRowCapacity(currentProject.value)
+    let result = placeProduct(currentProject.value.devices, product, 0, 0, capacity, uid, definitions.value)
+    for (let row = 1; row < currentProject.value.settings.rows && result.error; row += 1) {
+      result = placeProduct(currentProject.value.devices, product, row, 0, capacity, uid, definitions.value)
+    }
+    if (result.error) return refuse(result.error)
+    const placed = result.devices.find((item) => !currentProject.value.devices.some((before) => before.instanceId === item.instanceId))
+    if (!placed) return refuse('Не удалось разместить аппарат линии.')
+    const circuit: Circuit = {
+      id: uid(), name: input.name.trim(), loadName: input.name.trim(),
+      current: input.current ?? 0, power: input.power ?? 0,
+      phase: input.phase ?? 1, protectionDeviceId: placed.instanceId,
+      color: '#c65c3b', wireCrossSection: input.wireCrossSection ?? 1.5, note: '',
+      roomId: input.roomId || undefined, kind: input.kind ?? 'power', cableLength: 0,
+    }
+    // circuitError reads the protection out of the stored project, where the just-placed device
+    // only lands inside the commit below — running it here would refuse every line. The checks
+    // that matter are the ones about the input itself; the protection category was vetted above.
+    if (!validText(circuit.name, PROJECT_LIMITS.text, true)) return refuse('Название линии должно быть непустой строкой.')
+    if (!finiteInRange(circuit.current, 0, PROJECT_LIMITS.current)) return refuse('Ток линии должен быть числом от 0 до 10000 А.')
+    if (!finiteInRange(circuit.power, 0, PROJECT_LIMITS.power)) return refuse('Мощность линии должна быть числом от 0 до 10000000 Вт.')
+    if (!finiteInRange(circuit.wireCrossSection, 0.5, 1000)) return refuse('Сечение провода должно быть не меньше 0,5 мм².')
+    const phaseBus = currentProject.value.busAssemblies?.find((item) => item.kind === 'L')
+    const connection: Connection = {
+      id: uid(), circuitId: circuit.id, fromBus: 'L', toDeviceId: placed.instanceId,
+      color: circuit.color, thickness: 2, label: circuit.name, kind: 'circuit',
+      busId: phaseBus?.id,
+    }
+    commit((project) => {
+      renumber(project, result.devices)
+      project.circuits.push(circuit)
+      project.connections.push(connection)
+    }, 'Линия добавлена')
+    selectedDeviceId.value = placed.instanceId
+    notify(`Линия «${circuit.name}» добавлена: ${placed.address || 'аппарат'} на доске`)
+    return circuit.id
+  }
+
+  /**
+   * A line owns the apparatus the planner placed for it, so taking the line off removes the
+   * apparatus too — a breaker with no circuit to protect is board clutter, and the undo stack
+   * is the safety net the confirmation dialog names.
+   */
+  const deleteLine = (id: string) => {
+    const circuit = currentProject.value.circuits.find((item) => item.id === id)
+    if (!circuit) return rejectCommand('Линия не найдена.')
+    const protectionId = circuit.protectionDeviceId
+    commit((project) => {
+      project.circuits = project.circuits.filter((item) => item.id !== id)
+      project.connections = project.connections.filter((item) => item.circuitId !== id)
+      const kept = project.devices.filter((item) => item.instanceId !== protectionId)
+      if (kept.length !== project.devices.length) renumber(project, kept)
+    }, 'Линия удалена')
+    if (selectedDeviceId.value === protectionId) selectedDeviceId.value = null
+  }
+
+  /** Points a line at an apparatus the user placed by hand, when the planner's own is not wanted. */
+  const bindProtection = (circuitId: string, deviceId: string): boolean => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === deviceId)
+    if (!isProtectionDevice(device)) return rejectCommand('Линию защищает автомат, УЗО или дифавтомат.')
+    return updateCircuit(circuitId, { protectionDeviceId: deviceId })
+  }
+
+  /**
+   * Draws the conductors a worksheet expects for a line: the neutral from the N bar into the
+   * apparatus' neutral clamp, the earth into its PE clamp when it has one. The phase is
+   * deliberately left alone — it arrives through the comb, which the board already draws.
+   */
+  const wireLine = (circuitId: string): boolean => {
+    const circuit = currentProject.value.circuits.find((item) => item.id === circuitId)
+    if (!circuit) return rejectCommand('Линия не найдена.')
+    const device = currentProject.value.devices.find((item) => item.instanceId === circuit.protectionDeviceId)
+    const product = device ? definitions.value.get(device.productId) : undefined
+    if (!device || !product) return rejectCommand('Аппарат защиты линии не найден.')
+    const bars = new Map((currentProject.value.busAssemblies ?? []).map((item) => [item.kind, item]))
+    let drawn = 0
+    const wanted: Array<{ bus: 'N' | 'PE'; terminal: TerminalInfo }> = []
+    for (const terminal of deviceTerminals(product)) {
+      if (terminal.type === 'neutral' || terminal.type === 'pe') wanted.push({ bus: terminal.type === 'neutral' ? 'N' : 'PE', terminal })
+    }
+    for (const { bus, terminal } of wanted) {
+      const bar = bars.get(bus)
+      if (!bar) continue
+      const ref: TerminalRef = { deviceId: device.instanceId, pole: terminal.pole, side: terminal.side }
+      if (terminalOccupied(currentProject.value, ref)) continue
+      if (currentProject.value.connections.some((item) => item.circuitId === circuitId && item.busId === bar.id)) continue
+      const connection: Connection = {
+        id: uid(), circuitId, fromBus: bus, toDeviceId: device.instanceId,
+        color: '', thickness: 2, kind: 'circuit', busId: bar.id, toTerminal: ref,
+        label: `${circuit.name} / ${device.address || 'аппарат'}`,
+      }
+      commit((project) => { project.connections.push(connection) })
+      drawn += 1
+    }
+    notify(drawn ? `Линия «${circuit.name}» соединена (${drawn})` : `Линии «${circuit.name}» нечего дорисовывать`)
+    return true
+  }
+
+  /**
+   * «Запитано от QF02»: the address of the apparatus feeding this one, read off the jumper that
+   * enters its top clamp. Empty when the apparatus is fed from the comb or the bus instead.
+   */
+  const cascadeLabel = (deviceId: string): string => {
+    for (const connection of currentProject.value.connections) {
+      if (connection.kind !== 'jumper') continue
+      const enters = connection.toTerminal?.deviceId === deviceId || (!connection.toTerminal && connection.toDeviceId === deviceId)
+      if (!enters) continue
+      const sourceId = connection.fromTerminal?.deviceId ?? connection.fromDeviceId
+      if (!sourceId || sourceId === deviceId) continue
+      const source = currentProject.value.devices.find((item) => item.instanceId === sourceId)
+      if (source?.address) return `запитано от ${source.address}`
+    }
+    return ''
+  }
 
   const undo = () => {
     const history = historyFor(currentProjectId.value)
@@ -780,15 +1007,26 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * `silent` is for restoring a whole library from an archive: the same notice repeated once per
-   * model is noise, and the caller announces the result as a single count.
+   * Adds a CAD asset plus its product stub to the library. The stub keeps the asset id, so
+   * re-importing the same file in another browser revives placed devices instead of leaving
+   * them pointing at a product that no longer exists. A null product stores the asset alone,
+   * ready to be bound to an existing catalogue entry.
    */
-  const addImportedModel = async (metadata: ModelMetadata, data: ArrayBuffer, options?: { silent?: boolean }) => {
+  const addImportedModel = async (product: DeviceDefinition | null, asset: StoredModelAsset, data: ArrayBuffer) => {
+    if (product && product.id !== asset.id) return notify('Товар импорта должен наследовать id модели', 'error')
+    if (product && !isImportedProduct(product)) return notify('Некорректные параметры товара импорта', 'error')
     try {
-      await putModelAsset(metadata.id, data)
-      importedModels.value.push(metadata)
+      await putModelAsset(asset.id, { data })
+      invalidateModelCaches(asset.id)
+      modelLibrary.value = {
+        assets: [...modelLibrary.value.assets.filter((item) => item.id !== asset.id), asset],
+        products: product
+          ? [...modelLibrary.value.products.filter((item) => item.id !== product.id), product]
+          : modelLibrary.value.products,
+        bindings: modelLibrary.value.bindings,
+      }
       if (repository.available) await persistNow()
-      if (!options?.silent) notify('Модель добавлена в библиотеку')
+      notify(product ? 'Модель добавлена в библиотеку' : 'Модель добавлена в библиотеку без товара')
     } catch (error) {
       persistenceError = actionableStorageError(error, 'модель в IndexedDB')
       storageError.value = persistenceError
@@ -802,7 +1040,13 @@ export const useProjectStore = defineStore('project', () => {
     if (usage) return notify(`Модель используется в ${usage} позициях. Сначала удалите их.`, 'error')
     try {
       await deleteModelAsset(id)
-      importedModels.value = importedModels.value.filter((item) => item.id !== id)
+      modelLibrary.value = {
+        assets: modelLibrary.value.assets.filter((item) => item.id !== id),
+        products: modelLibrary.value.products
+          .filter((item) => item.id !== id)
+          .map((item) => item.modelId === id ? { ...item, modelId: undefined } : item),
+        bindings: Object.fromEntries(Object.entries(modelLibrary.value.bindings).filter(([, modelId]) => modelId !== id)),
+      }
       notify('Модель удалена')
     } catch (error) {
       persistenceError = actionableStorageError(error, 'модель в IndexedDB')
@@ -811,6 +1055,64 @@ export const useProjectStore = defineStore('project', () => {
       throw error
     }
   }
+
+  /** Attaches (or detaches) a library model to any product, including built-in ones. */
+  const bindProductModel = (productId: string, modelId: string | null): boolean => {
+    if (!definitions.value.has(productId)) return rejectCommand('Товар не найден.')
+    if (modelId && !modelAssetsById.value.has(modelId)) return rejectCommand('Модель не найдена в библиотеке.')
+    const bindings = { ...modelLibrary.value.bindings }
+    if (modelId) bindings[productId] = modelId
+    else delete bindings[productId]
+    modelLibrary.value = { ...modelLibrary.value, bindings }
+    notify(modelId ? 'CAD-модель привязана к товару' : 'Привязка CAD-модели снята')
+    return true
+  }
+
+  /**
+   * Swaps the product behind a placed device, e.g. a placeholder whose original product left
+   * the catalogue. The move resolver re-packs the row with the new footprint, so a wider
+   * replacement still cannot swallow its neighbours.
+   */
+  const replaceDeviceProduct = (instanceId: string, productId: string): boolean => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === instanceId)
+    if (!device) return rejectCommand('Устройство не найдено.')
+    const product = definitions.value.get(productId)
+    if (!product) return rejectCommand('Товар не найден.')
+    if (device.productId === productId) return true
+    const staged = currentProject.value.devices.map((item) => (item.instanceId === instanceId ? { ...item, productId } : item))
+    const result = resolveDeviceMove(staged, instanceId, device.row, device.slot, getRowCapacity(currentProject.value), definitions.value)
+    if (result.error) return rejectCommand(result.error)
+    commit((project) => {
+      renumber(project, result.devices)
+    }, 'Товар заменён')
+    return true
+  }
+
+  /**
+   * Cross-checks stored asset metadata against IndexedDB: orphan binaries are removed, and
+   * assets whose file disappeared are marked missing so the UI can ask for a re-import instead
+   * of silently rendering a procedural face.
+   */
+  const reconcileModelAssets = async () => {
+    if (typeof indexedDB === 'undefined') return
+    try {
+      const stored = new Set(await listModelAssetIds())
+      const assets = modelLibrary.value.assets
+      let changed = false
+      for (const asset of assets) {
+        const hasFile = stored.has(asset.id)
+        if (hasFile === !asset.missing) continue
+        asset.missing = !hasFile
+        changed = true
+      }
+      const orphans = [...stored].filter((id) => !assets.some((asset) => asset.id === id))
+      for (const id of orphans) await deleteModelAsset(id)
+      if (changed || orphans.length) modelLibrary.value = { ...modelLibrary.value, assets: [...assets] }
+    } catch {
+      // IndexedDB being unavailable only costs the missing-file hint; the library still works.
+    }
+  }
+  void reconcileModelAssets()
 
   const clearLocalData = async () => {
     let assetError: unknown
@@ -832,12 +1134,13 @@ export const useProjectStore = defineStore('project', () => {
     const fresh = seedProject()
     projects.value = [fresh]
     currentProjectId.value = fresh.id
-    importedModels.value = []
+    modelLibrary.value = { assets: [], products: [], bindings: {} }
     histories.value = {}
     selectedDeviceId.value = null
     cabinetMigration.value = null
     projectsDirty = false
     currentProjectDirty = false
+    modelsDirty = false
     lastSavedAt.value = null
     theme.value = 'light'
     updateStorageState()
@@ -893,15 +1196,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   return {
-    projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration,
-    selectedConnectionId, selectedConnection, selectDevice, selectConnection,
-    definitions, importedModels, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
+    projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration, selectedConnectionId, selectConnection,
+    selectedLineId, selectLine,
+    definitions, modelLibrary, modelAssetsById, resolveProductModel, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
     storageAlert, storageRecoveryNotice, hasStorageBackup, hasStorageRecovery, downloadStorageSnapshot, restoreStorageBackup, dismissStorageAlert,
     lastSavedAt, theme, toast, switchProject, newProject, duplicateProject, renameProject, deleteProject,
     applyPreset, updateSettings, selectCabinet, selectRail, stageCabinetMigration, stageRailMigration,
     commitCabinetMigration, cancelCabinetMigration, addDevice, moveSelected, nudgeSelectedDevice, deleteSelected, duplicateSelected,
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
-    addBusbarConnection, connectOnBoard, connectFromBus, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
-    retryPersistence, addImportedModel, deleteImportedModel, clearLocalData, importProject, restoreWorkspaceBackup, notify,
+    addComb, updateComb, removeComb, addWire, addBusWire,
+    addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
+    addRoom, updateRoom, deleteRoom, addLine, deleteLine, bindProtection, wireLine, cascadeLabel,
+    retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, replaceDeviceProduct, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })

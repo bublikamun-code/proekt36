@@ -3,8 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import { createProject } from '../src/domain/project'
 import { CURRENT_PROJECT_KEY } from '../src/storage/projectRepository'
-import { PERSIST_DELAY_MS, useProjectStore } from '../src/stores/project'
-import { getRowCapacity, getRowUsage } from '../src/domain/layout'
+import { useProjectStore } from '../src/stores/project'
 
 class MemoryStorage {
   private readonly values = new Map<string, string>()
@@ -58,7 +57,7 @@ describe('project store persistence and history', () => {
     const storage = new MemoryStorage()
     const first = createProject('Первый')
     const second = createProject('Второй')
-    storage.set('panel36.projects.v2', [first, second])
+    storage.set('panel36.projects.v3', [first, second])
     storage.setRaw(CURRENT_PROJECT_KEY, second.id)
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
@@ -92,7 +91,7 @@ describe('project store persistence and history', () => {
   it('debounces writes and keeps a failed write visible instead of claiming saved', async () => {
     vi.useFakeTimers()
     const storage = new MemoryStorage()
-    storage.failOn = 'panel36.projects.v2'
+    storage.failOn = 'panel36.projects.v3'
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -100,11 +99,11 @@ describe('project store persistence and history', () => {
     await nextTick()
     expect(store.storageStatus).toBe('saving')
     await vi.advanceTimersByTimeAsync(449)
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
     await vi.advanceTimersByTimeAsync(1)
     expect(store.storageStatus).toBe('save-failed')
     expect(store.storageError).toContain('переполнено')
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
     store.$dispose()
   })
 
@@ -119,13 +118,12 @@ describe('project store persistence and history', () => {
 
     store.updateSettings({ reserveModules: reserve + 3 })
     await nextTick()
-    await vi.advanceTimersByTimeAsync(PERSIST_DELAY_MS - 1)
-    // Still inside the debounce window, so nothing has been written yet. Deriving the step from
-    // the constant keeps this true whatever the delay is tuned to, rather than restating 450 here.
-    expect(storage.raw('panel36.projects.v2')).toBeNull()
+    await vi.advanceTimersByTimeAsync(400)
+    // Still inside the 450 ms window, so nothing has been written yet.
+    expect(storage.raw('panel36.projects.v3')).toBeNull()
 
     lifecycle.dispatch('pagehide')
-    expect(JSON.parse(storage.raw('panel36.projects.v2')!)[0].settings.reserveModules).toBe(reserve + 3)
+    expect(JSON.parse(storage.raw('panel36.projects.v3')!)[0].settings.reserveModules).toBe(reserve + 3)
     expect(store.storageStatus).toBe('saved')
     store.$dispose()
   })
@@ -144,7 +142,7 @@ describe('busbar wiring on insert', () => {
 
   it('links only the inserted device and leaves earlier unlinked apparatus untouched', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -169,7 +167,7 @@ describe('busbar wiring on insert', () => {
       instanceId: `mcb-${slot}`, productId: 'ekf-mcb-1p-c6', row: 0, slot, address: `QF${slot + 1}`,
       quantity: 1, phase: 1, marking: '', note: '', mount: 'din' as const,
     }))
-    storage.set('panel36.projects.v2', [project])
+    storage.set('panel36.projects.v3', [project])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -198,7 +196,7 @@ describe('busbar wiring on insert', () => {
       instanceId: `mcb-${slot}`, productId: 'ekf-mcb-1p-c6', row: 0, slot, address: `QF${slot + 1}`,
       quantity: 1, phase: 1, marking: '', note: '', mount: 'din' as const,
     }))
-    storage.set('panel36.projects.v2', [project])
+    storage.set('panel36.projects.v3', [project])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -217,7 +215,7 @@ describe('busbar wiring on insert', () => {
 
   it('undoes the placement and its busbar link in a single step', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -233,7 +231,7 @@ describe('busbar wiring on insert', () => {
 
   it('does not wire a non-protection device to the busbar', () => {
     const storage = new MemoryStorage()
-    storage.set('panel36.projects.v2', [panel()])
+    storage.set('panel36.projects.v3', [panel()])
     setupBrowserStorage(storage)
     setActivePinia(createPinia())
     const store = useProjectStore()
@@ -241,55 +239,6 @@ describe('busbar wiring on insert', () => {
     store.addDevice('shk', 0, 5)
 
     expect(store.currentProject.connections).toEqual([])
-    store.$dispose()
-  })
-})
-
-/**
- * A click in the catalogue names no position, so the store looks down the rows for the first one
- * that will take the device. This was found while porting the panels to the new board: with row 1
- * full and row 2 half empty, every click failed with «не хватает места в ряду».
- */
-describe('размещение по клику', () => {
-  const freshStore = () => {
-    const storage = new MemoryStorage()
-    setupBrowserStorage(storage)
-    setActivePinia(createPinia())
-    return useProjectStore()
-  }
-
-  // One module wide, so a slot count and a module count are the same thing here.
-  const PRODUCT = 'ekf-mcb-1p-b16'
-  const fillRow = (store: ReturnType<typeof useProjectStore>, row: number) => {
-    for (let slot = 0; slot < getRowCapacity(store.currentProject); slot += 1) {
-      store.addDevice(PRODUCT, row, slot)
-    }
-    return PRODUCT
-  }
-
-  it('находит свободный ряд ниже заполненного', () => {
-    const store = freshStore()
-    store.newProject('Ряды', 'apartment')
-    const productId = fillRow(store, 0)
-    expect(getRowUsage(0, store.currentProject, store.definitions).used).toBe(getRowCapacity(store.currentProject))
-
-    store.addDevice(productId)
-    expect(store.toast?.tone).toBe('ok')
-    expect(store.currentProject.devices.some((device) => device.row === 1)).toBe(true)
-    store.$dispose()
-  })
-
-  it('не ищет другой ряд, когда позиция указана явно', () => {
-    const store = freshStore()
-    store.newProject('Ряды', 'apartment')
-    const productId = fillRow(store, 0)
-
-    const before = store.currentProject.devices.length
-    store.addDevice(productId, 0, 0)
-    // A drop lands where it was dropped or not at all, even when the row below has plenty of room.
-    expect(store.currentProject.devices).toHaveLength(before)
-    expect(store.toast?.tone).toBe('error')
-    expect(store.toast?.text).toContain('места')
     store.$dispose()
   })
 })

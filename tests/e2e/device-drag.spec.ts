@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { dragWithPointer, gotoEditor, seedProject, settledLeftOf } from './helpers'
+import { dragWithPointer, gotoEditor, openSidePanels, seedProject } from './helpers'
 
 const oneModuleRow = [
   { id: 'a', row: 0, slot: 0 },
@@ -7,15 +7,16 @@ const oneModuleRow = [
   { id: 'c', row: 0, slot: 2 },
 ]
 
-// Positions are read only once the device has come to rest: these elements animate, and a reading
-// taken mid-transition is a value in flight.
-const leftOf = (page: import('@playwright/test').Page, id: string) =>
-  settledLeftOf(page, `.placed-device[data-instance-id="${id}"]`)
+const leftOf = async (page: import('@playwright/test').Page, id: string) => {
+  const box = await page.locator(`.placed-device[data-instance-id="${id}"]`).boundingBox()
+  if (!box) throw new Error(`Device ${id} is not on the board`)
+  return box.x
+}
 
 test('dropping a device onto a neighbour pushes that neighbour aside', async ({ page }) => {
   await seedProject(page, oneModuleRow)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const before = { a: await leftOf(page, 'a'), b: await leftOf(page, 'b'), c: await leftOf(page, 'c') }
   const target = page.locator('.din-row').first().locator('.slot-cell').first()
@@ -38,7 +39,7 @@ test('a row with no room for the neighbours explains itself and changes nothing'
   const full = Array.from({ length: 12 }, (_, index) => ({ id: `f${index}`, row: 0, slot: index }))
   await seedProject(page, [...full, { id: 'spare', row: 1, slot: 0 }])
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const target = page.locator('.din-row').first().locator('.slot-cell').first()
   await dragWithPointer(page, page.locator('.placed-device[data-instance-id="spare"]'), target, async () => {
@@ -52,7 +53,7 @@ test('a row with no room for the neighbours explains itself and changes nothing'
 test('Escape cancels a drag instead of dropping it', async ({ page }) => {
   await seedProject(page, oneModuleRow)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const before = { a: await leftOf(page, 'a'), b: await leftOf(page, 'b'), c: await leftOf(page, 'c') }
   const target = page.locator('.din-row').first().locator('.slot-cell').first()
@@ -78,7 +79,7 @@ test('Escape cancels a drag instead of dropping it', async ({ page }) => {
 test('arrow keys move the focused device and one undo returns the whole gesture', async ({ page }) => {
   await seedProject(page, oneModuleRow)
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const before = { a: await leftOf(page, 'a'), c: await leftOf(page, 'c') }
   // The two steps have to land inside the store's coalesce window to read as one
@@ -99,14 +100,16 @@ test('arrow keys move the focused device and one undo returns the whole gesture'
   expect(await leftOf(page, 'c')).toBeCloseTo(before.a, -1)
 
   await page.keyboard.press('Control+z')
-  expect(await leftOf(page, 'a')).toBeCloseTo(before.a, -1)
+  // The undo commits to the store synchronously, but the board re-renders on the next
+  // tick, so a reading taken straight after the keypress can still see the shifted row.
+  await expect.poll(() => leftOf(page, 'a')).toBeCloseTo(before.a, -1)
   expect(await leftOf(page, 'c')).toBeCloseTo(before.c, -1)
 })
 
 test('a catalogue item is dragged onto the board with a pointer', async ({ page }) => {
   await seedProject(page, [{ id: 'a', row: 0, slot: 0 }])
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const item = page.locator('.catalog-item').first()
   const target = page.locator('.din-row').first().locator('.slot-cell').nth(4)

@@ -1,13 +1,12 @@
 import { allCatalog, CATALOG_REVISION } from '../data/catalog'
 import { migrateProject } from './project'
-import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision, PROJECT_SCHEMA_VERSION } from './projectSchema'
-import { modelWord, projectWord } from './plural'
-import type { ModelMetadata, PanelProject } from './types'
+import { APPLICATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision } from './projectSchema'
+import type { PanelProject, StoredModelLibrary } from './types'
 
-const BACKUP_SCHEMA = 'panel36.backup.v1'
+export const BACKUP_SCHEMA = 'panel36.backup.v1'
 const MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
-const clone = <T>(value: T): T => structuredClone(value as object) as T
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 export interface WorkspaceBackup {
   schema: typeof BACKUP_SCHEMA
@@ -31,7 +30,7 @@ export interface RestoredWorkspaceBackup {
 
 export const createWorkspaceBackup = (
   projects: PanelProject[],
-  importedModels: ModelMetadata[],
+  modelLibrary: StoredModelLibrary,
   currentProjectId: string | null,
   exportedAt = new Date().toISOString(),
 ): WorkspaceBackup => ({
@@ -39,7 +38,7 @@ export const createWorkspaceBackup = (
   application: { name: 'Panel36', revision: APPLICATION_REVISION },
   exportedAt,
   catalogRevision: CATALOG_REVISION,
-  cad: { binaryIncluded: false, modelManifest: { modelIds: importedModels.map((model) => model.id) } },
+  cad: { binaryIncluded: false, modelManifest: { modelIds: modelLibrary.assets.map((asset) => asset.id) } },
   currentProjectId: projects.some((project) => project.id === currentProjectId) ? currentProjectId : null,
   projects: clone(projects),
 })
@@ -56,10 +55,10 @@ export const downloadJsonFile = (payload: unknown, fileName: string) => {
 
 export const downloadWorkspaceBackup = (
   projects: PanelProject[],
-  importedModels: ModelMetadata[],
+  modelLibrary: StoredModelLibrary,
   currentProjectId: string | null,
 ) => {
-  const backup = createWorkspaceBackup(projects, importedModels, currentProjectId)
+  const backup = createWorkspaceBackup(projects, modelLibrary, currentProjectId)
   downloadJsonFile(backup, `panel36-backup-${new Date().toISOString().slice(0, 10)}.json`)
 }
 
@@ -105,10 +104,10 @@ export const readWorkspaceBackup = async (file: File): Promise<RestoredWorkspace
 
   const projects = parsed.projects.map((value, index) => {
     try {
-      const candidate = isRecord(value) && value.schemaVersion === PROJECT_SCHEMA_VERSION
-        ? assertValidProjectSchema(value)
-        : assertValidProjectSchema(migrateProject(value as Partial<PanelProject>))
-      return clone(candidate)
+      // Every payload goes through migration, whatever version it claims: a v2 project read as
+      // a current one is missing the fields the present schema asks for, so validating it in
+      // place would throw away exactly the old archive the backup exists to rescue.
+      return clone(assertValidProjectSchema(migrateProject(value as Partial<PanelProject>)))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'неизвестная ошибка схемы'
       throw new Error(`projects[${index}]: ${message}`)
@@ -130,28 +129,4 @@ export const readWorkspaceBackup = async (file: File): Promise<RestoredWorkspace
     ? parsed.currentProjectId
     : projects[0]!.id
   return { projects, currentProjectId, pendingLocalCad }
-}
-
-/** Joins the first few names and counts the rest, so a long list does not fill the dialog. */
-const sampleNames = (names: string[]) => `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` и ещё ${names.length - 3}` : ''}`
-
-/**
- * What the restore dialog tells the user, and why the two shapes of file are not described the
- * same way: a JSON copy really does not carry the geometry, an archive does. Telling an archive
- * "the files are not in the copy" was wrong in both directions — it lost the point of the archive
- * and contradicted the message shown right after the restore.
- *
- * `carriedIds` are the models inside the archive. Positions that need a model the archive does not
- * carry are still called out separately, because those are the ones that will come back as
- * "нет в каталоге".
- */
-export const describeBackupRestore = (backup: RestoredWorkspaceBackup, carriedIds: string[]): string => {
-  const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
-  const carried = new Set(carriedIds)
-  const stillPending = backup.pendingLocalCad.filter((id) => !carried.has(id))
-  const lead = carried.size ? ` Архив вернёт ${carried.size} ${modelWord(carried.size)} в локальную библиотеку.` : ''
-  if (!stillPending.length) return `${base}${lead}`
-  const pending = stillPending.length
-  const plural = pending === 1 ? 'позиция опирается' : 'позиций опираются'
-  return `${base}${lead} ${pending} ${plural} на локально импортированные CAD-модели (${sampleNames(stillPending)}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
 }

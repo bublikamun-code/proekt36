@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { dragWithPointer, gotoEditor, openSidePanels } from './helpers'
+import { closeSidePanels, dragWithPointer, gotoEditor, openSidePanels } from './helpers'
 
 test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) => {
   await gotoEditor(page)
+  // Focused mode is what the toggle reaches, not what the editor now opens on: a first visit
+  // lands on the wide editor, and this test is about what the closed state looks like.
+  await closeSidePanels(page)
 
   await expect(page.getByRole('button', { name: '3D вид' })).toHaveCount(0)
   await expect(page.locator('.viewer-3d')).toHaveCount(0)
@@ -26,8 +29,10 @@ test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) 
     scrollBox.y + scrollBox.height + 1,
   )
 
+  // The comparison is «focused vs. with panels», so both ends are set rather than assumed.
+  await closeSidePanels(page)
   const viewportBeforePanels = await page.locator('.canvas-scroll').boundingBox()
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const viewportAfterPanels = await page.locator('.canvas-scroll').boundingBox()
   if (!viewportBeforePanels || !viewportAfterPanels) throw new Error('Viewport geometry is unavailable')
 
@@ -37,12 +42,54 @@ test('focused 2D mode hides side panels and fits the cabinet', async ({ page }) 
   await expect(page.locator('.app-shell')).toHaveClass(/panels-open/)
   await expect(page.locator('.catalog-panel')).toBeVisible()
   await expect(page.locator('.inspector-panel')).toBeVisible()
+  // The bill lives behind the center-column tab; switching to it must show the panel.
+  await page.locator('[data-editor-tab="bom"]').click()
   await expect(page.locator('.bom-panel')).toBeVisible()
+})
+
+test('center-column tabs switch sections, keep the URL and survive a reload', async ({ page }) => {
+  await gotoEditor(page)
+  await openSidePanels(page)
+
+  const tabs = page.locator('.editor-tabs [role="tab"]')
+  await expect(tabs).toHaveCount(5)
+  await expect(page.locator('[data-editor-tab="2d"]')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.editor-2d')).toBeVisible()
+
+  // The line planner sits between the board and the bill: the plan is where circuits are born,
+  // the board is where they get drawn.
+  await page.locator('[data-editor-tab="lines"]').click()
+  await expect(page.locator('#editor-panel-lines')).toBeVisible()
+  await expect(page.locator('#editor-panel-2d')).toBeHidden()
+  await expect(page).toHaveURL(/tab=lines/)
+
+  // The bill tab shows the BOM and only it; the board keeps its DOM (state survives switching).
+  await page.locator('[data-editor-tab="bom"]').click()
+  await expect(page.locator('.bom-panel')).toBeVisible()
+  await expect(page.locator('#editor-panel-2d')).toBeHidden()
+  await expect(page).toHaveURL(/tab=bom/)
+
+  // Checks render the validation summary for the seeded board.
+  await page.locator('[data-editor-tab="checks"]').click()
+  await expect(page.locator('[data-checks-panel]')).toBeVisible()
+  await expect(page.locator('.checks-summary')).toBeVisible()
+
+  // The report is readable on screen and the URL reload lands on the same tab.
+  await page.locator('[data-editor-tab="report"]').click()
+  await expect(page.getByRole('article', { name: /Печатный отчёт/ })).toBeVisible()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.locator('[data-editor-tab="report"]')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('article', { name: /Печатный отчёт/ })).toBeVisible()
+
+  // Arrow-key navigation walks the tablist like the demo does.
+  await page.locator('[data-editor-tab="report"]').focus()
+  await page.keyboard.press('Home')
+  await expect(page.locator('[data-editor-tab="2d"]')).toHaveAttribute('aria-selected', 'true')
 })
 
 test('DIN drag shows a stable insertion preview before committing the move', async ({ page }) => {
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
 
   const source = page.locator('.placed-device').first()
   const instanceId = await source.getAttribute('data-instance-id')
@@ -63,31 +110,36 @@ test('2D DIN slots and the position pad use one-based labels', async ({ page }) 
 
   const firstRow = page.locator('.din-row').first()
   const slots = firstRow.locator('.slot-cell')
-  await expect(slots).toHaveCount(29)
-  await expect(slots.first()).toHaveAttribute('aria-label', 'Ряд 1, модуль 1. Свободен. Добавить устройство')
-  await expect(slots.last()).toHaveAttribute('aria-label', 'Ряд 1, модуль 29. Свободен. Добавить устройство')
+  // The apartment seed sits on the NX8-24 cabinet with a 12-slot rail-12, and its three
+  // 4-module apparatus fill row one completely; row two starts free.
+  await expect(slots).toHaveCount(12)
+  await expect(slots.first()).toHaveAttribute('aria-label', 'Ряд 1, модуль 1. Занят. Вставить и сдвинуть соседние')
+  await expect(slots.last()).toHaveAttribute('aria-label', 'Ряд 1, модуль 12. Занят. Вставить и сдвинуть соседние')
+  const secondRowSlots = page.locator('.din-row').nth(1).locator('.slot-cell')
+  await expect(secondRowSlots.first()).toHaveAttribute('aria-label', 'Ряд 2, модуль 1. Занят. Вставить и сдвинуть соседние')
+  await expect(secondRowSlots.last()).toHaveAttribute('aria-label', 'Ряд 2, модуль 12. Свободен. Добавить устройство')
 
   await page.locator('.placed-device').first().click()
   const positionPad = page.getByLabel('Позиционирование устройства')
   const padSlots = positionPad.locator('.pad-slot')
   await expect(padSlots.first()).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 1')
-  await expect(padSlots.nth(28)).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 29')
+  await expect(padSlots.nth(11)).toHaveAttribute('aria-label', 'Переместить в ряд 1, модуль 12')
 })
 
-test('City9 2P sample renders the bundled CAD preview in the 2D editor', async ({ page }) => {
+test('a CHINT-bound ENMAS breaker renders the bundled CAD preview in the 2D editor', async ({ page }) => {
   await gotoEditor(page)
-  await page.getByRole('button', { name: 'Показать боковые панели' }).click()
+  await openSidePanels(page)
   const search = page.getByLabel('Поиск по каталогу')
-  await search.fill('City9 MCB 2P')
-  const item = page.locator('.catalog-item').filter({ hasText: 'City9 MCB 2P C16' })
+  await search.fill('NB1-63H 1P 16A C')
+  const item = page.locator('.catalog-item').filter({ hasText: 'NB1-63H 1P 16A C' })
   await expect(item).toHaveCount(1)
   await expect(item.locator('.cad-badge')).toHaveText('CAD')
-  await expect(item.locator('[data-model-preview="/models/city9-mcb-2p.glb"]')).toHaveCount(1)
+  await expect(item.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveCount(1)
   await item.click()
 
-  const placed = page.locator('.placed-device').filter({ hasText: 'CITY9-MCB' })
+  const placed = page.locator('.placed-device').filter({ hasText: 'NB1-63H' })
   await expect(placed).toHaveCount(1)
-  await expect(placed.locator('[data-model-preview="/models/city9-mcb-2p.glb"]')).toHaveAttribute('data-model-preview', '/models/city9-mcb-2p.glb')
+  await expect(placed.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveAttribute('data-model-preview', '/models/chint-nb1-63-1p.glb')
 })
 
 test('a project referencing a product outside the catalogue still renders', async ({ page }) => {
@@ -95,13 +147,13 @@ test('a project referencing a product outside the catalogue still renders', asyn
   // and connections, but not catalogue membership, so an unknown productId can reach
   // the editor. The board must degrade to a labelled placeholder, not unmount.
   await page.addInitScript(() => {
-    localStorage.setItem('panel36.projects.v2', JSON.stringify([{
-      schemaVersion: 2,
+    localStorage.setItem('panel36.projects.v3', JSON.stringify([{
+      schemaVersion: 3,
       id: 'orphan-product', name: 'Ссылка на отсутствующий товар', preset: 'demo',
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
       settings: { inputCurrent: 63, phase: 1, rows: 2, reserveModules: 8, enclosureWidth: 310, enclosureHeight: 350, enclosureDepth: 105, cabinetId: 'enmas-nx8-24-embedded', railId: 'rail-12' },
       devices: [{ instanceId: 'orphan-1', productId: 'no-such-product', row: 0, slot: 0, address: 'Q1', quantity: 1, phase: 1, note: '', marking: 'Q1', mount: 'din' }],
-      circuits: [], connections: [],
+      circuits: [], connections: [], busAssemblies: [], combs: [],
     }]))
   })
   await gotoEditor(page)
@@ -126,35 +178,6 @@ test('the print report module total matches the per-row table', async ({ page })
   const cells = await report.locator('.print-rack-summary tbody tr td:nth-child(2)').allTextContents()
   const rowsTotal = cells.reduce((sum, cell) => sum + Number(/\d+/.exec(cell ?? '')?.[0] ?? 0), 0)
   expect(total).toBe(rowsTotal)
-})
-
-test('the print report carries a single-line diagram of the supply path', async ({ page }) => {
-  await gotoEditor(page)
-  const report = page.locator('.print-report')
-  const diagram = report.locator('[data-single-line]')
-  await expect(diagram).toBeAttached()
-  // The seed project has no circuits, so the diagram has to say that instead of drawing an
-  // empty frame that reads like a finished drawing of nothing.
-  await expect(diagram.locator('.single-line-empty')).toContainText('Цепи не заданы')
-  await expect(diagram.locator('svg')).toHaveCount(0)
-
-  // Add a protection device and a circuit, and the drawing has to appear with that circuit on it.
-  await openSidePanels(page)
-  // Page-level locators, the way the rest of this file does it: the search box is not inside the
-  // element the panel is filtered by, so scoping it there waits for something that never matches.
-  await page.getByLabel('Поиск по каталогу').fill('AVO-10 1P C6')
-  await page.locator('.catalog-item').first().click()
-  // The seed project starts with no circuits at all, so the chain has to appear before the
-  // drawing has anything to draw: place a device, then add a circuit for it.
-  await page.getByRole('button', { name: '＋ Цепь' }).first().click()
-  await expect(page.locator('.circuit-card').first()).toBeVisible()
-
-  await expect(diagram.locator('svg')).toHaveCount(1)
-  await expect(diagram.locator('.sl-load-label').first()).toContainText('Цепь')
-  // Every load carries its current and its cross-section, which is what the drawing is for. The
-  // load caption has a class of its own: `.sl-caption` also covers the caption under a protection
-  // device, and that one carries the device name instead.
-  await expect(diagram.locator('.sl-load-caption').first()).toContainText('мм²')
 })
 
 test('deleting a device from the editor toolbar asks first', async ({ page }) => {

@@ -1,25 +1,14 @@
-import { circuitLoadCheck, conductorCheck, currentForPowerA, PHASE_IMBALANCE_LIMIT_PERCENT, phaseBalance, phaseImbalance, protectionLoads } from './electrical'
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
+import { CABLE_DROP_LIMIT_PERCENT, voltageDrop } from './voltageDrop'
 import { pricing } from './pricing'
-import { hasTerminalForBus } from './wiring'
 import { VALIDATION_REVISION } from './projectSchema'
+import { terminalKey } from './terminals'
 import type { DeviceDefinition, PanelProject, ValidationIssue } from './types'
 
 const issue = (id: string, level: ValidationIssue['level'], title: string, message: string, ruleCode: string, context: Record<string, unknown> = {}, deviceId?: string): ValidationIssue => ({
   id, level, title, message, deviceId,
   ruleCode, version: VALIDATION_REVISION, ruleVersion: VALIDATION_REVISION, context,
 })
-
-/**
- * Whether a connection belongs to a circuit, as opposed to coming from the panel bus or from
- * another device.
- *
- * A wire carries one of the three things a line can be: a circuit it belongs to, a device it leaves
- * from, or the bus of the panel. Only the first carries a load, and every rule that counts
- * connections per circuit has to ask this question first — a feed from the bus is not a missing
- * circuit, and a cascade is not a line of the circuit that happens to name the same device.
- */
-const carriesCircuit = (connection: { kind?: string }) => connection.kind === undefined || connection.kind === 'circuit'
 
 export const validateProject = (project: PanelProject, definitions: Map<string, DeviceDefinition>): ValidationIssue[] => {
   const issues: ValidationIssue[] = []
@@ -52,24 +41,8 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
       }
     }
     if (item.row >= project.settings.rows) issues.push(issue(`row-${item.instanceId}`, 'error', 'Ряд не существует', `Перенесите ${product.name} в один из ${project.settings.rows} настроенных рядов.`, 'layout.row.missing', { row: item.row, rows: project.settings.rows }, item.instanceId))
-    if (product.ratedCurrent > project.settings.inputCurrent && product.category === 'MCB') issues.push(issue(`current-${item.instanceId}`, 'warning', 'Ток выше вводного', `${product.name}: номинал ${product.ratedCurrent} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту ввода.`, 'electrical.current.preliminary', { ratedCurrent: product.ratedCurrent, inputCurrent: project.settings.inputCurrent }, item.instanceId))
-    // The address is the designator that identifies the device in the documentation around this
-    // board, so two devices answering to one address make every drawing and specification of it
-    // ambiguous. `autoNumber` never produces that, which is exactly why it needs a rule: a hand
-    // edit or an imported file can.
-    if (!item.address.trim()) issues.push(issue(`address-missing-${item.instanceId}`, 'warning', 'Нет адреса', `${product.name} в ряду ${item.row + 1} не имеет обозначения. Задайте адрес — по нему аппарат опознаётся в схеме и спецификации.`, 'device.address.missing', { row: item.row, slot: item.slot }, item.instanceId))
-  }
-
-  const addressOwners = new Map<string, string>()
-  for (const item of project.devices ?? []) {
-    const address = item.address.trim()
-    if (!address) continue
-    const owner = addressOwners.get(address)
-    if (owner && owner !== item.instanceId) {
-      issues.push(issue(`address-duplicate-${item.instanceId}`, 'error', 'Повторяется адрес', `Адрес «${address}» уже занят другим аппаратом. Обозначения должны быть уникальными: по ним идёт маркировка и спецификация.`, 'device.address.duplicate', { address, otherInstanceId: owner }, item.instanceId))
-      continue
-    }
-    addressOwners.set(address, item.instanceId)
+    // SPD is excluded on purpose: its rating is discharge capacity, not series current.
+    if (product.ratedCurrent > project.settings.inputCurrent && (product.category === 'MCB' || product.category === 'RCCB' || product.category === 'RCBO')) issues.push(issue(`current-${item.instanceId}`, 'warning', 'Ток выше вводного', `${product.name}: номинал ${product.ratedCurrent} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту ввода.`, 'electrical.current.preliminary', { ratedCurrent: product.ratedCurrent, inputCurrent: project.settings.inputCurrent }, item.instanceId))
   }
   if (project.settings.enclosureWidth < minimum.width) issues.push(issue('width', 'error', 'Корпус уже расчётного минимума', `Для текущего наполнения нужно не менее ${minimum.width} мм. Выберите корпус большей ширины или измените ряд.`, 'layout.enclosure.minimum', { minimum: minimum.width, actual: project.settings.enclosureWidth }))
   if (!project.devices.some((item) => ['RCCB', 'RCBO'].includes(definitions.get(item.productId)?.category ?? ''))) issues.push(issue('rccd', 'warning', 'Не выбрана защита утечки', 'Проверьте необходимость УЗО или дифавтоматов по проекту.', 'protection.rccd.preliminary'))
@@ -78,54 +51,35 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
   const circuitById = new Map<string, (typeof project.circuits)[number]>()
   for (const circuit of project.circuits ?? []) circuitById.set(circuit.id, circuit)
   const connectionKeys = new Set<string>()
-  // Face geometry per product, not per wire: the same breaker appears in every connection of every
-  // circuit, and rebuilding its clamps for each one is work the board has already done.
-  const terminalBusAvailable = new Map<string, Map<string, boolean>>()
+  const terminalOwners = new Map<string, string>()
   for (const connection of project.connections ?? []) {
     if (seenConnectionIds.has(connection.id)) issues.push(issue(`duplicate-connection-${connection.id}`, 'error', 'Повторяется идентификатор подключения', `Подключение «${connection.label || connection.id}» встречается несколько раз.`, 'project.ids.duplicate', { kind: 'connection', id: connection.id }))
     seenConnectionIds.add(connection.id)
-    // A wire either belongs to a circuit or comes from somewhere physical: another device, or the
-    // bus of the panel. Only the first of those carries a circuit, which is why a hand-drawn feed
-    // used to be reported as a connection with a missing circuit — the rule was asking for a load
-    // where the person had drawn a piece of copper.
-    const isCircuitLine = carriesCircuit(connection)
-    const circuit = isCircuitLine ? circuitById.get(connection.circuitId) : undefined
-    if (isCircuitLine && !circuit) issues.push(issue(`connection-circuit-${connection.id}`, 'error', 'Подключение без цепи', `Подключение «${connection.label || connection.id}» ссылается на несуществующую цепь. Выберите существующую цепь.`, 'connection.circuit.missing', { connectionId: connection.id, circuitId: connection.circuitId }))
+    const circuit = connection.kind === 'busbar' || connection.kind === 'jumper' ? undefined : circuitById.get(connection.circuitId)
+    if (connection.kind !== 'busbar' && connection.kind !== 'jumper' && !circuit) issues.push(issue(`connection-circuit-${connection.id}`, 'error', 'Подключение без цепи', `Подключение «${connection.label || connection.id}» ссылается на несуществующую цепь. Выберите существующую цепь.`, 'connection.circuit.missing', { connectionId: connection.id, circuitId: connection.circuitId }))
     if (connection.kind === 'busbar' && !connection.fromDeviceId) issues.push(issue(`connection-busbar-source-${connection.id}`, 'error', 'Нет источника шины', `Подключение «${connection.label || connection.id}» не указывает шину-источник.`, 'connection.busbar.source.missing', { connectionId: connection.id }))
     if (connection.kind === 'busbar' && connection.fromDeviceId && !project.devices.some((device) => device.instanceId === connection.fromDeviceId)) issues.push(issue(`connection-busbar-source-missing-${connection.id}`, 'error', 'Шина-источник удалена', `Подключение «${connection.label || connection.id}» ссылается на удалённую шину.`, 'connection.busbar.source.missing', { connectionId: connection.id, fromDeviceId: connection.fromDeviceId }, connection.fromDeviceId))
-    if (connection.kind === 'bus' && connection.fromDeviceId) issues.push(issue(`connection-bus-source-${connection.id}`, 'error', 'У подключения от шины щита есть устройство-источник', `Подключение «${connection.label || connection.id}» объявлено запиткой от шины щита, но указывает аппарат-источник. Проводьте каскад инструментом «Провести».`, 'connection.bus.source.unexpected', { connectionId: connection.id, fromDeviceId: connection.fromDeviceId }, connection.fromDeviceId))
     if (!project.devices.some((device) => device.instanceId === connection.toDeviceId)) issues.push(issue(`connection-device-${connection.id}`, 'error', 'Подключение без устройства', `Подключение «${connection.label || connection.id}» ссылается на удалённое устройство.`, 'connection.device.missing', { connectionId: connection.id, toDeviceId: connection.toDeviceId }, connection.toDeviceId))
     if (!['L', 'N', 'PE'].includes(connection.fromBus)) issues.push(issue(`connection-bus-${connection.id}`, 'error', 'Неизвестная шина', `В подключении «${connection.label || connection.id}» указана неизвестная шина. Выберите L, N или PE.`, 'connection.bus.unknown', { connectionId: connection.id, fromBus: connection.fromBus }))
     if (!connection.label.trim()) issues.push(issue(`connection-label-${connection.id}`, 'warning', 'Подключение без подписи', 'Добавьте понятную подпись к линии на схеме.', 'connection.label.missing', { connectionId: connection.id }))
-    // A wire whose bus has no clamp of its own is drawn into the first column there is, so that a
-    // device without, say, an earth clamp can still be fed. The drawing then shows a conductor in a
-    // clamp that does not carry it, and only the drawing knows that — so it is said out loud.
-    const terminalProduct = project.devices.find((device) => device.instanceId === connection.toDeviceId)
-    const terminalDefinition = terminalProduct ? definitions.get(terminalProduct.productId) : undefined
-    if (terminalDefinition && !terminalBusAvailable.has(terminalDefinition.id)) {
-      terminalBusAvailable.set(terminalDefinition.id, new Map([
-        ['L', hasTerminalForBus(terminalDefinition, 'L')],
-        ['N', hasTerminalForBus(terminalDefinition, 'N')],
-        ['PE', hasTerminalForBus(terminalDefinition, 'PE')],
-      ]))
+    // Two conductors clamped in the same hole is a real installation fault, and the wire
+    // drawing hides it: both lines simply overlap at the terminal.
+    for (const [side, ref] of [['from', connection.fromTerminal], ['to', connection.toTerminal]] as const) {
+      if (!ref) continue
+      const key = terminalKey(ref)
+      const owner = terminalOwners.get(key)
+      if (owner) issues.push(issue(`connection-terminal-busy-${connection.id}-${side}`, 'error', 'Клемма занята', `Клемма «${ref.deviceId}:${ref.pole} ${ref.side === 'top' ? 'верх' : 'низ'}» уже занята подключением «${owner}». Снимите одно из подключений или выберите другую клемму.`, 'connection.terminal.busy', { connectionId: connection.id, deviceId: ref.deviceId, pole: ref.pole, side: ref.side, otherConnectionId: owner }, ref.deviceId))
+      else terminalOwners.set(key, connection.label || connection.id)
     }
-    const hasClamp = terminalBusAvailable.get(terminalDefinition?.id ?? '')?.get(connection.fromBus)
-    if (hasClamp === false) issues.push(issue(`connection-clamp-${connection.id}`, 'warning', 'У аппарата нет зажима этой шины', `Подключение «${connection.label || connection.id}»: у «${terminalDefinition!.name}» нет зажима ${connection.fromBus}, провод приведён к первому. Проверьте, где должна быть эта шина.`, 'connection.clamp.bus.missing', { connectionId: connection.id, fromBus: connection.fromBus, productId: terminalDefinition!.id }, connection.toDeviceId))
-    // A named terminal that the device does not have. Six screws are drawn on a terminal block, so a
-    // wire pointing at the ninth one is a file that disagrees with the panel in front of it, and the
-    // wire is drawn where the first screw is because there is nothing else to draw.
-    if (connection.terminal !== undefined && terminalDefinition && terminalDefinition.category === 'terminals') {
-      const terminalCount = Math.max(2, Math.min(terminalDefinition.terminalCount || 6, 10))
-      if (connection.terminal >= terminalCount) issues.push(issue(`connection-terminal-${connection.id}`, 'warning', 'Зажима у аппарата нет', `Подключение «${connection.label || connection.id}» указывает зажим ${connection.terminal + 1}, а у «${terminalDefinition.name}» их ${terminalCount}. Провод приведён к первому зажиму.`, 'connection.terminal.missing', { connectionId: connection.id, terminal: connection.terminal, terminalCount }, connection.toDeviceId))
-    }
-    // The terminal is part of what makes a wire this wire. Two earth wires from the same bus to the
-    // same terminal block are not a duplicate of each other when they land on different screws —
-    // which is exactly what a six-screw block exists for, and what the key used to forbid.
-    const connectionKey = connection.kind === 'busbar'
-      ? `busbar:${connection.fromDeviceId ?? ''}:${connection.toDeviceId}:${connection.fromTerminal ?? 0}`
-      : connection.kind === 'bus'
-        ? `bus:${connection.fromBus}:${connection.toDeviceId}:${connection.terminal ?? 0}`
-        : `circuit:${connection.circuitId}:${connection.fromBus}:${connection.toDeviceId}:${connection.terminal ?? 0}`
+    if (connection.kind === 'jumper' && (!connection.fromTerminal || !connection.toTerminal)) issues.push(issue(`connection-jumper-anchors-${connection.id}`, 'error', 'Перемычка без клемм', `Перемычка «${connection.label || connection.id}» должна указывать клемму источника и клемму приёмника.`, 'connection.jumper.anchors.missing', { connectionId: connection.id }))
+    if (connection.kind === 'jumper' && connection.fromTerminal && connection.toTerminal && terminalKey(connection.fromTerminal) === terminalKey(connection.toTerminal)) issues.push(issue(`connection-jumper-loop-${connection.id}`, 'error', 'Перемычка в никуда', `Перемычка «${connection.label || connection.id}» соединяет клемму с самой собой. Выберите разные клеммы.`, 'connection.jumper.loop', { connectionId: connection.id }, connection.fromTerminal.deviceId))
+    const bus = connection.busId ? (project.busAssemblies ?? []).find((item) => item.id === connection.busId) : undefined
+    if (connection.busId && !bus) issues.push(issue(`connection-bus-missing-${connection.id}`, 'error', 'Шина удалена', `Подключение «${connection.label || connection.id}» ссылается на несуществующую шину.`, 'connection.bus.missing', { connectionId: connection.id, busId: connection.busId }))
+    // N and PE are the same shape of conductor and the drawing cannot tell them apart, so the
+    // bus a line claims has to carry what the line carries.
+    if (bus && bus.kind === 'PE' && connection.fromBus !== 'PE') issues.push(issue(`connection-bus-kind-${connection.id}`, 'error', 'Фаза на шине PE', `Подключение «${connection.label || connection.id}» идёт от шины PE, но помечено как ${connection.fromBus}. Уберите фазу с защитной шины.`, 'connection.bus.kind.mismatch', { connectionId: connection.id, busKind: bus.kind, fromBus: connection.fromBus }))
+    if (bus && (bus.kind === 'N' || bus.kind === 'L') && connection.fromBus === 'PE') issues.push(issue(`connection-bus-kind-${connection.id}`, 'error', 'PE на рабочей шине', `Подключение «${connection.label || connection.id}» идёт от шины ${bus.kind}, но помечено как PE. Заземляющий провод подключается только к шине PE.`, 'connection.bus.kind.mismatch', { connectionId: connection.id, busKind: bus.kind, fromBus: connection.fromBus }))
+    const connectionKey = connection.kind === 'busbar' ? `busbar:${connection.fromDeviceId ?? ''}:${connection.toDeviceId}` : connection.kind === 'jumper' ? `jumper:${connection.fromTerminal && terminalKey(connection.fromTerminal)}:${connection.toTerminal && terminalKey(connection.toTerminal)}` : `circuit:${connection.circuitId}:${connection.fromBus}:${connection.toDeviceId}`
     if (connectionKeys.has(connectionKey)) issues.push(issue(`connection-duplicate-${connection.id}`, 'warning', 'Повторяется подключение', `В цепи «${circuit?.name ?? connection.circuitId}» уже есть такая же линия.`, 'connection.duplicate', { connectionKey }))
     connectionKeys.add(connectionKey)
     if (connection.thickness <= 0) issues.push(issue(`connection-thickness-${connection.id}`, 'warning', 'Некорректная толщина линии', `В подключении «${connection.label || connection.id}» укажите толщину больше нуля.`, 'connection.thickness.invalid', { connectionId: connection.id }))
@@ -145,34 +99,22 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     if (project.settings.phase === 1 && circuit.phase !== 1) issues.push(issue(`circuit-phase-${circuit.id}`, 'error', 'Фаза цепи не совпадает с сетью', `${circuit.name} назначена на L${circuit.phase}, а проект однофазный. Укажите L1.`, 'circuit.phase.mismatch', { phase: circuit.phase, projectPhase: project.settings.phase }))
     if (project.settings.phase === 1 && circuit.current > project.settings.inputCurrent) issues.push(issue(`circuit-input-current-${circuit.id}`, 'warning', 'Ток цепи выше вводного', `${circuit.name}: расчётный ток ${circuit.current} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту и нагрузку.`, 'circuit.current.input.preliminary', { current: circuit.current, inputCurrent: project.settings.inputCurrent }))
 
-    const buses = new Set((project.connections ?? []).filter((connection) => carriesCircuit(connection) && connection.circuitId === circuit.id).map((connection) => connection.fromBus))
+    const buses = new Set((project.connections ?? []).filter((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id).map((connection) => connection.fromBus))
     for (const bus of ['L', 'N', 'PE'] as const) {
       if (!buses.has(bus)) issues.push(issue(`circuit-bus-missing-${bus.toLowerCase()}-${circuit.id}`, 'info', `Предварительно: нет шины ${bus}`, `У цепи «${circuit.name}» не найдено подключение ${bus}. Это предварительная проверка комплектности, а не нормативное заключение.`, 'circuit.bus.completeness.preliminary', { circuitId: circuit.id, bus }))
     }
-    if (!project.connections?.some((connection) => carriesCircuit(connection) && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
-
-    // A conductor is protected against overload by the same device as its circuit, so the
-    // declared cross-section is compared with the rating of that device, not with the load.
-    const conductor = protectionProduct ? conductorCheck(circuit.wireCrossSection, protectionProduct.ratedCurrent) : null
-    if (conductor) issues.push(issue(`circuit-conductor-${circuit.id}`, 'warning', 'Сечение провода меньше номинала защиты', `${circuit.name}: ${conductor.actual} мм² при защите ${protectionProduct!.ratedCurrent} А. Для этого номинала нужен провод от ${conductor.required} мм². Это предварительная проверка, а не расчёт кабеля.`, 'circuit.conductor.cross-section', { crossSection: conductor.actual, required: conductor.required, capacity: conductor.capacity, ratedCurrent: protectionProduct!.ratedCurrent, circuitId: circuit.id }))
-
-    // Power and current are entered independently, so they can disagree. A circuit designed for
-    // more than it carries is ordinary, so only the direction that cannot be right is reported —
-    // and neither number is rewritten: the check says what the other one implies.
-    const load = protectionProduct ? circuitLoadCheck(circuit, protectionProduct.ratedCurrent) : null
-    if (load?.exceedsCurrent) issues.push(issue(`circuit-power-mismatch-${circuit.id}`, 'warning', 'Мощность не соответствует току', `${circuit.name}: ${Math.round(circuit.power)} Вт — это около ${Math.round(load.implied)} А, а цепь объявлена на ${circuit.current} А. Проверьте, какое из двух значений верно.`, 'circuit.power.current.mismatch', { power: circuit.power, current: circuit.current, implied: Math.round(load.implied), circuitId: circuit.id }))
-    if (load?.exceedsProtection && protectionProduct) issues.push(issue(`circuit-power-over-protection-${circuit.id}`, 'warning', 'Нагрузка выше номинала защиты', `${circuit.name}: ${Math.round(circuit.power)} Вт — это около ${Math.round(load.implied)} А при защите ${protectionProduct.ratedCurrent} А. Проверьте номинал аппарата.`, 'circuit.power.over-protection', { power: circuit.power, implied: Math.round(load.implied), ratedCurrent: protectionProduct.ratedCurrent, circuitId: circuit.id }))
-    if (circuit.power > 0 && circuit.current <= 0) issues.push(issue(`circuit-current-undetermined-${circuit.id}`, 'info', 'Мощность задана, ток — нет', `${circuit.name}: ${Math.round(circuit.power)} Вт соответствует примерно ${Math.round(currentForPowerA(circuit.power, circuit.phase))} А. Укажите ток, иначе нагрузка не попадёт в расчёт фаз.`, 'circuit.current.undetermined', { power: circuit.power, suggested: Math.round(currentForPowerA(circuit.power, circuit.phase)), circuitId: circuit.id }))
-  }
-
-  // One protective device feeding several circuits has to be rated for their sum. The editor makes
-  // this easy to do by accident: a new circuit defaults to the first protection device on the
-  // board, and only the per-circuit comparison above existed to catch it.
-  for (const load of protectionLoads(project, definitions).values()) {
-    if (load.ratedCurrent <= 0 || load.circuits.length < 2 || load.current <= load.ratedCurrent) continue
-    const placed = project.devices.find((item) => item.instanceId === load.instanceId)
-    const product = placed ? definitions.get(placed.productId) : undefined
-    issues.push(issue(`shared-protection-${load.instanceId}`, 'warning', 'Общий защитный аппарат перегружен', `${product?.name || 'Защитный аппарат'} на ${load.ratedCurrent} А защищает ${load.circuits.length} цепи с суммой ${Math.round(load.current)} А (${load.circuits.map((item) => item.name).join(', ')}). Разделите цепи или поставьте аппарат большего номинала.`, 'circuit.shared-protection.overload', { instanceId: load.instanceId, current: load.current, ratedCurrent: load.ratedCurrent, circuits: load.circuits.map((item) => item.id) }, load.instanceId))
+    if (!project.connections?.some((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
+    // A planned cable length turns the worksheet into a checkable number: the drop is what the
+    // far end of the line actually loses. Without a length there is nothing to check yet.
+    if ((circuit.cableLength ?? 0) > 0 && circuit.current > 0) {
+      const drop = voltageDrop({
+        lengthM: circuit.cableLength ?? 0,
+        currentA: circuit.current,
+        crossSectionMm2: circuit.wireCrossSection,
+        system: project.settings.phase === 3 ? 3 : 1,
+      })
+      if (!drop.ok) issues.push(issue(`cable-drop-${circuit.id}`, 'warning', 'Потери напряжения выше 4 %', `${circuit.name}: падение ${drop.dropPercent.toFixed(1).replace('.', ',')} % на ${circuit.cableLength} м при ${circuit.wireCrossSection} мм². Увеличьте сечение или сократите трассу.`, 'cable.drop.exceeded', { circuitId: circuit.id, dropPercent: Number(drop.dropPercent.toFixed(2)), lengthM: circuit.cableLength, crossSectionMm2: circuit.wireCrossSection, limitPercent: CABLE_DROP_LIMIT_PERCENT }))
+    }
   }
 
   // A single-phase panel already gets a per-circuit check above; a three-phase one had no
@@ -186,10 +128,6 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
       const bus = `L${index + 1}`
       issues.push(issue(`phase-load-${bus.toLowerCase()}`, 'warning', `Нагрузка на ${bus} выше вводного`, `На фазе ${bus} суммарно ${load} А при вводном ${project.settings.inputCurrent} А. Проверьте вводной аппарат и перераспределите нагрузку по фазам.`, 'electrical.phase-load.preliminary', { phase: index + 1, load, inputCurrent: project.settings.inputCurrent }))
     }
-    // The spread was computed for the inspector and never acted on, so a panel with all its load
-    // on L1 passed every check. It only means something once at least two phases carry load.
-    const imbalance = phaseImbalance(project, definitions)
-    if (imbalance) issues.push(issue('phase-imbalance', 'warning', 'Разброс фаз', `Нагрузка распределена неравномерно: ${imbalance.totals.map((value, index) => `L${index + 1} ${value} А`).join(', ')}, разброс ${imbalance.spread} % при пороге ${PHASE_IMBALANCE_LIMIT_PERCENT} %. Перераспределите нагрузку.`, 'electrical.phase-imbalance.preliminary', { spread: imbalance.spread, totals: imbalance.totals, limit: PHASE_IMBALANCE_LIMIT_PERCENT }))
   }
 
   const free = getFreeSlots(project, definitions)
@@ -198,6 +136,21 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
   if (!project.devices.length) issues.push(issue('empty', 'info', 'Пустая панель', 'Добавьте аппарат из каталога или выберите мастер.', 'project.empty'))
   issues.push(issue('preliminary', 'info', 'Предварительный расчёт', `${result.hasUnknownPrices ? 'Стоимость с неизвестными ценами уточняется; известная часть ' : 'Расчётная стоимость '}${result.total.toLocaleString('ru-RU')} ₽. Проверьте по схеме, паспортам и действующим требованиям.`, 'calculation.preliminary', { knownTotal: result.total, hasUnknownPrices: result.hasUnknownPrices }))
   return issues
+}
+
+export const phaseBalance = (project: PanelProject, definitions: Map<string, DeviceDefinition>) => {
+  const totals = [0, 0, 0]
+  if (project.circuits?.length) {
+    for (const circuit of project.circuits) totals[(circuit.phase - 1) % 3] += Math.max(0, circuit.current)
+  } else {
+    for (const item of project.devices) totals[(item.phase - 1) % 3] += (definitions.get(item.productId)?.ratedCurrent ?? 0) * item.quantity
+  }
+  const activeTotals = project.settings.phase === 1 ? totals.slice(0, 1) : totals
+  // A panel with no load at all is balanced, not maximally skewed. Forcing a
+  // non-zero denominator here reported «Разброс фаз 100 %» on an empty board.
+  const max = Math.max(...activeTotals)
+  const min = Math.min(...activeTotals)
+  return { totals, spread: max <= 0 ? 0 : Math.round(((max - min) / max) * 100) }
 }
 
 export const layoutCheck = (project: PanelProject, _definitions: Map<string, DeviceDefinition>) => {

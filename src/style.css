@@ -21,6 +21,8 @@
   --text-muted: #59635d;
   --text-faint: #6a706c;
   --ok: #2c7155;
+  /* Set at runtime by the editor (measured board top); `initial` keeps var() fallbacks live. */
+  --editor-panels-top: initial;
   --on-ok: #ffffff;
   --ok-soft: #dcece4;
   --warning: #9a6418;
@@ -871,6 +873,39 @@ kbd {
   color: var(--text-muted);
   font-size: var(--text-micro);
 }
+.model-row.is-missing b,
+.model-row.is-missing small {
+  color: var(--error);
+}
+.import-note {
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--accent);
+  background: var(--line-soft);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.import-note.warn {
+  border-left-color: var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+}
+.import-note.mono {
+  font-family: var(--mono);
+  letter-spacing: .02em;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.checkbox-row input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
 .import-dialog {
   position: fixed;
   z-index: 100;
@@ -904,10 +939,389 @@ kbd {
   width: 100%;
   min-height: 40px;
 }
+/* First-run orientation card; deliberately quiet in the focus mode. */
+.editor-hints {
+  margin: 8px 10px 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  font-size: var(--text-xs);
+}
+.editor-hints b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--text-sm);
+}
+.editor-hints ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.editor-hints button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.editor-hints button:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.canvas-focus:not(.panels-open) .editor-hints {
+  display: none;
+}
+/* The settings screen is a plain flowing page like the projects list. It must not
+   inherit the editor shell's grid: with no action bar of its own, the content row
+   lands in the 44px second track and the whole page clips to a sliver (and on
+   mobile, under the editor's bottom-nav padding). */
+.app-shell.settings-shell {
+  display: block;
+  padding-bottom: 0;
+}
+/* Settings page: one column of blocks, tables read like the BOM. */
+.settings-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px clamp(14px, 4vw, 40px) 40px;
+  background: var(--canvas);
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.settings-block {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.settings-block h2 {
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+}
+.settings-block .button-row {
+  margin-top: 10px;
+}
+.settings-table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+.settings-table th {
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-bottom: 1px solid var(--line);
+}
+.settings-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+.settings-table td small {
+  display: block;
+  color: var(--text-muted);
+}
+/* Persistent workspace navigation: one strip above every /app screen, so switching
+   between the project list and the editor stops living in each screen's own header. */
+.workspace-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.workspace-nav a {
+  padding: 4px 12px;
+  color: var(--text-muted);
+  font: 600 var(--text-xs) var(--mono);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.workspace-nav a:hover {
+  color: var(--text);
+}
+.workspace-nav a[aria-current='page'] {
+  color: var(--on-service);
+  background: var(--service);
+  border-color: var(--service);
+}
 .center-workspace {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+/* Center-column tabs: the board, the bill, the checks and the report share one column,
+   each reachable in both panel modes. Keyboard follows the demo tablist pattern. */
+.editor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  width: fit-content;
+  margin: 8px 10px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.editor-tabs button {
+  min-height: 32px;
+  padding: 0 14px;
+  color: var(--text-muted);
+  font: 700 var(--text-xs) var(--mono);
+  cursor: pointer;
+}
+.editor-tabs button.active {
+  color: var(--on-service);
+  background: var(--service);
+}
+.tab-panel-2d {
+  display: grid;
+  /* The board takes whatever the position pad leaves; without the definite 1fr track
+     the editor falls back to content height and its rows end up clipped. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 600px;
+}
+.tab-panel > .bom-panel,
+.tab-panel > .checks-panel {
+  margin: 10px;
+}
+/* In the tab the bill scrolls with its tab; the 360px window belongs to the
+   floating-panel era and would nest a second scrollbar inside the tab. Keeping
+   overflow visible also lets the sticky table head stick to the tab's scroller. */
+.tab-panel .bom-table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+/* The report tab reads the same document as print, but in the app palette.
+   Screen rules live in their own media block so they can never outrank the
+   print sheet's pt/mm measurements and its deliberate black-on-white look. */
+@media screen {
+  .print-report.screen-visible {
+    display: block;
+    margin: 10px;
+    padding: 16px 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .print-report .print-report-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--service);
+  }
+  .print-report .print-report-head h1 {
+    margin: 2px 0 4px;
+    font-size: var(--text-2xl);
+  }
+  .print-report .print-report-head p,
+  .print-report .print-report-head time {
+    color: var(--text-muted);
+    font: var(--text-xs)/1.5 var(--mono);
+  }
+  .print-report .print-report-head time {
+    flex: none;
+    color: var(--text-faint);
+  }
+  .print-report .print-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 12px 0;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+  }
+  .print-report .print-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 9px;
+    border-right: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .print-report .print-summary span {
+    color: var(--text-muted);
+    font: var(--text-micro) var(--mono);
+  }
+  .print-report .print-summary strong {
+    font-size: var(--text-sm);
+  }
+  .print-report h2 {
+    margin: 16px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .print-report table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-micro);
+  }
+  .print-report th {
+    padding: 6px 8px;
+    background: var(--canvas);
+    color: var(--text-muted);
+    text-align: left;
+    font: var(--text-micro) var(--mono);
+    text-transform: uppercase;
+  }
+  .print-report td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+  .print-report .print-connections p,
+  .print-report .print-issues p {
+    color: var(--text-muted);
+    font: var(--text-xs)/1.5 var(--mono);
+  }
+  .print-report .print-connections ol,
+  .print-report .print-issues ol {
+    margin: 0;
+    padding-left: 18px;
+    font-size: var(--text-xs);
+  }
+  .print-report .print-connections li,
+  .print-report .print-issues li {
+    margin: 6px 0;
+  }
+  .print-report .print-connections li span,
+  .print-report .print-issues li span {
+    display: block;
+    color: var(--text-muted);
+  }
+  .print-report .print-issue-error strong {
+    color: var(--error);
+  }
+  .print-report .print-issue-warning strong {
+    color: var(--warning);
+  }
+  .print-report .print-issue-info strong {
+    color: var(--info);
+  }
+  .print-report .print-price-note {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    font: var(--text-micro)/1.5 var(--mono);
+  }
+  .print-report .print-revisions {
+    margin-top: 16px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--text-muted);
+    font: var(--text-micro)/1.6 var(--mono);
+  }
+  .print-report .print-disclaimer {
+    color: var(--text-faint);
+  }
+}
+.checks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.checks-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+}
+.checks-summary.ok {
+  border-left-color: var(--ok, var(--accent));
+}
+.checks-summary strong {
+  font-size: var(--text-sm);
+}
+.checks-summary span {
+  color: var(--text-muted);
+}
+.checks-phase h4 {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.checks-phase dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 6px 0 0;
+}
+.checks-phase dl div {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.checks-phase dt {
+  color: var(--text-muted);
+  font-size: var(--text-micro);
+}
+.checks-phase dd {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+.checks-issue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.checks-issue-list li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: var(--surface-raised);
+  border-left: 2px solid var(--warning);
+}
+.checks-issue-list li.issue-error {
+  border-left-color: var(--error);
+}
+.checks-issue-list li.issue-info {
+  border-left-color: var(--accent);
+}
+.issue-goto {
+  margin-left: auto;
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.issue-goto:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.count-error {
+  color: var(--error);
+}
+.count-warning {
+  color: var(--warning);
 }
 .editor-2d {
   min-height: 600px;
@@ -937,6 +1351,72 @@ kbd {
   background: var(--service);
   color: var(--on-service);
   border-color: var(--service);
+}
+/* A two-position segment, the way a drawing tool announces which mode owns the board. */
+.tool-segment {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.tool-segment button {
+  min-height: 27px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  font-size: var(--text-micro);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tool-segment button + button { border-left: 1px solid var(--line); }
+.tool-segment button.active { background: var(--service); color: var(--on-service); }
+.tool-segment kbd {
+  font: 600 9px/1 var(--mono);
+  padding: 2px 3px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: .65;
+}
+/* The hit layer is invisible by default: a 0.8px conductor cannot be a pointer target, and a
+   visible fat line over the drawing would be a second, fainter wire pretending to be the first. */
+.wire-hits {
+  position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible;
+}
+.wire-hits .wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 9;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.wire-hits .wire-hit.selected { stroke: rgba(192, 57, 43, .22); }
+.wire-hits.active { cursor: crosshair; }
+.wire-port {
+  fill: rgba(251, 250, 242, .001);
+  stroke: var(--service);
+  stroke-width: .5;
+  pointer-events: all;
+  cursor: crosshair;
+}
+.wire-port:hover { fill: rgba(198, 92, 59, .35); }
+/* A clamp that already carries a conductor stays visible but refuses the click, so a dense row
+   still reads as fully wired instead of looking empty where the tool cannot be used. */
+.wire-port.taken {
+  stroke: var(--wire-jumper, #5a6672);
+  fill: rgba(90, 102, 114, .3);
+  cursor: not-allowed;
+}
+.wire-port.source { fill: var(--service); stroke-width: .9; }
+.wire-bus-port { fill: rgba(198, 92, 59, .001); pointer-events: all; cursor: crosshair; }
+.wire-bus-port:hover { fill: rgba(198, 92, 59, .22); }
+.wire-preview {
+  fill: none;
+  stroke: var(--service);
+  stroke-width: 1.4;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
 }
 .view-caption {
   display: flex;
@@ -1079,10 +1559,14 @@ kbd {
 }
 .din-rows {
   position: relative;
-  z-index: 2;
+  /* Above the wire hit layer, so a conductor running behind an appliance does not swallow the
+     click that was meant for the appliance. In the wire tool the order flips: there the whole
+     board is a terminal field, and the devices step out of the pointer's way entirely. */
+  z-index: 5;
   display: flex;
   flex-direction: column;
 }
+.editor-2d.wire-tool .din-rows { pointer-events: none; }
 .din-row {
   position: relative;
   min-height: 0;
@@ -1099,6 +1583,7 @@ kbd {
 }
 .row-label {
   position: absolute;
+  z-index: 1;
   top: 0;
   bottom: 0;
   display: flex;
@@ -1117,6 +1602,44 @@ kbd {
   color: #7b857e;
   font:500 var(--text-micro) var(--mono);
   white-space: nowrap;
+}
+/* The comb button lives in the row gutter, which is the only strip of the board not covered by
+   devices — the comb itself has to be drawn over the row, and a control there would sit on a clamp. */
+.row-comb-add {
+  margin-top: 4px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* The gutter is 62 px wide: a single row of four pole buttons runs under the rail and the
+     buttons stop being clickable, so the poles wrap into a square. */
+  gap: 2px;
+  color: #6d766f;
+  font:600 var(--text-micro) var(--mono);
+}
+.row-comb-add > span {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+.row-comb-add button { width: 100%; }
+.row-comb-add span { padding: 0 3px 0 1px; }
+.row-comb-add button {
+  min-height: 0;
+  padding: 1px 4px;
+  border: 1px solid rgba(109, 118, 111, .4);
+  border-radius: 2px;
+  background: rgba(251, 250, 242, .7);
+  color: #6d766f;
+  font:600 var(--text-micro) var(--mono);
+  cursor: pointer;
+}
+.row-comb-add button:hover:not(:disabled) {
+  border-color: var(--service);
+  color: var(--service);
+  background: var(--canvas);
+}
+.row-comb-add button:disabled {
+  opacity: .4;
+  cursor: default;
 }
 .din-rail {
   position: absolute;
@@ -1209,40 +1732,44 @@ kbd {
 .editor-2d.is-dragging {
   user-select: none;
 }
+/* While a drag is live the hover state must not repaint the frame the user is dragging. */
 .editor-2d.is-dragging .placed-device:hover {
-  border-color: inherit;
+  --device-edge: var(--board-device-edge);
 }
+/* The frame is an inset shadow rather than a border on purpose: a border and padding would
+   shrink the box the face is drawn into, and the wire router anchors to that box. The two frame
+   colours are variables so hover and selection only restate a colour, never the whole shadow. */
 .placed-device {
+  --device-edge: var(--board-device-edge);
+  --device-cap: #9ca69f;
   position: absolute;
   z-index: 3;
   min-width: 0;
-  border: 1px solid var(--board-device-edge);
-  border-top: 2px solid #9ca69f;
-  border-radius: 1.5px;
-  padding: 0 1px 1px;
+  padding: 0;
+  /* The global button rule paints a 1px border, which would eat a millimetre off every side of the
+     box the wire router anchors to. The frame below is drawn as an inset shadow for that reason. */
+  border: 0;
   background: transparent;
-  box-shadow: 1px 2px 3px rgba(0, 0, 0, .18);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-end;
+  box-shadow: inset 0 0 0 1px var(--device-edge), inset 0 2px 0 var(--device-cap), 1px 2px 3px rgba(0, 0, 0, .18);
+  border-radius: 1.5px;
+  display: block;
   overflow: hidden;
   cursor: grab;
   user-select: none;
   touch-action: pan-y;
-  transition: left .16s ease, box-shadow .16s ease, opacity .12s ease, border-color .12s ease;
+  transition: left .16s ease, box-shadow .16s ease, opacity .12s ease;
 }
 .placed-device.phase-1 {
-  border-top-color: var(--accent);
+  --device-cap: var(--accent);
 }
 .placed-device.phase-2 {
-  border-top-color: #2b6254;
+  --device-cap: #2b6254;
 }
 .placed-device.phase-3 {
-  border-top-color: var(--copper);
+  --device-cap: var(--copper);
 }
 .placed-device.busbar-device {
-  border-color: rgba(96, 108, 99, .8);
+  --device-edge: rgba(96, 108, 99, .8);
 }
 .placed-device.busbar-device b {
   color: #30473b;
@@ -1251,10 +1778,7 @@ kbd {
   color: #53645a;
 }
 .placed-device.missing-product {
-  align-items: center;
-  justify-content: center;
-  border-style: dashed;
-  border-color: var(--error);
+  --device-edge: var(--error);
   background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 .placed-device.missing-product b {
@@ -1263,26 +1787,27 @@ kbd {
 .placed-device.missing-product small {
   color: var(--error);
 }
+/* Centred absolutely for the same reason the face is: the device box is a block now, so a flex
+   child would collapse to zero height and the question mark would vanish. */
 .missing-mark {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
   color: var(--error);
   font-size: var(--text-base);
   font-weight: 800;
 }
 .placed-device:hover {
   z-index: 5;
-  border-color: var(--service);
+  --device-edge: var(--service);
 }
 .placed-device:active {
   cursor: grabbing;
 }
 .placed-device.selected {
   z-index: 6;
-  border-color: var(--accent);
+  --device-edge: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 2px 2px 3px rgba(0, 0, 0, .2);
 }
 .placed-device.dragging {
@@ -1299,16 +1824,22 @@ kbd {
   opacity: .82;
   box-shadow: 0 0 0 1px var(--info), 1px 2px 3px rgba(0, 0, 0, .18);
 }
+/* The face fills the whole device box and the marking floats over it, so a drawn screw sits
+   exactly where `facePlacementMm` says it does and a wire can be anchored to that point. */
 .placed-device .device-visual {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100% !important;
-  height: auto !important;
-  min-height: 0;
-  flex: 1 1 auto;
+  height: 100% !important;
 }
 .placed-device b {
-  display: block;
-  margin: 0 0 1px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
   padding: 1px 0;
   border-top: 1px solid rgba(118, 128, 121, .5);
   background: linear-gradient(180deg, var(--dv-paper-1, #fbfaf2), var(--dv-paper-2, #e4e3d7));
@@ -1568,14 +2099,6 @@ kbd {
   --dv-panel: #eef0e9;
   --dv-sidewall: #bcc2b9;
 }
-.family-city9 {
-  --dv-shell-1: #dfe3dd;
-  --dv-shell-2: #fbfcf9;
-  --dv-shell-3: #eff2eb;
-  --dv-shell-4: #d7dbd4;
-  --dv-panel: #f6f8f2;
-  --dv-sidewall: #c4cac1;
-}
 [data-theme="dark"] .family-light {
   --dv-shell-1: #3a413b;
   --dv-shell-2: #515950;
@@ -1615,14 +2138,6 @@ kbd {
   --dv-shell-4: #303531;
   --dv-panel: #474e48;
   --dv-sidewall: #292e2a;
-}
-[data-theme="dark"] .family-city9 {
-  --dv-shell-1: #3e453f;
-  --dv-shell-2: #586058;
-  --dv-shell-3: #4c534c;
-  --dv-shell-4: #373d38;
-  --dv-panel: #515952;
-  --dv-sidewall: #2e342f;
 }
 .row-capacity {
   position: absolute;
@@ -1705,11 +2220,31 @@ kbd {
   height: 100%;
   pointer-events: none;
   overflow: visible;
+  /* Bars and conductors are real objects, so they carry the phase palette as custom
+     properties: the drawing, the legend and the print report all read one set of values. */
+  --wire-phase-1: #c0392b;
+  --wire-phase-2: #8e44ad;
+  --wire-phase-3: #2c6fbb;
+  --wire-neutral: #1f6fb4;
+  --wire-pe: #4f9d3a;
+  --wire-jumper: #5a6672;
+  --bus-bar-fill: #9aa2a6;
+  --wire-label-ink: #2f3831;
+  --wire-label-paper: #fbfaf2;
 }
 .wires path {
   fill: none;
-  stroke-width: 1.2;
-  vector-effect: non-scaling-stroke;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+/* A conductor is a solid core with a darker casing, the way it is drawn on a real board. */
+.wire-core {
+  stroke-width: .8;
+  opacity: .95;
+}
+.wire-casing {
+  stroke-width: 2.4;
+  opacity: .3;
 }
 /* Terminal clamps carry the colour of the bus they serve, the same three colours as the wires. */
 .dv-pocket-bus-l {
@@ -1722,13 +2257,79 @@ kbd {
   stroke: #47a067;
 }
 .wire-l {
-  stroke: #a44d37;
+  stroke: var(--wire-phase-1);
+}
+.wire-l.phase-2 {
+  stroke: var(--wire-phase-2);
+}
+.wire-l.phase-3 {
+  stroke: var(--wire-phase-3);
 }
 .wire-n {
-  stroke: #8a9599;
+  stroke: var(--wire-neutral);
 }
 .wire-pe {
-  stroke: #47a067;
+  stroke: var(--wire-pe);
+}
+.wire-jumper {
+  stroke: var(--wire-jumper);
+}
+/* The badge sits on the wire, so it is drawn in the wire's own coordinate space and needs a
+   readable paper behind it — a label laid over a busy chassis is worse than no label. */
+.wire-label {
+  fill: var(--wire-label-ink);
+  stroke: var(--wire-label-paper);
+  stroke-width: 1.6;
+  paint-order: stroke fill;
+  font-family: var(--mono);
+  font-size: 4.4px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.wires.labels-off .wire-label {
+  display: none;
+}
+/* A comb bridges the top clamps of a run, so it borrows the copper of the busbars and adds a
+   tooth per pole. A comb with fewer devices than poles is drawn hollow: on a real board that
+   means an unfed fork, and the drawing should say so rather than look complete. */
+.comb-bar {
+  fill: #b9c2ba;
+  stroke: #6d776f;
+  stroke-width: .35;
+}
+.comb-tooth {
+  fill: none;
+  stroke: #7c867e;
+  stroke-width: 1.6;
+  stroke-linecap: butt;
+}
+.comb.starved .comb-bar {
+  fill: none;
+  stroke: var(--error);
+  stroke-dasharray: 1.6 1.2;
+}
+.comb.starved .comb-tooth {
+  stroke: var(--error);
+}
+.bus-bar {
+  fill: var(--bus-bar-fill);
+  stroke: rgba(28, 32, 30, .34);
+  stroke-width: .4;
+}
+.bus-bar.bus-n {
+  fill: #b9bfc2;
+}
+.bus-bar.bus-pe {
+  fill: #7fbf8d;
+}
+.bus-tag {
+  fill: #1d211f;
+  font-family: var(--mono);
+  letter-spacing: .06em;
+}
+.bus-tag-pe {
+  fill: #1f4a26;
 }
 .cabinet-label {
   position: absolute;
@@ -1867,9 +2468,30 @@ kbd {
 }
 .canvas-focus .workspace {
   grid-template-columns: minmax(0, 1fr);
+  /* Without a stretched row the tab column collapses to content height, the board
+     stops short of the viewport bottom and its rows land inside the drag autoscroll
+     edge band — every aimed drop would scroll the board mid-drag. */
+  grid-template-rows: minmax(0, 1fr);
 }
 .canvas-focus .center-workspace {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-focus .editor-tabs {
+  flex: none;
+}
+.canvas-focus .tab-panel-2d {
+  flex: 1;
+  min-height: 0;
+}
+/* The other tabs share the same overflow:hidden column, so each carries its own
+   scroll region instead of clipping its content at the fold. */
+.canvas-focus .tab-panel:not(.tab-panel-2d),
+.canvas-focus .print-report.screen-visible {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .canvas-focus .editor-2d {
   height: 100%;
@@ -1878,19 +2500,20 @@ kbd {
 .canvas-focus .canvas-scroll {
   min-height: 0;
 }
-.canvas-focus:not(.panels-open) .position-pad,
-.canvas-focus:not(.panels-open) .bom-panel {
+.canvas-focus:not(.panels-open) .position-pad {
   display: none;
 }
-.canvas-focus.panels-open .position-pad,
-.canvas-focus.panels-open .bom-panel {
+.canvas-focus.panels-open .position-pad {
   display: block;
 }
 .canvas-focus .catalog-panel,
 .canvas-focus .inspector-panel {
   position: fixed;
   z-index: 50;
-  top: 144px;
+  /* --editor-panels-top is measured at runtime (the board top under its toolbar band),
+     so extra chrome above the editor cannot desync the overlay from the toolbar. The
+     fallback chain is 102px header + 8px gap + 42px tabs + 42px toolbar. */
+  top: var(--editor-panels-top, 194px);
   bottom: 0;
   display: block;
   width: min(330px, calc(100vw - 24px));
@@ -1925,7 +2548,7 @@ kbd {
   backdrop-filter: blur(1px);
 }
 .canvas-focus .panel-scrim {
-  top: 144px;
+  top: var(--editor-panels-top, 194px);
 }
 /* On wide screens the panels float beside the board, so the board stays interactive and the canvas itself collapses them. */
 @media (min-width: 1025px) {
@@ -1992,6 +2615,21 @@ kbd {
   margin-bottom: 9px;
   background: var(--canvas);
   border-left: 2px solid var(--accent);
+}
+.missing-product-card {
+  padding: 8px 9px;
+  margin-bottom: 9px;
+  background: var(--error-soft);
+  border-left: 2px solid var(--error);
+}
+.missing-product-card p {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.missing-product-card b {
+  color: var(--error);
 }
 .product-monogram {
   width: 34px;
@@ -2125,6 +2763,107 @@ kbd {
   color: var(--text-faint);
   font-size: var(--text-micro);
   text-align: center;
+}
+/* A comb that reaches fewer devices than it has poles is drawn hollow on the board, so the
+   inspector says the same thing in words rather than leaving the user to spot the dashes. */
+.connection-warn {
+  margin: 4px 0 0;
+  color: var(--error);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+/* The clamp list mirrors the board: one row per screw, so the two can be read against each
+   other. A free clamp is greyed rather than hidden, because a hole with nothing in it is the
+   thing an installer looks for when deciding where the next wire goes. */
+.terminal-grid {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.terminal-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: rgba(251, 250, 242, .5);
+  font: var(--text-micro) var(--mono);
+}
+.terminal-row.busy {
+  border-color: rgba(109, 118, 111, .55);
+  background: rgba(251, 250, 242, .85);
+}
+.terminal-mark {
+  color: var(--text-muted);
+}
+.terminal-mark i {
+  font-style: normal;
+  color: var(--text-faint);
+}
+.terminal-free {
+  color: var(--text-faint);
+  font-family: 'Manrope', Arial, sans-serif;
+}
+.wire-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: var(--text-micro) var(--mono);
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.wire-link:hover,
+.wire-link.selected {
+  color: var(--service);
+  text-decoration-style: solid;
+}
+.wire-card.selected {
+  border-color: var(--service);
+  box-shadow: inset 3px 0 0 var(--service);
+}
+.wire-card-head .wire-phase {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 2px;
+  background: var(--line);
+  color: var(--text-muted);
+  font: 600 var(--text-micro) var(--mono);
+}
+.wire-card-head .wire-phase.bus-n {
+  background: var(--wire-neutral);
+  color: #fff;
+}
+.wire-card-head .wire-phase.bus-pe {
+  background: var(--wire-pe);
+  color: #1d231f;
+}
+.wire-ends {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font: var(--text-micro) var(--mono);
+}
+.wire-arrow {
+  color: var(--text-faint);
+}
+.bus-chip {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--text-muted);
+}
+.wire-rename {
+  display: grid;
+  gap: 2px;
+  color: var(--text-muted);
 }
 .compact-empty {
   min-height: 62px;
@@ -3073,7 +3812,7 @@ kbd {
     position: fixed;
     z-index: 70;
     right: 0;
-    top: 102px;
+    top: var(--editor-panels-top, 102px);
     bottom: 0;
     width: min(340px, 92vw);
     transform: translateX(100%);
@@ -3319,6 +4058,16 @@ kbd {
   }
   .bom-panel {
     margin: 8px;
+  }
+  .print-report.screen-visible {
+    margin: 8px;
+    padding: 12px;
+  }
+  .print-report .print-report-head {
+    flex-direction: column;
+  }
+  .print-report .print-summary {
+    grid-template-columns: repeat(2, 1fr);
   }
   .bom-heading {
     grid-template-columns: 1fr auto;
@@ -3662,4 +4411,228 @@ kbd {
   .print-disclaimer {
     margin-top: 3mm;
   }
+}
+
+/* ── Планировщик линий (вкладка «Линии») ─────────────────────────────────────────────────── */
+
+.lines-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.lines-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+}
+.lines-summary strong {
+  font-size: var(--text-sm);
+}
+.lines-summary span {
+  color: var(--text-muted);
+}
+.lines-actions {
+  display: flex;
+  gap: 8px;
+}
+.lines-group {
+  border: 1px solid var(--line);
+}
+.lines-group.ungrouped {
+  border-style: dashed;
+}
+.lines-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--surface-raised);
+}
+.lines-group-head h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  flex: 1;
+}
+.lines-group-head .mono {
+  color: var(--text-muted);
+  font-size: var(--text-micro);
+}
+.lines-room-remove {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: 0 2px;
+}
+.lines-room-remove:hover {
+  color: var(--error);
+}
+.lines-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.lines-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.lines-row.selected {
+  background: var(--surface-raised);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.lines-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lines-kind {
+  font-size: var(--text-micro);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.lines-kind[data-kind='light'] { color: #8a6d1a; border-color: #d9c06a; }
+.lines-kind[data-kind='dc'] { color: #1f6fb4; border-color: #7db3e0; }
+.lines-kind[data-kind='control'] { color: #6b4fa0; border-color: #b19ad9; }
+.lines-name {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  color: inherit;
+  padding: 2px 4px;
+}
+.lines-name:hover,
+.lines-name:focus {
+  border-color: var(--line);
+  background: var(--surface);
+  outline: none;
+}
+.lines-phase {
+  font-size: var(--text-micro);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: #fff;
+}
+.lines-phase[data-phase='1'] { background: #c0392b; }
+.lines-phase[data-phase='2'] { background: #8e44ad; }
+.lines-phase[data-phase='3'] { background: #2c6fbb; }
+.lines-row-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 14px;
+}
+.lines-row-details label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-micro);
+  color: var(--text-muted);
+}
+.lines-row-details input {
+  width: 72px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 3px 6px;
+}
+.lines-protection {
+  min-width: 220px;
+  flex: 1;
+}
+.lines-cascade {
+  font-size: var(--text-micro);
+  color: var(--text-muted);
+  align-self: center;
+}
+.lines-row-actions {
+  display: flex;
+  gap: 6px;
+  align-self: end;
+}
+.lines-row-actions button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.lines-row-actions button.danger {
+  color: var(--error);
+}
+/* The inline stroke width comes from the conductor's cross-section, so the highlight rides on a
+   glow instead — it stays visible whatever the section, and never fights the inline style. */
+.wire-core.line-active {
+  filter: drop-shadow(0 0 1.4px var(--accent)) drop-shadow(0 0 2.4px var(--accent));
+}
+.lines-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+}
+.lines-view-switch button {
+  border: 0;
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.lines-view-switch button.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.lines-schedule {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+.lines-schedule th,
+.lines-schedule td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+}
+.lines-schedule th {
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.lines-schedule tbody tr {
+  cursor: pointer;
+}
+.lines-schedule tbody tr:hover {
+  background: var(--surface-raised);
+}
+.lines-schedule tr.bad td {
+  color: var(--error);
+}
+.print-cable-schedule table {
+  width: 100%;
+}
+.print-cable-schedule .print-row-bad td {
+  color: var(--error);
 }
