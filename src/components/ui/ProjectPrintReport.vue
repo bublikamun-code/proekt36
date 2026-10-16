@@ -4,6 +4,8 @@ import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDe
 import { buildBom } from '../../domain/pricing'
 import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
+import { formatDropPercent, voltageDrop } from '../../domain/voltageDrop'
+import type { CircuitKind } from '../../domain/types'
 import { verificationLabel } from '../../domain/verification'
 import type { DeviceDefinition, PanelProject } from '../../domain/types'
 
@@ -24,6 +26,29 @@ const modules = computed(() => props.project.devices.filter(isDinDevice).reduce(
 const capacity = computed(() => getRowCapacity(props.project) * props.project.settings.rows)
 const rows = computed(() => Array.from({ length: props.project.settings.rows }, (_, index) => index))
 const productFor = (productId: string) => props.definitions.get(productId)
+
+/** The schedule prints one row per line, with the drop the rough-in crew will check. */
+const CABLE_CORES: Record<CircuitKind, number> = { power: 3, light: 3, dc: 2, control: 2 }
+const schedule = computed(() => props.project.circuits.map((circuit, index) => {
+  const room = (props.project.rooms ?? []).find((item) => item.id === circuit.roomId)
+  const drop = voltageDrop({
+    lengthM: circuit.cableLength ?? 0,
+    currentA: circuit.current,
+    crossSectionMm2: circuit.wireCrossSection,
+    system: props.project.settings.phase === 3 ? 3 : 1,
+  })
+  return {
+    number: index + 1,
+    name: circuit.name,
+    room: room?.name ?? '—',
+    cable: `${CABLE_CORES[circuit.kind ?? 'power']}×${String(circuit.wireCrossSection).replace('.', ',')} мм²`,
+    length: circuit.cableLength ?? 0,
+    current: circuit.current,
+    dropText: formatDropPercent(drop.dropPercent),
+    status: (circuit.cableLength ?? 0) > 0 ? (drop.ok ? 'в норме' : 'выше 4 %') : 'нет длины',
+    ok: drop.ok,
+  }
+}))
 </script>
 
 <template>
@@ -90,6 +115,26 @@ const productFor = (productId: string) => props.definitions.get(productId)
           <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${project.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
         </li>
       </ol>
+    </section>
+
+    <section class="print-cable-schedule" v-if="schedule.length">
+      <h2>Кабельный журнал</h2>
+      <table>
+        <thead><tr><th>№</th><th>Линия</th><th>Помещение</th><th>Кабель</th><th>Длина, м</th><th>Ток, А</th><th>ΔU</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr v-for="row in schedule" :key="row.number" :class="{ 'print-row-bad': row.length > 0 && !row.ok }">
+            <td>{{ row.number }}</td>
+            <td>{{ row.name }}</td>
+            <td>{{ row.room }}</td>
+            <td>{{ row.cable }}</td>
+            <td>{{ String(row.length).replace('.', ',') }}</td>
+            <td>{{ row.current }}</td>
+            <td>{{ row.dropText }}</td>
+            <td>{{ row.status }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="print-price-note">Потери рассчитаны для меди (ρ 0,0175 Ом·мм²/м) при заданной длине и токе линии; проверка предварительная.</p>
     </section>
 
     <section class="print-bom">

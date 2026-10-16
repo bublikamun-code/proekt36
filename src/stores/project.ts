@@ -15,10 +15,11 @@ import { autoConnectionLabel, autoNumber, autoNumberConnections, createProject, 
 import type { RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { downloadJsonFile } from '../domain/projectBackup'
 import { assertValidProjectSchema, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
-import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, RowComb, StoredModelAsset, StoredModelLibrary } from '../domain/types'
+import type { Circuit, Connection, DeviceDefinition, ModelAsset, PanelProject, PlacedDevice, ProjectSettings, Room, RowComb, StoredModelAsset, StoredModelLibrary } from '../domain/types'
+import { CIRCUIT_KINDS } from '../domain/types'
 import { terminalOccupied } from '../domain/wireRouting'
-import { sameTerminal, terminalColumnForPole, terminalColumns, terminalType } from '../domain/terminals'
-import type { TerminalRef, TerminalType } from '../domain/terminals'
+import { deviceTerminals, sameTerminal, terminalColumnForPole, terminalColumns, terminalType } from '../domain/terminals'
+import type { TerminalInfo, TerminalRef, TerminalType } from '../domain/terminals'
 import { clearModelAssets, deleteModelAsset, listModelAssetIds, putModelAsset } from '../storage/modelDb'
 import { actionableStorageError, isImportedProduct, WorkspaceRepository, type StorageBackupData, type StorageRecovery } from '../storage/projectRepository'
 import { invalidateModelCaches } from '../services/modelRender'
@@ -31,6 +32,18 @@ type ProjectHistory = { undo: PanelProject[]; redo: PanelProject[] }
 type StorageStatus = 'saving' | 'saved' | 'save-failed' | 'storage-unavailable'
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+/** What the planner needs to know to add a line; everything else gets a sensible default. */
+export interface NewLineInput {
+  name: string
+  roomId?: string
+  kind?: Circuit['kind']
+  phase?: 1 | 2 | 3
+  protectionProductId: string
+  current?: number
+  power?: number
+  wireCrossSection?: number
+}
 
 const seedProject = () => {
   const project = createProject('Освещение квартиры', 'apartment', presetProducts('apartment').settings)
@@ -108,6 +121,12 @@ export const useProjectStore = defineStore('project', () => {
   const currentProjectId = ref(loaded.currentProjectId && projects.value.some((project) => project.id === loaded.currentProjectId) ? loaded.currentProjectId : projects.value[0]!.id)
   const selectedDeviceId = ref<string | null>(null)
   const selectedConnectionId = ref<string | null>(null)
+  // The line the planner tab is looking at, so the board can highlight its conductors; null when
+  // no row is selected. Kept here for the same reason as selectedConnectionId: two views, one state.
+  const selectedLineId = ref<string | null>(null)
+  const selectLine = (id: string | null) => {
+    selectedLineId.value = selectedLineId.value === id ? null : id
+  }
   const cabinetMigration = ref<LayoutMigrationPlan | null>(null)
   const modelLibrary = ref<StoredModelLibrary>(loaded.models)
   const histories = ref<Record<string, ProjectHistory>>({})
@@ -719,8 +738,13 @@ export const useProjectStore = defineStore('project', () => {
     const current = currentProject.value.circuits.find((item) => item.id === id)
     if (!current) return rejectCommand('Цепь не найдена.')
     const values = patch as Record<string, unknown>
-    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'protectionDeviceId', 'color', 'wireCrossSection', 'note'])
+    // Planner fields ride the same command: a row edit in the lines tab is a circuit edit, and
+    // letting them through one door keeps the inspector and the worksheet from drifting apart.
+    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение цепи содержит недопустимые поля.')
+    if ('roomId' in values && values.roomId && !currentProject.value.rooms?.some((item) => item.id === values.roomId)) return rejectCommand('Помещение цепи не найдено.')
+    if ('kind' in values && !CIRCUIT_KINDS.includes(String(values.kind) as typeof CIRCUIT_KINDS[number])) return rejectCommand('Вид линии должен быть силовым, освещением, DC или управлением.')
+    if ('cableLength' in values && !finiteInRange(values.cableLength, 0, PROJECT_LIMITS.cableLength)) return rejectCommand('Длина кабеля должна быть числом от 0 до 1000 м.')
     const candidate = { ...current, ...patch }
     const invalid = circuitError(candidate)
     if (invalid) return rejectCommand(invalid)
@@ -796,6 +820,171 @@ export const useProjectStore = defineStore('project', () => {
     project.circuits = project.circuits.filter((item) => item.id !== id)
     project.connections = project.connections.filter((item) => item.circuitId !== id)
   }, 'Цепь удалена')
+
+  // ── Планировщик линий ──────────────────────────────────────────────────────────────────────
+  // A line is planned as a row in a worksheet and lands on the board the same moment: the
+  // protection device is placed, the circuit is created and a conductor from the phase bus is
+  // already drawn. The board stays the place to fine-tune what the planner produced.
+
+  const addRoom = (name: string, floor = 1): Room | null => {
+    const refuse = (message: string): null => { rejectCommand(message); return null }
+    if (!validText(name, PROJECT_LIMITS.text, true)) return refuse('Название помещения должно быть непустой строкой.')
+    if (!finiteInRange(floor, 0, PROJECT_LIMITS.floor, true)) return refuse('Этаж должен быть целым числом от 0 до 100.')
+    const room: Room = { id: uid(), name: name.trim(), floor }
+    commit((project) => { project.rooms = [...(project.rooms ?? []), room] }, 'Помещение добавлено')
+    return room
+  }
+
+  const updateRoom = (id: string, patch: Partial<Room>): boolean => {
+    const current = currentProject.value.rooms?.find((item) => item.id === id)
+    if (!current) return rejectCommand('Помещение не найдено.')
+    const values = patch as Record<string, unknown>
+    const allowed = new Set(['name', 'floor'])
+    if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение помещения содержит недопустимые поля.')
+    if ('name' in values && !validText(values.name, PROJECT_LIMITS.text, true)) return rejectCommand('Название помещения должно быть непустой строкой.')
+    if ('floor' in values && !finiteInRange(values.floor, 0, PROJECT_LIMITS.floor, true)) return rejectCommand('Этаж должен быть целым числом от 0 до 100.')
+    commit((project) => {
+      const room = project.rooms?.find((item) => item.id === id)
+      if (room) Object.assign(room, patch)
+    })
+    return true
+  }
+
+  /** Deleting a room keeps its lines — they simply sit outside any room until regrouped. */
+  const deleteRoom = (id: string) => commit((project) => {
+    project.rooms = (project.rooms ?? []).filter((item) => item.id !== id)
+    for (const circuit of project.circuits) if (circuit.roomId === id) circuit.roomId = undefined
+  }, 'Помещение удалено')
+
+  /**
+   * Plans a line: places its protection device on the first row with room (top row first, the
+   * way a board fills left to right), creates the circuit and feeds it a conductor from the
+   * phase bus, so the plan and the board never tell two different stories.
+   */
+  const addLine = (input: NewLineInput): string | null => {
+    // rejectCommand has already shown its toast by the time it returns; collapsing its false to
+    // null keeps the signature honest — the caller only wants the new id or its absence.
+    const refuse = (message: string): null => { rejectCommand(message); return null }
+    if (input.roomId && !currentProject.value.rooms?.some((item) => item.id === input.roomId)) return refuse('Помещение не найдено.')
+    const product = definitions.value.get(input.protectionProductId)
+    if (!product) return refuse('Аппарат защиты не найден в каталоге.')
+    if (product.category !== 'MCB' && product.category !== 'RCCB' && product.category !== 'RCBO') {
+      return refuse('Линию защищает автомат, УЗО или дифавтомат.')
+    }
+    const capacity = getRowCapacity(currentProject.value)
+    let result = placeProduct(currentProject.value.devices, product, 0, 0, capacity, uid, definitions.value)
+    for (let row = 1; row < currentProject.value.settings.rows && result.error; row += 1) {
+      result = placeProduct(currentProject.value.devices, product, row, 0, capacity, uid, definitions.value)
+    }
+    if (result.error) return refuse(result.error)
+    const placed = result.devices.find((item) => !currentProject.value.devices.some((before) => before.instanceId === item.instanceId))
+    if (!placed) return refuse('Не удалось разместить аппарат линии.')
+    const circuit: Circuit = {
+      id: uid(), name: input.name.trim(), loadName: input.name.trim(),
+      current: input.current ?? 0, power: input.power ?? 0,
+      phase: input.phase ?? 1, protectionDeviceId: placed.instanceId,
+      color: '#c65c3b', wireCrossSection: input.wireCrossSection ?? 1.5, note: '',
+      roomId: input.roomId || undefined, kind: input.kind ?? 'power', cableLength: 0,
+    }
+    // circuitError reads the protection out of the stored project, where the just-placed device
+    // only lands inside the commit below — running it here would refuse every line. The checks
+    // that matter are the ones about the input itself; the protection category was vetted above.
+    if (!validText(circuit.name, PROJECT_LIMITS.text, true)) return refuse('Название линии должно быть непустой строкой.')
+    if (!finiteInRange(circuit.current, 0, PROJECT_LIMITS.current)) return refuse('Ток линии должен быть числом от 0 до 10000 А.')
+    if (!finiteInRange(circuit.power, 0, PROJECT_LIMITS.power)) return refuse('Мощность линии должна быть числом от 0 до 10000000 Вт.')
+    if (!finiteInRange(circuit.wireCrossSection, 0.5, 1000)) return refuse('Сечение провода должно быть не меньше 0,5 мм².')
+    const phaseBus = currentProject.value.busAssemblies?.find((item) => item.kind === 'L')
+    const connection: Connection = {
+      id: uid(), circuitId: circuit.id, fromBus: 'L', toDeviceId: placed.instanceId,
+      color: circuit.color, thickness: 2, label: circuit.name, kind: 'circuit',
+      busId: phaseBus?.id,
+    }
+    commit((project) => {
+      renumber(project, result.devices)
+      project.circuits.push(circuit)
+      project.connections.push(connection)
+    }, 'Линия добавлена')
+    selectedDeviceId.value = placed.instanceId
+    notify(`Линия «${circuit.name}» добавлена: ${placed.address || 'аппарат'} на доске`)
+    return circuit.id
+  }
+
+  /**
+   * A line owns the apparatus the planner placed for it, so taking the line off removes the
+   * apparatus too — a breaker with no circuit to protect is board clutter, and the undo stack
+   * is the safety net the confirmation dialog names.
+   */
+  const deleteLine = (id: string) => {
+    const circuit = currentProject.value.circuits.find((item) => item.id === id)
+    if (!circuit) return rejectCommand('Линия не найдена.')
+    const protectionId = circuit.protectionDeviceId
+    commit((project) => {
+      project.circuits = project.circuits.filter((item) => item.id !== id)
+      project.connections = project.connections.filter((item) => item.circuitId !== id)
+      const kept = project.devices.filter((item) => item.instanceId !== protectionId)
+      if (kept.length !== project.devices.length) renumber(project, kept)
+    }, 'Линия удалена')
+    if (selectedDeviceId.value === protectionId) selectedDeviceId.value = null
+  }
+
+  /** Points a line at an apparatus the user placed by hand, when the planner's own is not wanted. */
+  const bindProtection = (circuitId: string, deviceId: string): boolean => {
+    const device = currentProject.value.devices.find((item) => item.instanceId === deviceId)
+    if (!isProtectionDevice(device)) return rejectCommand('Линию защищает автомат, УЗО или дифавтомат.')
+    return updateCircuit(circuitId, { protectionDeviceId: deviceId })
+  }
+
+  /**
+   * Draws the conductors a worksheet expects for a line: the neutral from the N bar into the
+   * apparatus' neutral clamp, the earth into its PE clamp when it has one. The phase is
+   * deliberately left alone — it arrives through the comb, which the board already draws.
+   */
+  const wireLine = (circuitId: string): boolean => {
+    const circuit = currentProject.value.circuits.find((item) => item.id === circuitId)
+    if (!circuit) return rejectCommand('Линия не найдена.')
+    const device = currentProject.value.devices.find((item) => item.instanceId === circuit.protectionDeviceId)
+    const product = device ? definitions.value.get(device.productId) : undefined
+    if (!device || !product) return rejectCommand('Аппарат защиты линии не найден.')
+    const bars = new Map((currentProject.value.busAssemblies ?? []).map((item) => [item.kind, item]))
+    let drawn = 0
+    const wanted: Array<{ bus: 'N' | 'PE'; terminal: TerminalInfo }> = []
+    for (const terminal of deviceTerminals(product)) {
+      if (terminal.type === 'neutral' || terminal.type === 'pe') wanted.push({ bus: terminal.type === 'neutral' ? 'N' : 'PE', terminal })
+    }
+    for (const { bus, terminal } of wanted) {
+      const bar = bars.get(bus)
+      if (!bar) continue
+      const ref: TerminalRef = { deviceId: device.instanceId, pole: terminal.pole, side: terminal.side }
+      if (terminalOccupied(currentProject.value, ref)) continue
+      if (currentProject.value.connections.some((item) => item.circuitId === circuitId && item.busId === bar.id)) continue
+      const connection: Connection = {
+        id: uid(), circuitId, fromBus: bus, toDeviceId: device.instanceId,
+        color: '', thickness: 2, kind: 'circuit', busId: bar.id, toTerminal: ref,
+        label: `${circuit.name} / ${device.address || 'аппарат'}`,
+      }
+      commit((project) => { project.connections.push(connection) })
+      drawn += 1
+    }
+    notify(drawn ? `Линия «${circuit.name}» соединена (${drawn})` : `Линии «${circuit.name}» нечего дорисовывать`)
+    return true
+  }
+
+  /**
+   * «Запитано от QF02»: the address of the apparatus feeding this one, read off the jumper that
+   * enters its top clamp. Empty when the apparatus is fed from the comb or the bus instead.
+   */
+  const cascadeLabel = (deviceId: string): string => {
+    for (const connection of currentProject.value.connections) {
+      if (connection.kind !== 'jumper') continue
+      const enters = connection.toTerminal?.deviceId === deviceId || (!connection.toTerminal && connection.toDeviceId === deviceId)
+      if (!enters) continue
+      const sourceId = connection.fromTerminal?.deviceId ?? connection.fromDeviceId
+      if (!sourceId || sourceId === deviceId) continue
+      const source = currentProject.value.devices.find((item) => item.instanceId === sourceId)
+      if (source?.address) return `запитано от ${source.address}`
+    }
+    return ''
+  }
 
   const undo = () => {
     const history = historyFor(currentProjectId.value)
@@ -1008,6 +1197,7 @@ export const useProjectStore = defineStore('project', () => {
 
   return {
     projects, currentProjectId, currentProject, selectedDeviceId, selectedDevice, selectedProduct, cabinetMigration, selectedConnectionId, selectConnection,
+    selectedLineId, selectLine,
     definitions, modelLibrary, modelAssetsById, resolveProductModel, undoStack, redoStack, storageStatus, storageError, storageRecovery, storageBackup,
     storageAlert, storageRecoveryNotice, hasStorageBackup, hasStorageRecovery, downloadStorageSnapshot, restoreStorageBackup, dismissStorageAlert,
     lastSavedAt, theme, toast, switchProject, newProject, duplicateProject, renameProject, deleteProject,
@@ -1016,6 +1206,7 @@ export const useProjectStore = defineStore('project', () => {
     updateSelected, compactSelectedRow, compactAllRows, autoNumberAll, moveDeviceById, addCircuit, updateCircuit, addConnection,
     addComb, updateComb, removeComb, addWire, addBusWire,
     addBusbarConnection, updateConnection, deleteConnection, deleteCircuit, undo, redo, persistNow, flushPersistence,
+    addRoom, updateRoom, deleteRoom, addLine, deleteLine, bindProtection, wireLine, cascadeLabel,
     retryPersistence, addImportedModel, deleteImportedModel, bindProductModel, replaceDeviceProduct, clearLocalData, importProject, restoreWorkspaceBackup, notify,
   }
 })

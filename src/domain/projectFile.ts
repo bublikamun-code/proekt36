@@ -80,14 +80,24 @@ const validateEnvelope = (value: unknown): string[] => {
   }
   if (!isRecord(value.application) || text(value.application.name) !== APPLICATION_NAME || !isKnownRevision(value.application.revision)) errors.push('отсутствует или неверна ревизия приложения')
   else if (isFutureRevision(value.application.revision, APPLICATION_REVISION)) errors.push(`приложение в файле новее установленного (${text(value.application.revision)} > ${APPLICATION_REVISION})`)
-  if (isFutureRevision(value.applicationRevision, APPLICATION_REVISION)) errors.push(`applicationRevision новее установленного (${text(value.applicationRevision)} > ${APPLICATION_REVISION})`)
+  // The flat copy is optional: files written before it existed carry the revision only inside
+  // `application`, so only a value that is present and wrong is worth reporting.
+  if (value.applicationRevision !== undefined) {
+    if (!isKnownRevision(value.applicationRevision)) errors.push('неверна applicationRevision')
+    else if (isFutureRevision(value.applicationRevision, APPLICATION_REVISION)) errors.push(`applicationRevision новее установленного (${text(value.applicationRevision)} > ${APPLICATION_REVISION})`)
+  }
   if (value.schemaRevision !== (legacySchema ? schemaVersion : PROJECT_SCHEMA_VERSION)) errors.push(`ожидается schemaRevision ${legacySchema ? schemaVersion : PROJECT_SCHEMA_VERSION}`)
   // A file written against an older catalogue is still readable; a newer or unreadable
   // revision is not. Comparing for plain equality would retire every export on each release.
-  if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
-  else if (!isKnownRevision(value.catalogRevision)) errors.push('неверна ревизия каталога')
-  if (isFutureRevision(value.validationRevision, VALIDATION_REVISION)) errors.push(`validationRevision новее установленного (${String(value.validationRevision)} > ${VALIDATION_REVISION})`)
+  // Readability is asked before recency: `isFutureRevision` calls anything it cannot parse
+  // «newer», so checking it first would file a mangled revision under a version comparison it
+  // never took part in and leave the honest «неверна ревизия» unreachable.
+  if (!isKnownRevision(value.catalogRevision)) errors.push('неверна ревизия каталога')
+  else if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
+  if (!isKnownRevision(value.validationRevision)) errors.push('неверна revision проверок')
+  else if (isFutureRevision(value.validationRevision, VALIDATION_REVISION)) errors.push(`validationRevision новее установленного (${String(value.validationRevision)} > ${VALIDATION_REVISION})`)
   if (!isRecord(value.validation)) errors.push('отсутствует вложенная ревизия валидации')
+  else if (!isKnownRevision(value.validation.revision)) errors.push('неверна вложенная ревизия валидации')
   else if (isFutureRevision(value.validation.revision, VALIDATION_REVISION)) errors.push(`вложенная ревизия валидации новее установленной (${String(value.validation.revision)} > ${VALIDATION_REVISION})`)
   if (typeof value.exportedAt !== 'string' || Number.isNaN(Date.parse(value.exportedAt))) errors.push('ожидается корректная дата exportedAt')
   // New files carry the snapshot only inside `catalog`; older ones also had flat top-level
@@ -96,8 +106,8 @@ const validateEnvelope = (value: unknown): string[] => {
   const snapshot = nested && Array.isArray(nested.snapshot) ? nested.snapshot : value.catalogSnapshot
   const manifest = nested && isRecord(nested.manifest) ? nested.manifest : value.catalogManifest
   if (nested) {
-    if (isFutureRevision(nested.revision, DOMAIN_CATALOG_REVISION)) errors.push(`вложенная ревизия каталога новее установленной (${String(nested.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-    else if (!isKnownRevision(nested.revision)) errors.push('неверна вложенная ревизия каталога')
+    if (!isKnownRevision(nested.revision)) errors.push('неверна вложенная ревизия каталога')
+    else if (isFutureRevision(nested.revision, DOMAIN_CATALOG_REVISION)) errors.push(`вложенная ревизия каталога новее установленной (${String(nested.revision)} > ${DOMAIN_CATALOG_REVISION})`)
     if (Array.isArray(value.catalogSnapshot) && JSON.stringify(nested.snapshot) !== JSON.stringify(value.catalogSnapshot)) errors.push('вложенный snapshot каталога не совпадает с catalogSnapshot')
     if (isRecord(value.catalogManifest) && JSON.stringify(nested.manifest) !== JSON.stringify(value.catalogManifest)) errors.push('вложенный manifest каталога не совпадает с catalogManifest')
   }
@@ -105,8 +115,8 @@ const validateEnvelope = (value: unknown): string[] => {
   else if (!isRecord(manifest)) errors.push('отсутствует catalogManifest')
   else {
     const ids = snapshot.map((item) => isRecord(item) ? text(item.id) : '').filter(Boolean)
-    if (isFutureRevision(manifest.revision, DOMAIN_CATALOG_REVISION)) errors.push(`ревизия manifest каталога новее установленной (${String(manifest.revision)} > ${DOMAIN_CATALOG_REVISION})`)
-    else if (!isKnownRevision(manifest.revision)) errors.push('неверна ревизия manifest каталога')
+    if (!isKnownRevision(manifest.revision)) errors.push('неверна ревизия manifest каталога')
+    else if (isFutureRevision(manifest.revision, DOMAIN_CATALOG_REVISION)) errors.push(`ревизия manifest каталога новее установленной (${String(manifest.revision)} > ${DOMAIN_CATALOG_REVISION})`)
     if (manifest.count !== snapshot.length) errors.push('count каталога не совпадает со snapshot')
     if (JSON.stringify(manifest.productIds) !== JSON.stringify(ids)) errors.push('productIds manifest не совпадают со snapshot')
     if (manifest.hash !== stableHash(snapshot)) errors.push('hash каталога не совпадает со snapshot')

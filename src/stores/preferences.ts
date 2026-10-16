@@ -38,7 +38,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const theme = ref<Theme>(read(THEME_KEY) === 'dark' ? 'dark' : 'light')
   const boardZoom = ref<number | null>(readStoredZoom())
   /** Whether the editor's side panels are showing, as opposed to the board alone. */
-  const panelsOpen = ref(read(PANELS_KEY) === 'open')
+  // Only an explicit "closed" hides the panels: the setting exists so a refresh does not undo
+  // the layout the user chose, and a first visit has to land on the editor they get to keep.
+  const panelsOpen = ref(read(PANELS_KEY) !== 'closed')
 
   const setTheme = (value: Theme) => {
     theme.value = value

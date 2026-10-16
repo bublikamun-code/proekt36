@@ -1,9 +1,13 @@
-import { assertValidProjectSchema, PROJECT_SCHEMA_VERSION } from '../domain/projectSchema'
+import { assertValidProjectSchema, isSupportedSchemaVersion, PROJECT_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS } from '../domain/projectSchema'
 import { migrateProject } from '../domain/project'
 import { DEVICE_CATEGORIES } from '../domain/types'
 import type { DeviceDefinition, ModelFormat, PanelProject, StoredModelAsset, StoredModelLibrary } from '../domain/types'
 
 export const PROJECTS_KEY = 'panel36.projects.v3'
+/** Schema version the current key was introduced at: older records belong to LEGACY_PROJECTS_KEYS. */
+const PROJECTS_KEY_SCHEMA_VERSION = 3
+/** Everything the current key can legitimately hold: the version its name carries and later ones. */
+const CURRENT_KEY_SCHEMA_VERSIONS = SUPPORTED_SCHEMA_VERSIONS.filter((version) => version >= PROJECTS_KEY_SCHEMA_VERSION)
 export const LEGACY_PROJECTS_KEY = 'panel36.projects.v1'
 /** Every superseded project key, newest first, so a v2 panel survives the v3 rewrite. */
 export const LEGACY_PROJECTS_KEYS = ['panel36.projects.v2', LEGACY_PROJECTS_KEY] as const
@@ -180,15 +184,21 @@ export const migrateLegacyModels = (items: unknown[]): StoredModelLibrary => {
 const normalizeProject = (value: unknown, strict: boolean): PanelProject => {
   const candidate = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   if (strict) {
-    // A record read from a current-schema key is data this app itself wrote, so anything
-    // else means the record is damaged. Repairing it here would be silent data loss: the
-    // user would get an empty panel with a new id and a fresh timestamp, with no record
-    // that anything had been thrown away. Refusing it hands the raw text to the caller
-    // instead, which preserves it as a recovery snapshot.
-    if (candidate.schemaVersion !== PROJECT_SCHEMA_VERSION) {
-      throw new Error(`ожидается schemaVersion ${PROJECT_SCHEMA_VERSION}, получено ${JSON.stringify(candidate.schemaVersion ?? null)}`)
+    // A record read from a current-schema key is data this app itself wrote. A record older
+    // than the key is a lookalike, and an unknown version is damage: repairing either here
+    // would be silent data loss — the user would get an empty panel with a fresh id and a
+    // new timestamp, with no record that anything had been thrown away. Refusing hands the
+    // raw text to the caller instead, which preserves it as a recovery snapshot.
+    // The one exception is the version the previous build wrote: the key keeps its name
+    // across schema bumps, so an installed board still sits in it until the next save
+    // rewrites it, and refusing that would empty a real user's panel on upgrade.
+    if (!isSupportedSchemaVersion(candidate.schemaVersion) || candidate.schemaVersion < PROJECTS_KEY_SCHEMA_VERSION) {
+      throw new Error(`ожидается schemaVersion ${CURRENT_KEY_SCHEMA_VERSIONS.join(' или ')}, получено ${JSON.stringify(candidate.schemaVersion ?? null)}`)
     }
-    return assertValidProjectSchema(candidate)
+    // A current-version record is checked exactly as it was written. Running it through the
+    // migrator would fill in the very fields that make it invalid and call the result healthy.
+    if (candidate.schemaVersion === PROJECT_SCHEMA_VERSION) return assertValidProjectSchema(candidate)
+    return assertValidProjectSchema(migrateProject(candidate as Partial<PanelProject>))
   }
   if (candidate.schemaVersion === PROJECT_SCHEMA_VERSION) assertValidProjectSchema(candidate)
   return assertValidProjectSchema(migrateProject(candidate as Partial<PanelProject>))

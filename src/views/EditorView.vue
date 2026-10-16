@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import CatalogPanel from '../components/catalog/CatalogPanel.vue'
 import Editor2D from '../components/editor/Editor2D.vue'
 import ChecksPanel from '../components/editor/ChecksPanel.vue'
+import LinesPanel from '../components/editor/LinesPanel.vue'
 import DevicePositionPad from '../components/editor/DevicePositionPad.vue'
 import InspectorPanel from '../components/inspector/InspectorPanel.vue'
 import BomPanel from '../components/bom/BomPanel.vue'
@@ -36,6 +37,15 @@ const canvasFocus = computed({
   set: (value: boolean) => { preferences.setPanelsOpen(!value) },
 })
 const wizardOpen = ref(false)
+/** A one-time orientation card; the dismissal is remembered so the editor stays quiet. */
+const HINTS_KEY = 'panel36.hints.v1'
+const hintsDismissed = ref(false)
+try { hintsDismissed.value = localStorage.getItem(HINTS_KEY) === 'dismissed' } catch { /* a blocked storage only means the hint shows again */ }
+const dismissHints = () => {
+  hintsDismissed.value = true
+  try { localStorage.setItem(HINTS_KEY, 'dismissed') } catch { /* see above */ }
+  liveMessage.value = 'Подсказки скрыты.'
+}
 const catalogFocus = ref<Category | null>(null)
 const mobilePanel = ref<'catalog' | 'inspector' | null>(null)
 const projectOpen = ref(false)
@@ -207,6 +217,7 @@ const printProject = () => requestAnimationFrame(() => window.print())
 
 const EDITOR_TABS = [
   { id: '2d', label: 'Схема 2D' },
+  { id: 'lines', label: 'Линии' },
   { id: 'bom', label: 'Спецификация' },
   { id: 'checks', label: 'Проверки' },
   { id: 'report', label: 'Отчёт' },
@@ -350,12 +361,24 @@ onUnmounted(() => {
     <main class="workspace" @click="onWorkspaceClick">
       <CatalogPanel :focus-category="catalogFocus" :class="{ 'mobile-active': mobilePanel === 'catalog' }" />
       <div class="center-workspace">
+        <div v-if="!hintsDismissed" class="editor-hints" data-editor-hints>
+          <b>Как устроен кабинет</b>
+          <ul>
+            <li>Разделы редактора — вкладки над схемой: спецификация, проверки и печатный отчёт всегда доступны, адрес сохраняет активную вкладку.</li>
+            <li>Позиции каталога различаются по происхождению: «Подтверждено» — сверено с источником, «Шаблон» — сгенерированная серия, «Импорт» — ваши CAD-модели.</li>
+            <li>CAD-модель импортируется кнопкой в панели каталога; привязать её к любому товару можно в инспекторе, а управлять библиотекой — в «Настройках».</li>
+          </ul>
+          <button type="button" data-dismiss-hints @click="dismissHints">Понятно, скрыть</button>
+        </div>
         <nav class="editor-tabs" role="tablist" aria-label="Разделы редактора">
           <button v-for="(tab, index) in EDITOR_TABS" :id="`editor-tab-${tab.id}`" :key="tab.id" :data-editor-tab="tab.id" :aria-controls="`editor-panel-${tab.id}`" :aria-selected="activeTab === tab.id" :class="{ active: activeTab === tab.id }" :tabindex="activeTab === tab.id ? 0 : -1" type="button" role="tab" @click="setTab(tab.id)" @keydown="onTabKeydown($event, index)">{{ tab.label }}</button>
         </nav>
         <div id="editor-panel-2d" class="tab-panel tab-panel-2d" role="tabpanel" aria-labelledby="editor-tab-2d" v-show="activeTab === '2d'">
           <Editor2D :focused="canvasFocus" @toggle-focus="togglePanels" />
           <DevicePositionPad v-if="selectedDevice" />
+        </div>
+        <div id="editor-panel-lines" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-lines" v-show="activeTab === 'lines'">
+          <LinesPanel @goto-board="setTab('2d')" />
         </div>
         <div id="editor-panel-bom" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-bom" v-show="activeTab === 'bom'">
           <BomPanel />

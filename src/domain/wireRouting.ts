@@ -47,12 +47,23 @@ export interface RoutedWire {
   points: WirePoint[]
   /** Midpoint of the longest horizontal run, where the marking badge is drawn. */
   labelAt: WirePoint
+  /** The colour the conductor is drawn in: the bus palette, unless the user picked one. */
   color: string
+  /**
+   * True when the colour came from the connection rather than the bus palette. The drawing lets
+   * the stylesheet own the palette and applies an inline stroke only for this case, so a board
+   * that never overrides a colour keeps following the theme, and one that does gets what the
+   * inspector promised it.
+   */
+  customColor: boolean
+  /** Conductor cross-section in millimetres, as the inspector and the print report quote it. */
   thickness: number
   label: string
   bus: 'L' | 'N' | 'PE'
   phase?: 1 | 2 | 3
   kind: 'circuit' | 'busbar' | 'jumper'
+  /** The planner line this conductor belongs to, so the board can highlight a selected line. */
+  circuitId?: string
 }
 
 export interface RoutedBoard {
@@ -245,11 +256,16 @@ const walk = (points: WirePoint[], x: number, y: number): WirePoint[] => {
  * What the badge on the conductor reads. A wire drawn by hand names two clamps, and that text is
  * the inspector's, not the board's: on a 12-module-wide rail a badge long enough to spell
  * «QF01:1 верх → QF03:1 верх» would cover the very devices it connects. The board shows what an
- * installer reads off it in the field — the phase, or N/PE — and the inspector keeps the full pair.
+ * installer reads off it in the field: the line's name when the wire belongs to one — the way a
+ * worksheet and a marking sheet spell it — or the phase/N/PE for a conductor without a line.
  * A line that predates clamping, or that an installer named by hand, keeps its own text.
  */
-export const wireBadge = (connection: { label: string; fromBus: string; phase?: 1 | 2 | 3; fromTerminal?: unknown; toTerminal?: unknown }): string => {
+export const wireBadge = (
+  connection: { label: string; fromBus: string; phase?: 1 | 2 | 3; fromTerminal?: unknown; toTerminal?: unknown },
+  lineName?: string,
+): string => {
   if (!connection.toTerminal) return connection.label
+  if (lineName) return lineName.length > 24 ? `${lineName.slice(0, 23)}…` : lineName
   if (connection.fromBus === 'N' || connection.fromBus === 'PE') return connection.fromBus
   return `L${connection.phase ?? 1}`
 }
@@ -282,6 +298,7 @@ const labelAnchor = (points: WirePoint[]): WirePoint => {
  */
 export const routeBoard = (project: PanelProject, definitions: Map<string, DeviceDefinition>, frame: WireFrame): RoutedBoard => {
   const devices = new Map(project.devices.map((device) => [device.instanceId, device]))
+  const lineNames = new Map((project.circuits ?? []).map((circuit) => [circuit.id, circuit.name]))
   const busBars = busBarLayout(frame, project.busAssemblies ?? [])
   const buses = [...busBars.values()]
   const wires: RoutedWire[] = []
@@ -357,11 +374,15 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       points: scaled,
       labelAt: at,
       color: wireColor(connection),
+      // An empty colour is the conductor asking to be painted in its bus colour, so only a
+      // colour the user actually chose overrides what the stylesheet would have picked.
+      customColor: Boolean(connection.color),
       thickness: connection.thickness > 0 ? connection.thickness : 2,
-      label: wireBadge(connection),
+      label: wireBadge(connection, connection.circuitId ? lineNames.get(connection.circuitId) : undefined),
       bus: connection.fromBus,
       phase: connection.phase,
       kind: connection.kind ?? 'circuit',
+      circuitId: connection.circuitId || undefined,
     })
   }
 

@@ -41,6 +41,11 @@ export interface CabinetDefinition {
   verificationStatus: VerificationStatus
 }
 
+/** What a line feeds, so the planner and the cable schedule can tell a socket run from lighting. */
+export type CircuitKind = 'power' | 'light' | 'dc' | 'control'
+
+export const CIRCUIT_KINDS: readonly CircuitKind[] = ['power', 'light', 'dc', 'control'] as const
+
 export interface Circuit {
   id: string
   name: string
@@ -52,6 +57,18 @@ export interface Circuit {
   color: string
   wireCrossSection: number
   note: string
+  /** Room grouping for the planner; empty means the line sits outside any room. */
+  roomId?: string
+  kind?: CircuitKind
+  /** Outgoing cable length in metres; 0 or absent means not planned yet. */
+  cableLength?: number
+}
+
+/** A planning group for lines — a room on a floor, the way a estimate worksheet expects. */
+export interface Room {
+  id: string
+  name: string
+  floor: number
 }
 
 export interface Connection {
@@ -212,6 +229,7 @@ export interface PanelProject {
   connections: Connection[]
   busAssemblies?: BusAssembly[]
   combs?: RowComb[]
+  rooms?: Room[]
 }
 
 export type IssueLevel = 'error' | 'warning' | 'info'

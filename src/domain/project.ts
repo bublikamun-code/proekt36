@@ -1,5 +1,6 @@
 import { cabinetById, railById } from '../data/enclosures'
-import type { BusAssembly, Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings, RowComb } from './types'
+import type { BusAssembly, Category, Circuit, Connection, DeviceDefinition, PanelProject, PlacedDevice, ProjectSettings, Room, RowComb } from './types'
+import { CIRCUIT_KINDS } from './types'
 import type { TerminalRef } from './terminals'
 import { terminalDisplayName, terminalMarkedName } from './terminals'
 import { PROJECT_SCHEMA_VERSION } from './projectSchema'
@@ -64,7 +65,21 @@ export const normalizeCircuit = (value: unknown): Circuit => {
     color: asText(raw.color, '#c65c3b'),
     wireCrossSection: asNumber(raw.wireCrossSection, 1.5, 0, 1000),
     note: asText(raw.note),
+    // v4 planner fields: a line that predates rooms sits outside any room, keeps its old
+    // «power» behaviour and has no cable planned yet — 0 means «not measured», not «on the spot».
+    roomId: asText(raw.roomId) || undefined,
+    kind: (CIRCUIT_KINDS as readonly string[]).includes(String(raw.kind)) ? raw.kind as Circuit['kind'] : 'power',
+    cableLength: asNumber(raw.cableLength, 0, 0, 1000),
   }
+}
+
+/** Normalize a planner room; a record without a name is not a group worth showing. */
+export const normalizeRoom = (value: unknown): Room | null => {
+  const raw = asRecord(value)
+  const id = asText(raw.id)
+  const name = asText(raw.name)
+  if (!id || !name) return null
+  return { id, name, floor: asInteger(raw.floor, 1, 0, 100) }
 }
 
 /** Normalize a connection, including old records that did not have kind. */
@@ -195,6 +210,7 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
     connections,
     busAssemblies,
     combs: Array.isArray(source.combs) ? source.combs.map(normalizeRowComb).filter((item): item is RowComb => Boolean(item)) : [],
+    rooms: Array.isArray(source.rooms) ? source.rooms.map(normalizeRoom).filter((item): item is Room => Boolean(item)) : [],
   }
 }
 
@@ -221,7 +237,7 @@ export const createProject = (name = 'Демо-панель', preset = 'demo', s
     id: uid(), name, preset, createdAt: now, updatedAt: now,
     settings: { ...merged, enclosureWidth: cabinet.width, enclosureHeight: cabinet.height, enclosureDepth: cabinet.depth, rows: cabinet.rows, cabinetId: cabinet.id, railId: rail.id },
     devices: [], circuits: [], connections: [],
-    busAssemblies: DEFAULT_BUS_ASSEMBLIES(), combs: [],
+    busAssemblies: DEFAULT_BUS_ASSEMBLIES(), combs: [], rooms: [],
   }
 }
 

@@ -418,6 +418,22 @@ const wireClass = (path: { kind: string; bus: string; phase?: number }): string 
   return `l phase-${path.phase ?? 1}`
 }
 
+/**
+ * Millimetres of conductor to pixels of stroke. The default 2 mm section lands on the widths the
+ * stylesheet already used (0.8 px core, 2.4 px casing), so a board nobody has edited draws exactly
+ * as it did before the inspector's colour and thickness could reach the drawing at all.
+ */
+const MM_TO_STROKE_PX = 0.4
+const conductorStyle = (path: { customColor: boolean; color: string; thickness: number }, role: 'core' | 'casing') => {
+  const style: Record<string, string> = {}
+  if (path.customColor) style.stroke = path.color
+  const px = path.thickness * MM_TO_STROKE_PX * (role === 'casing' ? 3 : 1)
+  style.strokeWidth = `${px}px`
+  return style
+}
+const coreStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'core')
+const casingStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'casing')
+
 // Markings crowd a dense board, so the drawing keeps a switch that turns them off.
 const showWireLabels = ref(true)
 
@@ -565,8 +581,8 @@ const selectWire = (id: string) => {
               </g>
               <!-- Casing first, core on top: one pass per wire so every conductor keeps its own
                    outline instead of merging with its neighbours where they run side by side. -->
-              <path v-for="path in wirePaths" :key="`${path.id}-casing`" :d="path.d" :class="`wire-casing wire-${wireClass(path)}`" />
-              <path v-for="path in wirePaths" :key="`${path.id}-core`" :data-connection-id="path.id" :d="path.d" :class="`wire-core wire-${wireClass(path)}`"><title>{{ path.label }}</title></path>
+              <path v-for="path in wirePaths" :key="`${path.id}-casing`" :d="path.d" :class="`wire-casing wire-${wireClass(path)}`" :style="casingStyle(path)" />
+              <path v-for="path in wirePaths" :key="`${path.id}-core`" :data-connection-id="path.id" :d="path.d" :class="`wire-core wire-${wireClass(path)}${path.circuitId && path.circuitId === store.selectedLineId ? ' line-active' : ''}`" :style="coreStyle(path)"><title>{{ path.label }}</title></path>
               <g class="wire-labels">
                 <text v-for="path in wirePaths" :key="`${path.id}-label`" :x="path.labelAt.x" :y="path.labelAt.y" class="wire-label">{{ path.label }}</text>
               </g>

@@ -1,12 +1,13 @@
 import { CATALOG_REVISION as DATA_CATALOG_REVISION } from '../data/catalog'
 import type { PanelProject } from './types'
+import { CIRCUIT_KINDS } from './types'
 import { APP_VERSION } from '../version'
 
 /** The only project schema understood by this application. */
-export const PROJECT_SCHEMA_VERSION = 3
+export const PROJECT_SCHEMA_VERSION = 4
 export const APPLICATION_REVISION = APP_VERSION
 export const CATALOG_REVISION = DATA_CATALOG_REVISION
-export const VALIDATION_REVISION = 3
+export const VALIDATION_REVISION = 4
 
 /**
  * Orders two revision strings and returns a negative number when `left` is older. Both
@@ -49,6 +50,9 @@ export const PROJECT_LIMITS = {
   connections: 2000,
   busAssemblies: 12,
   combs: 60,
+  rooms: 100,
+  floor: 100,
+  cableLength: 1000,
   quantity: 99,
   current: 10000,
   power: 10000000,
@@ -58,7 +62,11 @@ export const PROJECT_LIMITS = {
 } as const
 
 /** Schema versions this build can still read, oldest first. */
-export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, PROJECT_SCHEMA_VERSION] as const
+export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, PROJECT_SCHEMA_VERSION] as const
+
+/** True when the app can migrate a record of this schema version instead of refusing it. */
+export const isSupportedSchemaVersion = (value: unknown): value is (typeof SUPPORTED_SCHEMA_VERSIONS)[number] =>
+  typeof value === 'number' && (SUPPORTED_SCHEMA_VERSIONS as readonly number[]).includes(value)
 
 export interface ProjectSchemaValidationResult {
   valid: boolean
@@ -175,6 +183,18 @@ const validateCircuit = (errors: string[], value: unknown, path: string) => {
   finiteNumber(errors, value.power, `${path}.power`, { min: 0, max: PROJECT_LIMITS.power })
   finiteNumber(errors, value.wireCrossSection, `${path}.wireCrossSection`, { min: 0, max: 1000 })
   if (value.phase !== 1 && value.phase !== 2 && value.phase !== 3) add(errors, `${path}.phase`, 'ожидается 1, 2 или 3')
+  enumValue(errors, value.kind, `${path}.kind`, CIRCUIT_KINDS, false)
+  string(errors, value.roomId, `${path}.roomId`, { max: PROJECT_LIMITS.id })
+  // A planned line starts with an unmeasured run: an absent cableLength is «not known yet»,
+  // the same «not known» an empty roomId means, and not a malformed number.
+  if (value.cableLength !== undefined) finiteNumber(errors, value.cableLength, `${path}.cableLength`, { min: 0, max: PROJECT_LIMITS.cableLength })
+}
+
+const validateRoom = (errors: string[], value: unknown, path: string) => {
+  if (!isRecord(value)) { add(errors, path, 'ожидается объект помещения'); return }
+  string(errors, value.id, `${path}.id`, { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
+  string(errors, value.name, `${path}.name`, { required: true, max: PROJECT_LIMITS.text, nonEmpty: true })
+  finiteNumber(errors, value.floor, `${path}.floor`, { min: 0, max: PROJECT_LIMITS.floor, integer: true })
 }
 
 const validateTerminalRef = (errors: string[], value: unknown, path: string) => {
@@ -237,11 +257,15 @@ const validateReferences = (errors: string[], project: RecordValue) => {
   const circuits = Array.isArray(project.circuits) ? project.circuits.filter(isRecord) : []
   const connections = Array.isArray(project.connections) ? project.connections.filter(isRecord) : []
   const buses = Array.isArray(project.busAssemblies) ? project.busAssemblies.filter(isRecord) : []
+  const rooms = Array.isArray(project.rooms) ? project.rooms.filter(isRecord) : []
   const deviceIds = new Set(devices.map((item) => typeof item.instanceId === 'string' ? item.instanceId : ''))
   const circuitIds = new Set(circuits.map((item) => typeof item.id === 'string' ? item.id : ''))
   const busIds = new Set(buses.map((item) => typeof item.id === 'string' ? item.id : ''))
+  const roomIds = new Set(rooms.map((item) => typeof item.id === 'string' ? item.id : ''))
   for (const [index, circuit] of circuits.entries()) {
     if (typeof circuit.protectionDeviceId === 'string' && !deviceIds.has(circuit.protectionDeviceId)) add(errors, `circuits[${index}].protectionDeviceId`, `ссылается на несуществующее устройство «${circuit.protectionDeviceId}»`)
+    // An empty roomId is a planner-free line; only a named room has to exist.
+    if (typeof circuit.roomId === 'string' && circuit.roomId && !roomIds.has(circuit.roomId)) add(errors, `circuits[${index}].roomId`, `ссылается на несуществующее помещение «${circuit.roomId}»`)
   }
   for (const [index, connection] of connections.entries()) {
     if (typeof connection.toDeviceId === 'string' && !deviceIds.has(connection.toDeviceId)) add(errors, `connections[${index}].toDeviceId`, `ссылается на несуществующее устройство «${connection.toDeviceId}»`)
@@ -273,7 +297,7 @@ export const validateProjectSchema = (value: unknown): ProjectSchemaValidationRe
   const version = value.schemaVersion
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) add(errors, 'schemaVersion', `ожидается целая версия схемы из ${SUPPORTED_SCHEMA_VERSIONS.join(', ')}`)
   else if (version > PROJECT_SCHEMA_VERSION) add(errors, 'schemaVersion', `схема версии ${version} новее поддерживаемой версии ${PROJECT_SCHEMA_VERSION}; обновите приложение`)
-  else if (!SUPPORTED_SCHEMA_VERSIONS.includes(version as 1 | 2 | 3)) add(errors, 'schemaVersion', `версия схемы ${version} не поддерживается`)
+  else if (!SUPPORTED_SCHEMA_VERSIONS.includes(version as 1 | 2 | 3 | 4)) add(errors, 'schemaVersion', `версия схемы ${version} не поддерживается`)
   if (version === PROJECT_SCHEMA_VERSION) {
     string(errors, value.id, 'id', { required: true, max: PROJECT_LIMITS.id, nonEmpty: true })
     string(errors, value.name, 'name', { required: true, max: PROJECT_LIMITS.name, nonEmpty: true })
@@ -305,7 +329,12 @@ export const validateProjectSchema = (value: unknown): ProjectSchemaValidationRe
       combs.forEach((item, index) => validateRowComb(errors, item, `combs[${index}]`))
       duplicate(errors, combs.filter(isRecord).map((item) => typeof item.id === 'string' ? item.id : ''), 'combs.id')
     }
-    if (!errors.some((item) => item.startsWith('devices') || item.startsWith('circuits') || item.startsWith('connections') || item.startsWith('busAssemblies') || item.startsWith('combs'))) validateReferences(errors, value)
+    if (array(errors, value.rooms, 'rooms', PROJECT_LIMITS.rooms)) {
+      const rooms = value.rooms as unknown[]
+      rooms.forEach((item, index) => validateRoom(errors, item, `rooms[${index}]`))
+      duplicate(errors, rooms.filter(isRecord).map((item) => typeof item.id === 'string' ? item.id : ''), 'rooms.id')
+    }
+    if (!errors.some((item) => item.startsWith('devices') || item.startsWith('circuits') || item.startsWith('connections') || item.startsWith('busAssemblies') || item.startsWith('combs') || item.startsWith('rooms'))) validateReferences(errors, value)
   } else if (version === 1) {
     if (!Array.isArray(value.devices)) add(errors, 'devices', 'ожидается массив устройств')
     if (value.circuits !== undefined && !Array.isArray(value.circuits)) add(errors, 'circuits', 'ожидается массив цепей')

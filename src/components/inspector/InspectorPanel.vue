@@ -388,6 +388,7 @@ const migrationIssueLabel = (code: string) => ({
         <div><span>Свободно</span><strong>{{ metrics.free }}<small> мод.</small></strong></div>
         <div><span>Заполнено</span><strong>{{ metrics.modules }} / {{ metrics.capacity * currentProject.settings.rows }}<small> мод.</small></strong></div>
         <div><span>Разброс фаз</span><strong>{{ metrics.balance.spread }}<small> %</small></strong></div>
+        <div><span>Соединения</span><strong>{{ currentProject.connections.length }}<small> шт.</small></strong></div>
       </div>
       <div class="phase-bar" role="img" :aria-label="`Нагрузка фаз: ${metrics.balance.totals.join(', ')} ампер`"><i v-for="(value, index) in metrics.balance.totals" :key="index" :class="`phase-${index}`" :style="{ flex: Math.max(1, value) }"></i></div>
       <p class="microcopy">Расчёт предварительный. Нормативное соответствие не подтверждается.</p>

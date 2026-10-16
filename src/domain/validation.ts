@@ -1,4 +1,5 @@
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
+import { CABLE_DROP_LIMIT_PERCENT, voltageDrop } from './voltageDrop'
 import { pricing } from './pricing'
 import { VALIDATION_REVISION } from './projectSchema'
 import { terminalKey } from './terminals'
@@ -103,6 +104,17 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
       if (!buses.has(bus)) issues.push(issue(`circuit-bus-missing-${bus.toLowerCase()}-${circuit.id}`, 'info', `Предварительно: нет шины ${bus}`, `У цепи «${circuit.name}» не найдено подключение ${bus}. Это предварительная проверка комплектности, а не нормативное заключение.`, 'circuit.bus.completeness.preliminary', { circuitId: circuit.id, bus }))
     }
     if (!project.connections?.some((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
+    // A planned cable length turns the worksheet into a checkable number: the drop is what the
+    // far end of the line actually loses. Without a length there is nothing to check yet.
+    if ((circuit.cableLength ?? 0) > 0 && circuit.current > 0) {
+      const drop = voltageDrop({
+        lengthM: circuit.cableLength ?? 0,
+        currentA: circuit.current,
+        crossSectionMm2: circuit.wireCrossSection,
+        system: project.settings.phase === 3 ? 3 : 1,
+      })
+      if (!drop.ok) issues.push(issue(`cable-drop-${circuit.id}`, 'warning', 'Потери напряжения выше 4 %', `${circuit.name}: падение ${drop.dropPercent.toFixed(1).replace('.', ',')} % на ${circuit.cableLength} м при ${circuit.wireCrossSection} мм². Увеличьте сечение или сократите трассу.`, 'cable.drop.exceeded', { circuitId: circuit.id, dropPercent: Number(drop.dropPercent.toFixed(2)), lengthM: circuit.cableLength, crossSectionMm2: circuit.wireCrossSection, limitPercent: CABLE_DROP_LIMIT_PERCENT }))
+    }
   }
 
   // A single-phase panel already gets a per-circuit check above; a three-phase one had no
