@@ -1,26 +1,29 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { allCatalog, builtinCatalog, enmasSeriesCatalog } from '../src/data/catalog'
+import { allCatalog, builtinCatalog, enmasSeriesCatalog, referenceCatalog } from '../src/data/catalog'
 import { assertCatalogUniqueness, validateCatalogFile, validateCatalogUniqueness } from '../src/data/catalog/schema'
 
 const generated = JSON.parse(readFileSync(resolve(process.cwd(), 'src/data/catalog/enmas.generated.json'), 'utf8')) as unknown[]
 
 describe('catalog data files', () => {
   it('keeps the expected split between hand-written and generated data', () => {
-    expect(builtinCatalog).toHaveLength(48)
+    expect(builtinCatalog).toHaveLength(9)
+    expect(referenceCatalog).toHaveLength(40)
     expect(enmasSeriesCatalog).toHaveLength(344)
-    expect(allCatalog).toHaveLength(392)
+    expect(allCatalog).toHaveLength(393)
   })
 
   it('passes shape validation for every file', () => {
     expect(validateCatalogFile('builtin.json', builtinCatalog)).toEqual([])
+    expect(validateCatalogFile('reference.json', referenceCatalog)).toEqual([])
     expect(validateCatalogFile('enmas.generated.json', enmasSeriesCatalog)).toEqual([])
   })
 
   it('keeps ids and brand+sku pairs unique across the whole catalogue', () => {
     expect(() => validateCatalogUniqueness([
       { file: 'builtin.json', items: builtinCatalog },
+      { file: 'reference.json', items: referenceCatalog },
       { file: 'enmas.generated.json', items: enmasSeriesCatalog },
     ])).not.toThrow()
   })

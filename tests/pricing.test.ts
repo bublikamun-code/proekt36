@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { builtinCatalog } from '../src/data/catalog'
+import { workspaceCatalog } from '../src/data/catalog'
 import { bomToCsv, buildBom, pricing } from '../src/domain/pricing'
 import { createDevice } from '../src/domain/project'
 import type { DeviceDefinition } from '../src/domain/types'
 
-const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
+const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
 const base = definitions.get('ekf-mcb-1p-c6')!
 
 describe('pricing and BOM', () => {

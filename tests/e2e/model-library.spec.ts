@@ -120,7 +120,7 @@ test('a device whose product left the catalogue can be re-bound to a real produc
   await orphan.dispatchEvent('click')
   await expect(page.locator('.missing-product-card')).toBeVisible()
 
-  await pickOption(page.locator('.inspector-panel'), 'Заменить товар', /AVO-10/)
+  await pickOption(page.locator('.inspector-panel'), 'Заменить товар', 'AVO-10')
   await expect(page.locator('.placed-device.missing-product')).toHaveCount(0)
   await expect(page.locator('.placed-device svg.device-visual')).toHaveCount(1)
 })

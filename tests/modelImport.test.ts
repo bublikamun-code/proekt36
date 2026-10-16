@@ -9,7 +9,7 @@ const gltfJson = JSON.stringify({
   buffers: [{ uri: 'device.bin', byteLength: 4 }],
 })
 
-const file = (name: string, bytes: Uint8Array) => new File([bytes], name)
+const file = (name: string, bytes: Uint8Array) => new File([bytes as unknown as BlobPart], name)
 
 const makeGlb = () => {
   const json = new TextEncoder().encode(gltfJson)

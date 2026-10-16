@@ -2,8 +2,6 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { openSidePanels, unlockWorkspace } from './helpers'
 
-const SESSION = { kind: 'guest', name: 'Геометрия', createdAt: '2026-01-01T00:00:00.000Z' }
-
 const device = (productId: string, row: number, slot: number, quantity = 1) => ({
   instanceId: `${productId}-${row}-${slot}`,
   productId,
@@ -49,7 +47,8 @@ const boardMetrics = (page: Page) => page.evaluate(() => {
     const box = element.getBoundingClientRect()
     return { x: box.x, y: box.y, width: box.width, height: box.height, bottom: box.bottom, right: box.right }
   }
-  const slots = [...document.querySelectorAll('.din-row:first-of-type .slot-cell')].map((element) => rect(element))
+  // Elements from querySelectorAll always exist, so `rect` cannot answer null for them.
+  const slots = [...document.querySelectorAll('.din-row:first-of-type .slot-cell')].map((element) => rect(element)!)
   const devices = [...document.querySelectorAll('.placed-device')].map((element) => ({
     footprint: Number(element.getAttribute('data-footprint-modules')),
     widthMm: Number(element.getAttribute('data-width-mm')),
@@ -104,7 +103,7 @@ test('a 12-module rail renders 18 mm pitch and footprint-based device widths', a
 test('an 18-module rail renders 18 slots and the same 18 mm pitch', async ({ page }) => {
   await openEditorWith(page, project('Геометрия 18', { cabinetId: 'panel36-18-r18-embedded', railId: 'rail-18', enclosureWidth: 354, enclosureHeight: 260 }, [
     device('ekf-mcb-3p-c25', 0, 2),
-    device('schneider-spd-t2-4p', 0, 6),
+    device('ekf-spd-t1-3p-n-pe', 0, 6),
   ]))
 
   await expect(page.locator('.canvas-spec')).toHaveText('18 мод./рейка · 18 мм')
@@ -274,7 +273,7 @@ test('the demo cabinet is not stretched by a minimum width', async ({ page }) =>
     if (!element || !caption) return null
     const box = element.getBoundingClientRect()
     const [widthMm, heightMm] = (caption.textContent ?? '').match(/(\d+) × (\d+)/)?.slice(1).map(Number) ?? []
-    return { width: box.width, height: box.height, inline: Number(element.style.width.replace('px', '')), widthMm: widthMm ?? 0, heightMm: heightMm ?? 0 }
+    return { width: box.width, height: box.height, inline: Number((element as HTMLElement).style.width.replace('px', '')), widthMm: widthMm ?? 0, heightMm: heightMm ?? 0 }
   })
   expect(cabinet).not.toBeNull()
   // The inline width follows the catalog millimetres at the shared 1.5 factor, with no pixel floor.

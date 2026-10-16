@@ -32,7 +32,11 @@ export class MemoryStorage {
 
 /** A storage that fails the way a private-mode browser does, for the blocked-storage paths. */
 export class ThrowingStorage {
-  constructor(private readonly error: Error) {}
+  private readonly error: Error
+
+  constructor(error: Error) {
+    this.error = error
+  }
 
   getItem(): string | null {
     throw this.error
@@ -60,10 +64,13 @@ class FakeRequest<T = unknown> {
 }
 
 class FakeObjectStore {
-  constructor(
-    private readonly data: Map<string, unknown>,
-    private readonly transaction: FakeTransaction,
-  ) {}
+  private readonly data: Map<string, unknown>
+  private readonly transaction: FakeTransaction
+
+  constructor(data: Map<string, unknown>, transaction: FakeTransaction) {
+    this.data = data
+    this.transaction = transaction
+  }
 
   put(value: unknown, key: string) {
     this.data.set(key, value)
@@ -107,8 +114,11 @@ class FakeTransaction {
   onerror: (() => void) | null = null
   onabort: (() => void) | null = null
   error: unknown = null
+  private readonly data: Map<string, unknown>
 
-  constructor(private readonly data: Map<string, unknown>) {}
+  constructor(data: Map<string, unknown>) {
+    this.data = data
+  }
 
   objectStore() {
     return new FakeObjectStore(this.data, this)
@@ -123,7 +133,11 @@ class FakeDatabase {
   readonly objectStoreNames = { contains: (name: string) => this.stores.has(name) }
   close = () => {}
 
-  constructor(readonly stores: Map<string, Map<string, unknown>>) {}
+  readonly stores: Map<string, Map<string, unknown>>
+
+  constructor(stores: Map<string, Map<string, unknown>>) {
+    this.stores = stores
+  }
 
   createObjectStore(name: string) {
     if (!this.stores.has(name)) this.stores.set(name, new Map<string, unknown>())
@@ -230,7 +244,7 @@ export class FakeElement {
 
   remove() {
     if (!this.parent) return
-    this.parent.children = this.parent.children.filter((item) => item !== this)
+    ;(this.parent as { children: unknown[] }).children = this.parent.children.filter((item) => item !== this)
     this.parent = null
   }
 
@@ -340,7 +354,7 @@ export const installBrowserEnv = (options: { storage?: Pick<Storage, 'getItem' |
   return {
     document: documentStub,
     window: windowStub,
-    storage,
+    storage: storage as MemoryStorage,
     lastDownload: () => {
       const anchor = documentStub.querySelectorAll('a').at(-1) ?? detached.filter((item) => item.tagName === 'a').at(-1)
       return anchor ? { href: anchor.href, download: anchor.download, clicks: anchor.clicks } : null
@@ -353,3 +367,5 @@ export const installBrowserEnv = (options: { storage?: Pick<Storage, 'getItem' |
     },
   }
 }
+
+export type { StoredModelAsset } from '../../src/domain/types'

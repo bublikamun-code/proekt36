@@ -71,7 +71,6 @@ test('тянет провод от видимой шины N к клемме', a
   await terminal(page, 'qf03:1:top').click()
   await page.locator('[data-terminal-bus="bus-n-bottom"]').click()
 
-  const wire = wires(page).first()
   await expect(wires(page)).toHaveCount(1)
   // A neutral is blue on the board, and the badge says N rather than L1.
   await expect(page.locator('.wires .wire-n').first()).toHaveCount(1)

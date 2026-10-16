@@ -3,3 +3,6 @@ Allow: /
 Disallow: /app
 Disallow: /login
 Disallow: /register
+# The demo board is reachable without an account but the page itself asks robots not to index it;
+# robots.txt has to carry it too, because the noindex tag is set by script after the first paint.
+Disallow: /demo/project

@@ -215,8 +215,7 @@ describe('отказы проверки схемы', () => {
 
     let thrown: unknown
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const unused = project
+      void project
     } catch (error) { thrown = error }
     expect(thrown).toBeUndefined()
 
@@ -233,7 +232,7 @@ describe('резервная копия рабочей области', () => {
     env = installBrowserEnv()
     vi.useFakeTimers()
     const library: StoredModelLibrary = {
-      assets: [{ id: 'model-1', name: 'Модель', fileName: 'model-1.glb', format: 'glb', mimeType: 'model/gltf-binary', bytes: 12, createdAt: '2026-01-01T00:00:00.000Z' }],
+      assets: [{ id: 'model-1', name: 'Модель', source: 'local', fileName: 'model-1.glb', format: 'glb', transform: { rotationY: 0, scale: 1 }, createdAt: '2026-01-01T00:00:00.000Z' }],
       products: [],
       bindings: {},
     }
@@ -339,8 +338,8 @@ describe('резервная копия рабочей области', () => {
     expect(restored.projects[0]!.schemaVersion).toBe(PROJECT_SCHEMA_VERSION)
     // A v2 board had no bars to name, so migration builds the two its own wires ask for and
     // anchors them by kind — that is the whole v2→v3 step.
-    expect(restored.projects[0]!.busAssemblies.map((bus) => bus.kind)).toEqual(['N', 'PE'])
-    const bars = new Set(restored.projects[0]!.busAssemblies.map((bus) => bus.id))
+    expect(restored.projects[0]!.busAssemblies!.map((bus) => bus.kind)).toEqual(['N', 'PE'])
+    const bars = new Set(restored.projects[0]!.busAssemblies!.map((bus) => bus.id))
     expect(restored.projects[0]!.connections.every((wire) => bars.has(wire.busId ?? ''))).toBe(true)
   })
 

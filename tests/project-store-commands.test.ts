@@ -5,9 +5,9 @@ import { createProject } from '../src/domain/project'
 import { PROJECT_LIMITS } from '../src/domain/projectSchema'
 import { deviceTerminals } from '../src/domain/terminals'
 import { useProjectStore } from '../src/stores/project'
-import { builtinCatalog } from '../src/data/catalog'
+import { workspaceCatalog } from '../src/data/catalog'
 import { MemoryStorage, ThrowingStorage, createFakeIndexedDB, installBrowserEnv, resetFakeIndexedDB } from './support/browser-env'
-import type { BrowserEnv } from './support/browser-env'
+import type { BrowserEnv , StoredModelAsset } from './support/browser-env'
 import type { PanelProject } from '../src/domain/types'
 
 let env: BrowserEnv | null = null
@@ -412,7 +412,7 @@ describe('выделение и правка аппарата', () => {
     store.selectedDeviceId = store.currentProject.devices[0]!.instanceId
     store.updateSelected({ address: 'QF99' })
     const device = store.currentProject.devices[0]!
-    store.addBusWire(store.currentProject.busAssemblies[0]!.id, { deviceId: device.instanceId, pole: 1, side: 'top' })
+    store.addBusWire(store.currentProject.busAssemblies![0]!.id, { deviceId: device.instanceId, pole: 1, side: 'top' })
     const wire = store.currentProject.connections.at(-1)!
     const before = wire.label
     expect(before).toContain('QF99')
@@ -428,7 +428,7 @@ describe('выделение и правка аппарата', () => {
 describe('гребёнки', () => {
   it('не добавляет гребёнку в пустой ряд', () => {
     const store = openStore()
-    const before = store.currentProject.combs.length
+    const before = store.currentProject.combs!.length
 
     store.addComb(9, 2)
 
@@ -444,7 +444,7 @@ describe('гребёнки', () => {
 
     store.addComb(row, 2)
 
-    const comb = store.currentProject.combs.at(-1)!
+    const comb = store.currentProject.combs!.at(-1)!
     const fed = inRow.filter((item) => item.slot >= comb.fromSlot && item.slot <= comb.toSlot)
     // A comb is a part of a fixed length; covering the whole row would draw a two-tooth bar
     // across six devices, which no installer would recognise.
@@ -457,11 +457,11 @@ describe('гребёнки', () => {
     const store = openStore()
     const row = 0
     store.addComb(row, 2)
-    const comb = store.currentProject.combs.at(-1)!
+    const comb = store.currentProject.combs!.at(-1)!
 
     store.updateComb(comb.id, { fromSlot: comb.toSlot + 2, toSlot: comb.fromSlot })
 
-    const updated = store.currentProject.combs.at(-1)!
+    const updated = store.currentProject.combs!.at(-1)!
     expect(updated.fromSlot).toBeLessThanOrEqual(updated.toSlot)
   })
 
@@ -478,8 +478,8 @@ describe('гребёнки', () => {
   it('удаляет гребёнку', () => {
     const store = openStore()
     store.addComb(0, 1)
-    const comb = store.currentProject.combs.at(-1)!
-    const before = store.currentProject.combs.length
+    const comb = store.currentProject.combs!.at(-1)!
+    const before = store.currentProject.combs!.length
 
     store.removeComb(comb.id)
 
@@ -549,7 +549,7 @@ describe('провода между клеммами', () => {
     const { store } = twoDevices()
     store.addDevice('ekf-rcbo-1p-c16', 1, 8)
     const linked = store.currentProject.devices.find((item) => item.productId === 'ekf-rcbo-1p-c16')!
-    const product = builtinCatalog.find((item) => item.id === 'ekf-rcbo-1p-c16')!
+    const product = workspaceCatalog.find((item) => item.id === 'ekf-rcbo-1p-c16')!
     const neutral = deviceTerminals(product).find((item) => item.type === 'neutral')
     expect(neutral).toBeDefined()
     const target = store.currentProject.devices.find((item) => item.mount === 'din' && item.instanceId !== linked.instanceId)!
@@ -582,7 +582,7 @@ describe('провода между клеммами', () => {
 
   it('тянет провод от видимой шины и не даёт занять клемму дважды', () => {
     const { store, first } = twoDevices()
-    const bus = store.currentProject.busAssemblies[0]!
+    const bus = store.currentProject.busAssemblies![0]!
     const to = { deviceId: first.instanceId, pole: 1, side: 'top' as const }
 
     expect(store.addBusWire(bus.id, to)).toBe(true)
@@ -594,7 +594,7 @@ describe('провода между клеммами', () => {
     const { store, first } = twoDevices()
 
     expect(store.addBusWire('нет', { deviceId: first.instanceId, pole: 1, side: 'top' })).toBe(false)
-    expect(store.addBusWire(store.currentProject.busAssemblies[0]!.id, { deviceId: 'нет', pole: 1, side: 'top' })).toBe(false)
+    expect(store.addBusWire(store.currentProject.busAssemblies![0]!.id, { deviceId: 'нет', pole: 1, side: 'top' })).toBe(false)
   })
 })
 
@@ -774,13 +774,13 @@ describe('история изменений', () => {
 })
 
 describe('модельная библиотека', () => {
-  const asset = (id: string) => ({
+  const asset = (id: string): StoredModelAsset => ({
     id,
     name: 'Модель',
+    source: 'local',
     fileName: `${id}.glb`,
-    format: 'glb' as const,
-    mimeType: 'model/gltf-binary',
-    bytes: 4,
+    format: 'glb',
+    transform: { rotationY: 0, scale: 1 },
     createdAt: '2026-01-01T00:00:00.000Z',
   })
 

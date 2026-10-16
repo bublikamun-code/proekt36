@@ -1,5 +1,5 @@
-import { DEVICE_CATEGORIES } from '../../domain/types'
-import type { Category, DeviceDefinition, VerificationStatus } from '../../domain/types'
+import { DEVICE_CATEGORIES } from './types'
+import type { Category, DeviceDefinition, VerificationStatus } from './types'
 
 /** The JSON data files are edited by hand and generated; this is the shape gate between them. */
 export interface CatalogIssue {
@@ -9,7 +9,7 @@ export interface CatalogIssue {
   message: string
 }
 
-const STATUSES: readonly VerificationStatus[] = ['verified', 'template', 'legacy']
+const STATUSES: readonly VerificationStatus[] = ['verified', 'unverified', 'template', 'legacy']
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 const isNumber = (value: unknown, min: number, max: number): value is number =>

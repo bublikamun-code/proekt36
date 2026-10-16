@@ -67,7 +67,7 @@ describe('strict project schema and migrations', () => {
     expect(migrated.combs).toEqual([])
     // Only the buses the old lines actually used are created, so the plate is not littered
     // with an empty PE bar the project never needed.
-    expect(migrated.busAssemblies?.map((bus) => bus.kind).sort()).toEqual(['N', 'PE'])
+    expect(migrated.busAssemblies!?.map((bus) => bus.kind).sort()).toEqual(['N', 'PE'])
     expect(migrated.connections.map((connection) => connection.busId)).toEqual([undefined, 'bus-n-bottom', 'bus-pe-bottom'])
     expect(validateProjectSchema(migrated).errors).toEqual([])
   })
@@ -76,14 +76,14 @@ describe('strict project schema and migrations', () => {
     const migrated = migrateProject({ ...structuredClone(createProject('Только фаза', 'demo')), schemaVersion: 2, busAssemblies: undefined, connections: [] } as never)
     // A board fed only from L still gets both bars, exactly as `createProject` gives them.
     // Deciding from the old wires would leave it with nowhere to anchor a line it grows later.
-    expect(migrated.busAssemblies.map((bus) => bus.kind)).toEqual(['N', 'PE'])
+    expect(migrated.busAssemblies!.map((bus) => bus.kind)).toEqual(['N', 'PE'])
   })
 
   it('keeps the bars a v2 project already had instead of replacing them with the defaults', () => {
     const own = [{ id: 'bus-n-top', kind: 'N' as const, placement: 'top' as const, label: 'N верх' }]
     const migrated = migrateProject({ ...structuredClone(createProject('Со своими шинами', 'demo')), schemaVersion: 2, busAssemblies: own, connections: [] } as never)
 
-    expect(migrated.busAssemblies).toEqual(own)
+    expect(migrated.busAssemblies!).toEqual(own)
   })
 
   it('rejects a jumper without both ends and a line pointing at a removed bus', () => {

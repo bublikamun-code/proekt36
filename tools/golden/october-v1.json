@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "v1",
+  "name": "Старая",
+  "devices": [
+    { "instanceId": "d1", "productId": "ekf-mcb-1p-c6", "row": 0, "slot": 0, "address": "QF1", "quantity": 2, "phase": 9, "note": "", "mount": "din" }
+  ],
+  "circuits": [
+    { "id": "c1", "name": "Свет", "loadName": "Свет", "current": "6", "power": 100, "phase": 1, "protectionDeviceId": "d1", "color": "#fff", "wireCrossSection": 1.5, "note": "" }
+  ],
+  "connections": [
+    { "id": "w1", "circuitId": "c1", "fromBus": "L", "toDeviceId": "d1", "color": "#fff", "thickness": 2, "label": "L" }
+  ]
+}

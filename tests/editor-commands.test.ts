@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { builtinCatalog } from '../src/data/catalog'
+import { workspaceCatalog } from '../src/data/catalog'
 import { compactRow, evaluateCabinetMigration, getFootprintModules } from '../src/domain/layout'
 import { createDevice, createProject } from '../src/domain/project'
-import type { DeviceDefinition, PlacedDevice } from '../src/domain/types'
+import type { PlacedDevice } from '../src/domain/types'
 import { useProjectStore } from '../src/stores/project'
 
 class MemoryStorage {
@@ -24,7 +24,7 @@ const setupStore = () => {
   return useProjectStore()
 }
 
-const catalog = new Map(builtinCatalog.map((product) => [product.id, product]))
+const catalog = new Map(workspaceCatalog.map((product) => [product.id, product]))
 const oneModule = catalog.get('ekf-mcb-1p-c6')!
 const threeModule = { ...oneModule, id: 'three-module', moduleWidth: 3 }
 const definitions = new Map([...catalog, [threeModule.id, threeModule]] as const)

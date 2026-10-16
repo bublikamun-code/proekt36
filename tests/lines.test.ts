@@ -77,7 +77,7 @@ describe('схема v4: помещения и поля линии', () => {
       ...blankProject(),
       schemaVersion: 3,
       rooms: [{ id: 'r1', name: 'Кухня', floor: 2 }],
-      circuits: [{ id: 'c1', name: 'Свет', protectionDeviceId: '', roomId: 'r1' }],
+      circuits: [{ id: 'c1', name: 'Свет', loadName: 'Свет', current: 6, power: 1200, phase: 1, protectionDeviceId: '', color: '', wireCrossSection: 1.5, note: '', roomId: 'r1' }],
     })
     expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION)
     expect(migrated.rooms).toHaveLength(1)

@@ -2,17 +2,18 @@ import type { TerminalRef } from './terminals'
 
 export type Phase = 1 | 3
 
-export const DEVICE_CATEGORIES = [
-  'MCB', 'RCCB', 'RCBO', 'SPD', 'relay', 'terminals', 'busbar', 'meter', 'PSU',
-] as const
-
-export type Category = typeof DEVICE_CATEGORIES[number]
-
-export type BusType = 'L' | 'N' | 'PE'
+/**
+ * Модель каталога (Category, BusType, VerificationStatus, DeviceDefinition,
+ * DEVICE_CATEGORIES) определена в самом каталоге и реэкспортируется здесь:
+ * источник правды один, домен потребляет.
+ */
+import type { Category, BusType, VerificationStatus, DeviceDefinition } from '../data/catalog/types'
+import { DEVICE_CATEGORIES } from '../data/catalog/types'
+export type { Category, BusType, VerificationStatus, DeviceDefinition }
+export { DEVICE_CATEGORIES }
 
 export type RailSlotCount = 12 | 18
 export type EnclosureMountingType = 'embedded' | 'surface'
-export type VerificationStatus = 'verified' | 'template' | 'legacy'
 
 export interface RailDefinition {
   id: 'rail-12' | 'rail-18'
@@ -109,32 +110,6 @@ export interface RowComb {
   fromSlot: number
   toSlot: number
   label?: string
-}
-
-export interface DeviceDefinition {
-  id: string
-  name: string
-  brand: string
-  sku: string
-  category: Category
-  moduleWidth: number
-  poles: number
-  ratedCurrent: number
-  voltage: 230 | 400
-  bus: BusType
-  price: number
-  weight: number
-  height: number
-  depth: number
-  imported?: boolean
-  /** Link to a ModelAsset; visual only, never part of the electrical model. */
-  modelId?: string
-  series?: string
-  tripCurve?: 'B' | 'C' | 'D'
-  residualCurrentMa?: number
-  terminalCount?: number
-  sourceUrl?: string
-  verificationStatus?: VerificationStatus
 }
 
 export type ModelFormat = 'glb' | 'gltf' | 'gltf-zip'
