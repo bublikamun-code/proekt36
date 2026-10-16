@@ -34,6 +34,7 @@ const device = (product) => ({
   weight: product.weight,
   height: product.height,
   depth: product.depth,
+  modelId: product.modelId,
   series: product.series,
   tripCurve: product.tripCurve,
   residualCurrentMa: product.residualCurrentMa,
@@ -60,6 +61,7 @@ const enmas = (id, name, sku, category, moduleWidth, poles, ratedCurrent, option
   tripCurve: options.tripCurve,
   residualCurrentMa: options.residualCurrentMa,
   terminalCount: options.terminalCount,
+  modelId: options.modelId,
   sourceUrl: options.sourceUrl,
   verificationStatus: options.verificationStatus ?? 'verified',
 })
@@ -85,6 +87,8 @@ for (const poles of [1, 2, 3, 4]) {
         {
           series: 'NB1-63H',
           tripCurve: curve,
+          // The NB1-63 STEP files from the manufacturer cover every pole count.
+          modelId: `chint-nb1-63-${poles}p`,
           // Only the B curve has a photographed datasheet behind it; C and D follow the series.
           verificationStatus: curve === 'B' ? 'template' : 'verified',
           sourceUrl: NB1_SOURCE,
@@ -130,6 +134,8 @@ for (const poles of [1, 2]) {
             series: 'NB1L',
             tripCurve: curve,
             residualCurrentMa,
+            // The 36 mm STEP file matches only the linked 1P+N build; the 2P listing stays unbound.
+            modelId: poles === 1 ? 'chint-nb1l-1pn-36' : undefined,
             verificationStatus: 'verified',
             sourceUrl: NB1L_SOURCE,
             height: 86,

@@ -4,14 +4,14 @@ import type { DeviceDefinition, ModelAsset } from '../../domain/types'
 import { getThumbnail } from '../../services/modelRender'
 import DeviceChassis from './deviceFace/DeviceChassis.vue'
 import DeviceFace from './deviceFace/DeviceFace.vue'
-import City9Face from './deviceFace/City9Face.vue'
+import ChintFace from './deviceFace/ChintFace.vue'
 import { getDeviceFaceMetrics, faceShellFamily } from './deviceFace/metrics'
 
 const props = defineProps<{ product: DeviceDefinition; model?: ModelAsset | null; width?: number; height?: number }>()
 
 const face = computed(() => getDeviceFaceMetrics(props.product))
-/** City9 MCBs carry their own drawing-exact face instead of the generic one. */
-const isCity9 = computed(() => faceShellFamily(props.product) === 'city9' && props.product.category === 'MCB')
+/** The CHINT NB/NL platform follows its own manufacturer drawings. */
+const isChint = computed(() => faceShellFamily(props.product) === 'chint' && ['MCB', 'RCCB', 'RCBO'].includes(props.product.category))
 const isBusbar = computed(() => props.product.category === 'busbar')
 const busbarLabel = computed(() => (props.product.series === 'FORK' ? 'FORK' : 'BUS'))
 const busbarTicks = computed(() => Array.from({ length: Math.max(1, face.value.moduleWidth) }, (_, index) => face.value.body.x + 1.2 + (index * (face.value.body.width - 2.4)) / face.value.moduleWidth))
@@ -52,8 +52,8 @@ watch(() => props.model, (asset) => {
       <path class="dv-busbar-tick" :d="busbarTicks.map((x) => `M ${x} ${face.body.y + face.body.height * 0.3} V ${face.body.y + face.body.height * 0.7}`).join(' ')" />
       <text v-if="face.detail !== 'minimal'" class="dv-label" :x="face.widthMm / 2" :y="face.body.y + face.body.height * 0.88" font-size="2.4" font-weight="700" text-anchor="middle">{{ busbarLabel }}</text>
     </g>
-    <template v-else-if="isCity9">
-      <City9Face :product="product" />
+    <template v-else-if="isChint">
+      <ChintFace :product="product" />
     </template>
     <template v-else>
       <DeviceChassis :product="product" :metrics="face" />
