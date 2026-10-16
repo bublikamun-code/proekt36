@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 3,
+  "id": "b92a2dc6-6abb-44c2-ba59-25195563bb0d",
+  "name": "Золотой сентябрьский щит",
+  "preset": "apartment",
+  "createdAt": "2026-10-16T21:26:09.826Z",
+  "updatedAt": "2026-10-16T21:26:09.826Z",
+  "settings": {
+    "inputCurrent": 63,
+    "phase": 1,
+    "enclosureWidth": 310,
+    "enclosureHeight": 350,
+    "enclosureDepth": 105,
+    "rows": 2,
+    "reserveModules": 8,
+    "cabinetId": "enmas-nx8-24-embedded",
+    "railId": "rail-12"
+  },
+  "devices": [
+    {
+      "instanceId": "gd-dev-1",
+      "productId": "ekf-mcb-1p-c6",
+      "row": 0,
+      "slot": 0,
+      "address": "",
+      "quantity": 1,
+      "phase": 1,
+      "note": "",
+      "marking": "",
+      "mount": "din"
+    },
+    {
+      "instanceId": "gd-dev-2",
+      "productId": "ekf-rccb-2p-25",
+      "row": 0,
+      "slot": 1,
+      "address": "",
+      "quantity": 1,
+      "phase": 1,
+      "note": "",
+      "marking": "",
+      "mount": "din"
+    }
+  ],
+  "circuits": [
+    {
+      "id": "gd-cir-1",
+      "name": "Розетки кухни",
+      "loadName": "Розетки кухни",
+      "current": 16,
+      "power": 3500,
+      "phase": 1,
+      "protectionDeviceId": "gd-dev-1",
+      "color": "#c2410c",
+      "wireCrossSection": 2.5,
+      "note": ""
+    }
+  ],
+  "connections": [],
+  "busAssemblies": [
+    {
+      "id": "gd-bus-n",
+      "kind": "N",
+      "placement": "top"
+    }
+  ],
+  "combs": []
+}
