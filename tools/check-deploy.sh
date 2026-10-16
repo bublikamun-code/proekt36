@@ -16,7 +16,7 @@ code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE/")
 [ "$code" = 200 ] && ok "главная отвечает (200)" || { bad "главная: $code вместо 200 — контейнер не запущен?"; }
 
 # 2) Заголовки безопасности (главный признак свежего nginx-конфига)
-h=$(hdr GET /)
+h=$(hdr /)
 case "$h" in
   *Content-Security-Policy:*frame-ancestors*) ok "CSP заголовком, включая frame-ancestors" ;;
   *Content-Security-Policy:*) bad "CSP есть, но без frame-ancestors — частично старый конфиг" ;;
@@ -36,7 +36,7 @@ for p in /manifest.webmanifest /favicon.ico /offline.html /sw.js; do
   c=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE$p")
   [ "$c" = 200 ] && ok "$p → 200" || bad "$p → $c"
 done
-model=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE/models/city9-mcb-2p.glb")
+model=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE/models/chint-nb1-63-1p.glb")
 [ "$model" = 200 ] && ok "3D-модель → 200" || bad "3D-модель → $model"
 
 # 5) Кэш-политика статики
