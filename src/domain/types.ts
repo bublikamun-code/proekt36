@@ -1,30 +1,17 @@
 export type Phase = 1 | 3
 
-export type Category =
-  | 'MCB'
-  | 'RCCB'
-  | 'RCBO'
-  | 'SPD'
-  | 'relay'
-  | 'terminals'
-  | 'busbar'
-  | 'meter'
-  | 'PSU'
-
-export type BusType = 'L' | 'N' | 'PE'
+/**
+ * Модель каталога (Category, BusType, VerificationStatus, DeviceDefinition,
+ * DEVICE_CATEGORIES) определена в самом каталоге и реэкспортируется здесь:
+ * источник правды один, домен потребляет.
+ */
+import type { Category, BusType, VerificationStatus, DeviceDefinition } from '../data/catalog/types'
+import { DEVICE_CATEGORIES } from '../data/catalog/types'
+export type { Category, BusType, VerificationStatus, DeviceDefinition }
+export { DEVICE_CATEGORIES }
 
 export type RailSlotCount = 12 | 18
 export type EnclosureMountingType = 'embedded' | 'surface'
-/**
- * How far a catalogue position has been checked.
- *
- * `unverified` is the state most of the built-in catalogue is in: the position names a real
- * product, but its parameters were never compared against a manufacturer datasheet, and no
- * `sourceUrl` is claimed for it. It used to have no status at all and the UI said «Статус не
- * указан», which reads like unfinished data rather than a deliberate statement — the field is
- * now required on `DeviceDefinition`, so a new producer cannot forget it again.
- */
-export type VerificationStatus = 'verified' | 'unverified' | 'template' | 'legacy'
 
 export interface RailDefinition {
   id: 'rail-12' | 'rail-18'
@@ -97,38 +84,6 @@ export interface Connection {
   terminal?: number
   /** The same choice for the device the wire leaves from, for the same reason. */
   fromTerminal?: number
-}
-
-export interface DeviceDefinition {
-  id: string
-  name: string
-  brand: string
-  sku: string
-  category: Category
-  moduleWidth: number
-  poles: number
-  ratedCurrent: number
-  voltage: 230 | 400
-  bus: BusType
-  price: number
-  weight: number
-  height: number
-  depth: number
-  color: string
-  imported?: boolean
-  modelAssetId?: string
-  modelPreviewUrl?: string
-  modelPreviewRotationY?: number
-  series?: string
-  tripCurve?: 'B' | 'C' | 'D'
-  residualCurrentMa?: number
-  terminalCount?: number
-  sourceUrl?: string
-  /**
-   * Required: a position without a status is indistinguishable from a position nobody looked at.
-   * Producers outside the catalogue set it to `unverified` (see `VerificationStatus`).
-   */
-  verificationStatus: VerificationStatus
 }
 
 export interface PlacedDevice {

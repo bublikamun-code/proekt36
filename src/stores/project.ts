@@ -1,6 +1,6 @@
 import { computed, ref, toRaw, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { builtinCatalog, workspaceCatalog } from '../data/catalog'
+import { workspaceCatalog } from '../data/catalog'
 import {
   compactRow,
   evaluateCabinetMigration,
@@ -56,7 +56,7 @@ const seedProject = () => {
   project.id = 'sample-apartment'
   project.schemaVersion = PROJECT_SCHEMA_VERSION
   project.settings = { inputCurrent: 40, phase: 1, enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9, reserveModules: 8 }
-  const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
+  const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
   const products = [
     definitions.get('ekf-spd-t1-3p-n-pe')!, definitions.get('ekf-mcb-4p-b32')!,
     definitions.get('ekf-rccb-4p-40')!, definitions.get('ekf-mcb-1p-c6')!,

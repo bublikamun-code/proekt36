@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { builtinCatalog } from '../src/data/catalog'
+import { builtinCatalog, workspaceCatalog } from '../src/data/catalog'
 import { cabinetById, cabinetSpecLabel, railById } from '../src/data/enclosures'
 import { getEnclosureMinimum, getFreeSlots, getRowCapacity, moveDevice, placeProduct, resolveDeviceMove } from '../src/domain/layout'
 import { getPanelGeometry } from '../src/domain/panelGeometry'
 import { createDevice, createProject, migrateProject } from '../src/domain/project'
 import type { DeviceDefinition } from '../src/domain/types'
 
-const definitions = new Map(builtinCatalog.map((product) => [product.id, product]))
+const definitions = new Map(workspaceCatalog.map((product) => [product.id, product]))
 const product = (id: string, width: number): DeviceDefinition => ({ ...definitions.get('ekf-mcb-1p-c6')!, id, moduleWidth: width })
 const legacyProject = () => migrateProject({ settings: { enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9 } })
 
@@ -157,7 +157,7 @@ describe('slot layout', () => {
 })
 
 describe('catalog enclosure dimensions', () => {
-  const catalog = new Map(builtinCatalog.map((item) => [item.id, item]))
+  const catalog = new Map(workspaceCatalog.map((item) => [item.id, item]))
 
   it('stores the TEHNOPLAST C series at its published millimetre dimensions', () => {
     const expected: [string, { width: number; height: number; depth: number; rows: number; modules: number; railId: string }][] = [
@@ -213,7 +213,7 @@ describe('catalog enclosure dimensions', () => {
 
 describe('physical panel geometry', () => {
   it('uses 18 mm for 12- and 18-module catalog rails', () => {
-    const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
+    const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
     const rail12 = createProject('12', 'test', { cabinetId: 'panel36-12-embedded', railId: 'rail-12' })
     const rail18 = createProject('18', 'test', { cabinetId: 'panel36-18-r18-embedded', railId: 'rail-18' })
 
@@ -222,7 +222,7 @@ describe('physical panel geometry', () => {
   })
 
   it('keeps the 17.5 mm fallback for legacy projects', () => {
-    const geometry = getPanelGeometry(legacyProject(), new Map(builtinCatalog.map((item) => [item.id, item])))
+    const geometry = getPanelGeometry(legacyProject(), new Map(workspaceCatalog.map((item) => [item.id, item])))
     expect(geometry.capacity).toBe(29)
     expect(geometry.modulePitchMm).toBe(17.5)
     expect(geometry.railWidthMm).toBe(507.5)

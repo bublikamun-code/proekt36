@@ -59,7 +59,7 @@ const products = computed(() => {
 const verificationLabel = (product: DeviceDefinition) => {
   if (product.verificationStatus === 'verified') return ''
   if (product.imported) return 'Импорт, не проверено'
-  return VERIFICATION_LABELS[product.verificationStatus]
+  return VERIFICATION_LABELS[product.verificationStatus ?? 'unverified']
 }
 
 const browse = () => fileInput.value?.click()
