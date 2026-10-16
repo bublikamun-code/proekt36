@@ -51,16 +51,26 @@ export const normalizeDevice = (value: unknown): PlacedDevice | null => {
   }
 }
 
-/** Normalize a circuit without dropping any v1/v2 field. */
-export const normalizeCircuit = (value: unknown): Circuit => {
+/**
+ * Normalize a circuit without dropping any v1/v2 field.
+ *
+ * `preV5` marks records written before the phase split: there `phase: 3` could mean either
+ * a single-phase line on L3 or a three-phase line, so the migration keeps the L3 reading and
+ * raises `phaseAmbiguous` for the clarification dialog. Guessing from the power is forbidden —
+ * both old formats are ambiguous the same way. A v5 record already says what it means and
+ * keeps (or deliberately clears) its own flag.
+ */
+export const normalizeCircuit = (value: unknown, preV5 = false): Circuit => {
   const raw = asRecord(value)
+  const phase = asPhase(raw.phase)
   return {
     id: asText(raw.id, uid()),
     name: asText(raw.name, 'Без названия'),
     loadName: asText(raw.loadName, asText(raw.name, 'Без названия')),
     current: asNumber(raw.current, 0, 0, 10000),
     power: asNumber(raw.power, 0, 0, 10000000),
-    phase: asPhase(raw.phase),
+    phase,
+    phaseCount: raw.phaseCount === 3 ? 3 : 1,
     protectionDeviceId: asText(raw.protectionDeviceId),
     color: asText(raw.color, '#c65c3b'),
     wireCrossSection: asNumber(raw.wireCrossSection, 1.5, 0, 1000),
@@ -70,6 +80,7 @@ export const normalizeCircuit = (value: unknown): Circuit => {
     roomId: asText(raw.roomId) || undefined,
     kind: (CIRCUIT_KINDS as readonly string[]).includes(String(raw.kind)) ? raw.kind as Circuit['kind'] : 'power',
     cableLength: asNumber(raw.cableLength, 0, 0, 1000),
+    phaseAmbiguous: preV5 && phase === 3 ? true : raw.phaseAmbiguous === true ? true : undefined,
   }
 }
 
@@ -206,7 +217,7 @@ export const migrateProject = (input: Partial<PanelProject> | null | undefined):
     updatedAt: asText(source.updatedAt, now),
     settings: normalizeSettings(source.settings),
     devices: Array.isArray(source.devices) ? source.devices.map(normalizeDevice).filter((item): item is PlacedDevice => Boolean(item)) : [],
-    circuits: Array.isArray(source.circuits) ? source.circuits.map(normalizeCircuit) : [],
+    circuits: Array.isArray(source.circuits) ? source.circuits.map((circuit) => normalizeCircuit(circuit, sourceVersion < PROJECT_SCHEMA_VERSION)) : [],
     connections,
     busAssemblies,
     combs: Array.isArray(source.combs) ? source.combs.map(normalizeRowComb).filter((item): item is RowComb => Boolean(item)) : [],

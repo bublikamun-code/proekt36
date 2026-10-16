@@ -77,11 +77,36 @@ describe('схема v4: помещения и поля линии', () => {
       ...blankProject(),
       schemaVersion: 3,
       rooms: [{ id: 'r1', name: 'Кухня', floor: 2 }],
-      circuits: [{ id: 'c1', name: 'Свет', loadName: 'Свет', current: 6, power: 1200, phase: 1, protectionDeviceId: '', color: '', wireCrossSection: 1.5, note: '', roomId: 'r1' }],
+      circuits: [{ id: 'c1', name: 'Свет', loadName: 'Свет', current: 6, power: 1200, phase: 1, phaseCount: 1, protectionDeviceId: '', color: '', wireCrossSection: 1.5, note: '', roomId: 'r1' }],
     })
     expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION)
     expect(migrated.rooms).toHaveLength(1)
     expect(migrated.circuits[0]!.roomId).toBe('r1')
+  })
+
+  it('миграция v5 помечает старое «phase: 3» неоднозначным и не трогает явный выбор', () => {
+    // A real v4 record carries no phaseCount; building it through JSON keeps the input honest.
+    const legacy = JSON.parse(JSON.stringify({
+      ...blankProject(),
+      schemaVersion: 4,
+      circuits: [
+        { id: 'old-l3', name: 'Старая', loadName: 'Старая', current: 9, power: 0, phase: 3, protectionDeviceId: '', color: '', wireCrossSection: 2.5, note: '' },
+        { id: 'old-l1', name: 'Ясная', loadName: 'Ясная', current: 6, power: 0, phase: 1, protectionDeviceId: '', color: '', wireCrossSection: 1.5, note: '' },
+      ],
+    })) as Partial<PanelProject>
+    const migrated = migrateProject(legacy)
+    expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION)
+    expect(migrated.circuits[0]).toMatchObject({ phase: 3, phaseCount: 1, phaseAmbiguous: true })
+    expect(migrated.circuits[1]).toMatchObject({ phase: 1, phaseCount: 1 })
+    expect(migrated.circuits[1]!.phaseAmbiguous).toBeUndefined()
+
+    const explicit = migrateProject({
+      ...blankProject(),
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      circuits: [{ id: 'chosen', name: 'Насос', loadName: 'Насос', current: 6, power: 0, phase: 3, phaseCount: 3, protectionDeviceId: '', color: '', wireCrossSection: 2.5, note: '' }],
+    })
+    expect(explicit.circuits[0]).toMatchObject({ phase: 3, phaseCount: 3 })
+    expect(explicit.circuits[0]!.phaseAmbiguous).toBeUndefined()
   })
 
   it('валидатор отвергает нереальную длину кабеля и битую комнату', () => {
@@ -94,7 +119,7 @@ describe('схема v4: помещения и поля линии', () => {
     // Полевая проверка: длина за пределами.
     const withBadLength = base()
     withBadLength.circuits = [{
-      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1,
+      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1, phaseCount: 1,
       protectionDeviceId: 'qf1', color: '#fff', wireCrossSection: 1.5, note: '',
       roomId: 'r1', cableLength: 5000,
     }]
@@ -104,7 +129,7 @@ describe('схема v4: помещения и поля линии', () => {
     // Ссылочная проверка: поля в порядке, комната не существует.
     const withBadRoom = base()
     withBadRoom.circuits = [{
-      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1,
+      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1, phaseCount: 1,
       protectionDeviceId: 'qf1', color: '#fff', wireCrossSection: 1.5, note: '',
       roomId: 'нет-такого', cableLength: 25,
     }]
@@ -118,7 +143,7 @@ describe('схема v4: помещения и поля линии', () => {
     project.rooms = [{ id: 'r1', name: 'Кухня', floor: 1 }]
     project.devices = [{ instanceId: 'qf1', productId: 'ekf-mcb-1p-c6', row: 0, slot: 0, address: 'QF01', quantity: 1, phase: 1, note: '', marking: 'QF01', mount: 'din' }]
     project.circuits = [{
-      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1,
+      id: 'c1', name: 'Свет', loadName: 'Свет', current: 1, power: 0, phase: 1, phaseCount: 1,
       protectionDeviceId: 'qf1', color: '#fff', wireCrossSection: 1.5, note: '',
       roomId: 'r1', kind: 'light', cableLength: 25,
     }]
@@ -253,7 +278,7 @@ describe('бирка и проверки линии', () => {
     const store = openStore()
     const project = store.currentProject
     project.circuits = [{
-      id: 'c1', name: 'Далёкие розетки', loadName: 'Розетки', current: 20, power: 0, phase: 1,
+      id: 'c1', name: 'Далёкие розетки', loadName: 'Розетки', current: 20, power: 0, phase: 1, phaseCount: 1,
       protectionDeviceId: '', color: '#fff', wireCrossSection: 1.5, note: '',
       cableLength: 50, kind: 'power',
     }]

@@ -22,6 +22,10 @@ const PHASE_OPTIONS: AppSelectOption[] = [
   { value: '2', label: 'L2' },
   { value: '3', label: 'L3' },
 ]
+const PHASE_COUNT_OPTIONS: AppSelectOption[] = [
+  { value: '1', label: '1 фаза' },
+  { value: '3', label: '3 фазы' },
+]
 const SUPPLY_PHASE_OPTIONS: AppSelectOption[] = [
   { value: '1', label: '1 фаза' },
   { value: '3', label: '3 фазы' },
@@ -341,12 +345,14 @@ const migrationIssueLabel = (code: string) => ({
       <p class="microcopy">Цепь связывает выбранное устройство с защитным аппаратом. Нагрузка и баланс фаз считаются по цепям.</p>
       <div v-for="circuit in currentProject.circuits" :key="circuit.id" class="circuit-card">
         <div class="circuit-card-head"><strong>{{ circuit.name }}</strong><button class="icon-button danger" :aria-label="`Удалить цепь ${circuit.name}`" @click="removeCircuit(circuit.id, circuit.name)">×</button></div>
+        <p v-if="circuit.phaseAmbiguous" class="microcopy phase-ambiguous">«3» в этом старом проекте означало либо L3, либо трёхфазную линию. Выберите «Фазы линии» — после явного выбора предупреждение уйдёт, а баланс фаз станет точным.</p>
         <div class="form-grid compact-form">
           <label>Название<input :value="circuit.name" @change="store.updateCircuit(circuit.id, { name: ($event.target as HTMLInputElement).value })" /></label>
           <label>Нагрузка<input :value="circuit.loadName" @change="store.updateCircuit(circuit.id, { loadName: ($event.target as HTMLInputElement).value })" /></label>
           <label>Ток, А<input :value="circuit.current" type="number" min="0" step="0.1" @change="changeCircuitNumber(circuit.id, 'current', $event)" /></label>
           <label>Мощность, Вт<input :value="circuit.power" type="number" min="0" step="1" @change="changeCircuitNumber(circuit.id, 'power', $event)" /></label>
-          <label>Фаза<AppSelect label="Фаза" :model-value="String(circuit.phase)" :options="PHASE_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { phase: Number($event) as 1 | 2 | 3 })" /></label>
+          <label>Фазы линии<AppSelect label="Фазы линии" :model-value="circuit.phaseAmbiguous ? '' : String(circuit.phaseCount ?? 1)" :options="PHASE_COUNT_OPTIONS" placeholder="не уточнено" @update:model-value="store.updateCircuit(circuit.id, { phaseCount: Number($event) as 1 | 3, phaseAmbiguous: false })" /></label>
+          <label v-if="circuit.phaseCount !== 3">Фаза<AppSelect label="Фаза" :model-value="circuit.phaseAmbiguous ? '' : String(circuit.phase)" :options="PHASE_OPTIONS" placeholder="не уточнено" @update:model-value="store.updateCircuit(circuit.id, { phase: Number($event) as 1 | 2 | 3, phaseAmbiguous: false })" /></label>
           <label>Защита<AppSelect label="Защита" :model-value="circuit.protectionDeviceId" :options="protectionOptions()" placeholder="Выберите аппарат" @update:model-value="store.updateCircuit(circuit.id, { protectionDeviceId: $event })" /></label>
           <label>Провод, мм²<input :value="circuit.wireCrossSection" type="number" min="0.5" step="0.5" @change="changeCircuitNumber(circuit.id, 'wireCrossSection', $event)" /></label>
           <label>Цвет<input :value="circuit.color" type="color" @change="store.updateCircuit(circuit.id, { color: ($event.target as HTMLInputElement).value })" /></label>

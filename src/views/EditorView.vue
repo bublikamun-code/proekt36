@@ -37,6 +37,25 @@ const canvasFocus = computed({
   set: (value: boolean) => { preferences.setPanelsOpen(!value) },
 })
 const wizardOpen = ref(false)
+/**
+ * The phase split (v5) reads pre-v5 «phase: 3» as L3 and marks it ambiguous, because the old
+ * formats used the same number for a three-phase line. The dialog asks once per project per
+ * tab; a close without a choice must not nag on every switch — the inspector warning and the
+ * validation issue keep the state visible until an explicit choice clears the flag.
+ */
+const phaseDialogAsked = new Set<string>()
+const phaseDialogOpen = ref(false)
+const ambiguousCircuits = computed(() => currentProject.value.circuits.filter((circuit) => circuit.phaseAmbiguous))
+watch(currentProjectId, (id) => {
+  if (!id || phaseDialogAsked.has(id)) return
+  if (!currentProject.value.circuits.some((circuit) => circuit.phaseAmbiguous)) return
+  phaseDialogAsked.add(id)
+  phaseDialogOpen.value = true
+}, { immediate: true })
+// The store commits a fresh project state, so reading it back synchronously in the click handler
+// can still see the pre-choice circuits. Watching the derived list closes the dialog exactly
+// when the last ambiguity is gone — from the dialog or from the inspector alike.
+watch(ambiguousCircuits, (left) => { if (!left.length && phaseDialogOpen.value) phaseDialogOpen.value = false })
 /** A one-time orientation card; the dismissal is remembered so the editor stays quiet. */
 const HINTS_KEY = 'panel36.hints.v1'
 const hintsDismissed = ref(false)
@@ -93,6 +112,11 @@ watch(() => route.params.projectId, () => { void syncProjectFromRoute() }, { imm
 
 const createFromMaster = ({ name, preset }: { name: string; preset: string }) => {
   store.newProject(name, preset); store.applyPreset(preset); wizardOpen.value = false; mobilePanel.value = null; void replaceEditorRoute(currentProjectId.value)
+}
+const clarifyPhase = (circuitId: string, phaseCount: 1 | 3) => {
+  store.updateCircuit(circuitId, phaseCount === 1
+    ? { phaseCount: 1, phase: 3, phaseAmbiguous: false }
+    : { phaseCount: 3, phaseAmbiguous: false })
 }
 const exportProject = () => { downloadProject(currentProject.value); liveMessage.value = `Экспорт проекта «${currentProject.value.name}» начат.` }
 /**
@@ -411,6 +435,17 @@ onUnmounted(() => {
     </AppDialog>
     <AppDialog :open="clearConfirmOpen" title="Очистить локальные данные?" description="Все локальные проекты и импортированные CAD-модели будут удалены. Это действие нельзя отменить." @close="clearConfirmOpen = false">
       <div class="app-dialog-actions"><button type="button" autofocus @click="clearConfirmOpen = false">Отмена</button><button class="danger-button" type="button" @click="clearData">Очистить всё</button></div>
+    </AppDialog>
+    <AppDialog :open="phaseDialogOpen" title="Уточните фазу линии" description="В старом формате «3» означало либо однофазную линию на L3, либо трёхфазную линию — по данным не различить. Пока фаза не уточнена, баланс фаз условен." @close="phaseDialogOpen = false">
+      <ul class="phase-clarify-list">
+        <li v-for="circuit in ambiguousCircuits" :key="circuit.id">
+          <span class="phase-clarify-name"><strong>{{ circuit.name }}</strong><small>сейчас читается как L3 · {{ circuit.current }} А</small></span>
+          <span class="phase-clarify-actions">
+            <button type="button" @click="clarifyPhase(circuit.id, 1)">Однофазная, L3</button>
+            <button class="primary-button" type="button" @click="clarifyPhase(circuit.id, 3)">Трёхфазная</button>
+          </span>
+        </li>
+      </ul>
     </AppDialog>
     <p class="sr-only" aria-live="polite">{{ liveMessage }}</p>
   </div>

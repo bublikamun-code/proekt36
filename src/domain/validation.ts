@@ -1,4 +1,5 @@
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
+import { circuitCurrentA } from './electrical'
 import { CABLE_DROP_LIMIT_PERCENT, voltageDrop } from './voltageDrop'
 import { pricing } from './pricing'
 import { VALIDATION_REVISION } from './projectSchema'
@@ -94,10 +95,15 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     circuitNames.add(circuit.name)
     const protection = project.devices.find((item) => item.instanceId === circuit.protectionDeviceId)
     const protectionProduct = protection ? definitions.get(protection.productId) : undefined
+    // Every check below reads the same derived current the balance does, so a line planned by
+    // power (4600 W → 20 A) cannot be «fine» in one place and «over the rating» in another.
+    const drawnA = circuitCurrentA(circuit)
     if (!protection || !protectionProduct) issues.push(issue(`circuit-protection-${circuit.id}`, 'error', 'Не выбрано защитное устройство', `Для цепи «${circuit.name}» не найден автомат, УЗО или дифавтомат. Выберите защитное устройство.`, 'circuit.protection.missing', { circuitId: circuit.id, protectionDeviceId: circuit.protectionDeviceId }))
-    if (protectionProduct && circuit.current > protectionProduct.ratedCurrent) issues.push(issue(`circuit-overload-${circuit.id}`, 'warning', 'Ток цепи выше номинала защиты', `${circuit.name}: ${circuit.current} А при номинале ${protectionProduct.ratedCurrent} А.`, 'circuit.current.over-protection', { current: circuit.current, ratedCurrent: protectionProduct.ratedCurrent }))
-    if (project.settings.phase === 1 && circuit.phase !== 1) issues.push(issue(`circuit-phase-${circuit.id}`, 'error', 'Фаза цепи не совпадает с сетью', `${circuit.name} назначена на L${circuit.phase}, а проект однофазный. Укажите L1.`, 'circuit.phase.mismatch', { phase: circuit.phase, projectPhase: project.settings.phase }))
-    if (project.settings.phase === 1 && circuit.current > project.settings.inputCurrent) issues.push(issue(`circuit-input-current-${circuit.id}`, 'warning', 'Ток цепи выше вводного', `${circuit.name}: расчётный ток ${circuit.current} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту и нагрузку.`, 'circuit.current.input.preliminary', { current: circuit.current, inputCurrent: project.settings.inputCurrent }))
+    if (protectionProduct && drawnA > protectionProduct.ratedCurrent) issues.push(issue(`circuit-overload-${circuit.id}`, 'warning', 'Ток цепи выше номинала защиты', `${circuit.name}: ${drawnA > Math.floor(drawnA) ? drawnA.toFixed(1).replace('.', ',') : drawnA} А при номинале ${protectionProduct.ratedCurrent} А.`, 'circuit.current.over-protection', { current: Number(drawnA.toFixed(2)), ratedCurrent: protectionProduct.ratedCurrent }))
+    if (project.settings.phase === 1 && circuit.phaseCount === 1 && circuit.phase !== 1) issues.push(issue(`circuit-phase-${circuit.id}`, 'error', 'Фаза цепи не совпадает с сетью', `${circuit.name} назначена на L${circuit.phase}, а проект однофазный. Укажите L1.`, 'circuit.phase.mismatch', { phase: circuit.phase, projectPhase: project.settings.phase }))
+    if (project.settings.phase === 1 && circuit.phaseCount === 3) issues.push(issue(`circuit-threephase-${circuit.id}`, 'error', 'Трёхфазная цепь в однофазном щите', `${circuit.name} — трёхфазная нагрузка, а питание щита однофазное. Смените количество фаз линии или питание щита.`, 'circuit.phase-count.mismatch', { circuitId: circuit.id, projectPhase: project.settings.phase }))
+    if (circuit.phaseAmbiguous) issues.push(issue(`circuit-phase-ambiguous-${circuit.id}`, 'warning', 'Фаза линии не уточнена', `${circuit.name}: в старом проекте «3» означало либо однофазную линию на L3, либо трёхфазную линию — по данным не различить. Уточните, пока не уточнено, баланс фаз условен.`, 'circuit.phase.ambiguous', { circuitId: circuit.id }))
+    if (project.settings.phase === 1 && drawnA > project.settings.inputCurrent) issues.push(issue(`circuit-input-current-${circuit.id}`, 'warning', 'Ток цепи выше вводного', `${circuit.name}: расчётный ток ${drawnA > Math.floor(drawnA) ? drawnA.toFixed(1).replace('.', ',') : drawnA} А при вводном ${project.settings.inputCurrent} А. Проверьте защиту и нагрузку.`, 'circuit.current.input.preliminary', { current: Number(drawnA.toFixed(2)), inputCurrent: project.settings.inputCurrent }))
 
     const buses = new Set((project.connections ?? []).filter((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id).map((connection) => connection.fromBus))
     for (const bus of ['L', 'N', 'PE'] as const) {
@@ -106,10 +112,10 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     if (!project.connections?.some((connection) => connection.kind !== 'busbar' && connection.circuitId === circuit.id && project.devices.some((item) => item.instanceId === connection.toDeviceId))) issues.push(issue(`circuit-connection-${circuit.id}`, 'warning', 'Цепь не подключена', `У цепи «${circuit.name}» нет подключения к устройству.`, 'circuit.connection.missing', { circuitId: circuit.id }))
     // A planned cable length turns the worksheet into a checkable number: the drop is what the
     // far end of the line actually loses. Without a length there is nothing to check yet.
-    if ((circuit.cableLength ?? 0) > 0 && circuit.current > 0) {
+    if ((circuit.cableLength ?? 0) > 0 && drawnA > 0) {
       const drop = voltageDrop({
         lengthM: circuit.cableLength ?? 0,
-        currentA: circuit.current,
+        currentA: drawnA,
         crossSectionMm2: circuit.wireCrossSection,
         system: project.settings.phase === 3 ? 3 : 1,
       })
@@ -141,7 +147,17 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
 export const phaseBalance = (project: PanelProject, definitions: Map<string, DeviceDefinition>) => {
   const totals = [0, 0, 0]
   if (project.circuits?.length) {
-    for (const circuit of project.circuits) totals[(circuit.phase - 1) % 3] += Math.max(0, circuit.current)
+    for (const circuit of project.circuits) {
+      // A three-phase line draws its current from every phase, so it lands in all three baskets;
+      // a single-phase one only in its assigned basket. An ambiguous «phase: 3» keeps the L3
+      // reading it always had — the clarification issue says the number may still be wrong.
+      const drawn = circuitCurrentA(circuit)
+      if (circuit.phaseCount === 3) {
+        for (const index of [0, 1, 2]) totals[index] += drawn
+      } else {
+        totals[(circuit.phase - 1) % 3] += drawn
+      }
+    }
   } else {
     for (const item of project.devices) totals[(item.phase - 1) % 3] += (definitions.get(item.productId)?.ratedCurrent ?? 0) * item.quantity
   }

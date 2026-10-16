@@ -63,6 +63,8 @@ export interface AssistantContext {
   }
   load: {
     circuits: number
+    threePhaseCircuits: number
+    phaseAmbiguousCircuits: number
     circuitsWithoutProtection: number
     circuitsWithoutConnections: number
     totalCurrentA: number
@@ -123,8 +125,11 @@ export const buildAssistantContext = (
   const totals = balance.totals
   const perPhaseA = project.settings.phase === 3 ? [totals[0] ?? 0, totals[1] ?? 0, totals[2] ?? 0] : [totals[0] ?? 0]
   const cabinet = project.settings.cabinetId ? cabinetById.get(project.settings.cabinetId) : undefined
-  const connected = new Set((project.connections ?? []).filter((item) => item.circuitId).map((item) => item.circuitId))
-  const protectionIds = new Set((project.circuits ?? []).map((item) => item.protectionDeviceId))
+  // The summary counters are read off the same issues the diagnostics panel shows. Counting
+  // «unprotected» circuits from the project graph again would let the two disagree the moment
+  // one of them learns a new rule — a broken link or a non-protection device must be «missing
+  // protection» in both places or neither.
+  const countByRule = (code: string) => issues.filter((item) => item.ruleCode === code).length
 
   return {
     revision: ASSISTANT_CONTEXT_REVISION,
@@ -157,10 +162,12 @@ export const buildAssistantContext = (
     },
     load: {
       circuits: (project.circuits ?? []).length,
-      circuitsWithoutProtection: (project.circuits ?? []).filter((item) => !protectionIds.has(item.protectionDeviceId)).length,
-      circuitsWithoutConnections: (project.circuits ?? []).filter((item) => !connected.has(item.id)).length,
-      totalCurrentA: perPhaseA.reduce((sum, value) => sum + value, 0),
-      perPhaseA,
+      threePhaseCircuits: (project.circuits ?? []).filter((item) => item.phaseCount === 3).length,
+      phaseAmbiguousCircuits: countByRule('circuit.phase.ambiguous'),
+      circuitsWithoutProtection: countByRule('circuit.protection.missing'),
+      circuitsWithoutConnections: countByRule('circuit.connection.missing'),
+      totalCurrentA: Number(perPhaseA.reduce((sum, value) => sum + value, 0).toFixed(2)),
+      perPhaseA: perPhaseA.map((value) => Number(value.toFixed(2))),
       spreadPercent: balance.spread,
     },
     issues: countIssues(issues),
@@ -173,8 +180,9 @@ export const assistantContextDisclosure = (context: AssistantContext): string[] 
   `сеть: ${context.panel.phase} ф., ввод ${context.panel.inputCurrentA} А, ${context.panel.rows} ряд(ов) по ${context.panel.railModules} мод.`,
   `занято ${context.occupancy.usedModules} из ${context.occupancy.capacityModules} модулей, устройств: ${context.occupancy.devices}`,
   `цепи: ${context.load.circuits}, суммарный ток ${context.load.totalCurrentA} А, разброс фаз ${context.load.spreadPercent}%`,
+  context.load.phaseAmbiguousCircuits ? `фаза не уточнена у ${context.load.phaseAmbiguousCircuits} цепи(ей) — баланс условен` : '',
   `состав по категориям: ${context.occupancy.byCategory.map((item) => `${item.label} — ${item.devices}`).join(', ') || 'пусто'}`,
   `замечания проверок: ${context.issues.map((item) => `${item.title} (${item.count})`).join('; ') || 'нет'}`,
-]
+].filter((line) => line !== '')
 
 export const formatAssistantContext = (context: AssistantContext): string => JSON.stringify(context, null, 2)

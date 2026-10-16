@@ -384,6 +384,34 @@ h3 {
   min-width: 116px;
   min-height: 40px;
 }
+.phase-clarify-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.phase-clarify-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.phase-clarify-name {
+  display: grid;
+  gap: 2px;
+}
+.phase-clarify-actions {
+  display: flex;
+  gap: 7px;
+}
+.phase-clarify-actions button {
+  min-height: 36px;
+  white-space: nowrap;
+}
 .editor-storage-alert {
   position: fixed;
   z-index: 110;
@@ -2708,6 +2736,12 @@ kbd {
   min-height: 28px;
   width: 28px;
   min-width: 28px;
+}
+.circuit-card .phase-ambiguous {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warning);
+  color: var(--text-muted);
 }
 .circuit-card input[type='color'] {
   padding: 3px;

@@ -36,7 +36,7 @@ describe('лист маркировки', () => {
     // The same position without an address takes the circuit's name, which says more than a number.
     const filled = buildLabelSheet(withDevices([
       device({ instanceId: 'a', address: '', marking: '' }),
-    ], [{ id: 'c1', name: 'Кухня', loadName: 'Кухня', current: 16, power: 0, phase: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
+    ], [{ id: 'c1', name: 'Кухня', loadName: 'Кухня', current: 16, power: 0, phase: 1, phaseCount: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
     expect(filled.labels[0]!.text).toBe('Кухня')
     expect(filled.unmarked).toBe(0)
   })
@@ -63,7 +63,7 @@ describe('лист маркировки', () => {
     const long = 'Розетки кухни, холодильник и посудомоечная машина'
     const built = buildLabelSheet(withDevices([
       device({ instanceId: 'a', address: '', marking: '' }),
-    ], [{ id: 'c1', name: long, loadName: long, current: 16, power: 0, phase: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
+    ], [{ id: 'c1', name: long, loadName: long, current: 16, power: 0, phase: 1, phaseCount: 1, protectionDeviceId: 'a', color: '#000', wireCrossSection: 2.5, note: '' }]), definitions)
     const label = built.labels[0]!
     expect(label.text.length).toBe(LABEL_TEXT_MAX)
     expect(label.text.endsWith('…')).toBe(true)

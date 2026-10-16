@@ -15,6 +15,7 @@ const circuit = (patch: Partial<Circuit> = {}): Circuit => ({
   current: 10,
   power: 0,
   phase: 1,
+  phaseCount: 1,
   protectionDeviceId: 'protection-1',
   color: '#c65c3b',
   wireCrossSection: 1.5,
@@ -100,5 +101,46 @@ describe('circuits and connections', () => {
     project.circuits = [circuit({ id: 'single', current: 16, phase: 1 })]
     expect(phaseBalance(project, definitions).totals).toEqual([16, 0, 0])
     expect(phaseBalance(project, definitions).spread).toBe(0)
+  })
+
+  it('loads a three-phase line into all three baskets and a single-phase one only into its own', () => {
+    const project = createProject('Баланс фаз линии', 'house', { phase: 3 })
+    project.circuits = [
+      circuit({ id: 'c1', current: 12, phase: 1 }),
+      circuit({ id: 'c3ph', current: 8, phase: 3, phaseCount: 3 }),
+    ]
+    // The three-phase line draws 8 A from every phase; the L1 line adds only to L1.
+    expect(phaseBalance(project, definitions).totals).toEqual([20, 8, 8])
+  })
+
+  it('keeps the pre-v5 «phase: 3» reading as L3 and warns instead of guessing', () => {
+    const project = createProject('Неоднозначная фаза', 'house', { phase: 3 })
+    project.circuits = [circuit({ id: 'old', current: 9, phase: 3, phaseAmbiguous: true })]
+    expect(phaseBalance(project, definitions).totals).toEqual([0, 0, 9])
+    expect(validateProject(project, definitions).some((item) => item.ruleCode === 'circuit.phase.ambiguous')).toBe(true)
+  })
+
+  it('refuses a three-phase line in a single-phase panel', () => {
+    const project = createProject('Однофазный щит', 'demo', { phase: 1 })
+    project.circuits = [circuit({ id: 'pump', current: 6, phase: 1, phaseCount: 3 })]
+    expect(validateProject(project, definitions).some((item) => item.ruleCode === 'circuit.phase-count.mismatch')).toBe(true)
+  })
+
+  it('derives the current from the power when no current is stated: 4600 W reads 20 A single-phase', () => {
+    const project = createProject('Ток из мощности', 'house', { phase: 3 })
+    // The same 4600 W on any single phase: L1, L2 and L3 all see 20 A — the assigned phase
+    // must not change the arithmetic.
+    for (const phase of [1, 2, 3] as const) {
+      project.circuits = [circuit({ id: `w-${phase}`, current: 0, power: 4600, phase })]
+      expect(phaseBalance(project, definitions).totals).toEqual(phase === 1 ? [20, 0, 0] : phase === 2 ? [0, 20, 0] : [0, 0, 20])
+    }
+    // A three-phase line: 4600 / (√3 · 400) ≈ 6.64 A drawn from every phase.
+    project.circuits = [circuit({ id: 'w-3ph', current: 0, power: 4600, phase: 3, phaseCount: 3 })]
+    expect(phaseBalance(project, definitions).totals.map((value) => Number(value.toFixed(2)))).toEqual([6.64, 6.64, 6.64])
+    // A stated current wins over the derived one, and a line with neither number draws nothing.
+    project.circuits = [circuit({ id: 'stated', current: 10, power: 4600, phase: 1 })]
+    expect(phaseBalance(project, definitions).totals).toEqual([10, 0, 0])
+    project.circuits = [circuit({ id: 'silent', current: 0, power: 0, phase: 1 })]
+    expect(phaseBalance(project, definitions).totals).toEqual([0, 0, 0])
   })
 })

@@ -31,7 +31,7 @@ const seeded = (): PanelProject => {
   ]
   project.circuits = [{
     id: 'circuit-1', name: SECRET.circuitName, loadName: SECRET.loadName, current: 16, power: 3500,
-    phase: 1, protectionDeviceId: 'СЕКРЕТ-INSTANCE-1', color: '#c65c3b', wireCrossSection: 1.5, note: SECRET.circuitNote,
+    phase: 1, phaseCount: 1, protectionDeviceId: 'СЕКРЕТ-INSTANCE-1', color: '#c65c3b', wireCrossSection: 1.5, note: SECRET.circuitNote,
   }]
   project.connections = [
     { id: 'conn-1', circuitId: 'circuit-1', fromBus: 'L', toDeviceId: 'СЕКРЕТ-INSTANCE-1', color: '#c65c3b', thickness: 2, label: SECRET.connectionLabel },
@@ -87,5 +87,24 @@ describe('assistant context', () => {
     const overlapIssue = issues.find((item) => item.ruleCode === 'layout.overlap')
     expect(overlapIssue?.message).toContain('AVO-10')
     expect(JSON.stringify(context)).not.toContain('AVO-10')
+  })
+
+  it('counts unprotected circuits the way the diagnostics panel does, including broken links', () => {
+    const project = seeded()
+    // A device whose product the catalogue no longer knows: present on the board, yet no
+    // definition — a circuit pointing at it is as unprotected as one pointing nowhere.
+    project.devices.push({ instanceId: 'ghost-dev', productId: 'ghost-product', row: 1, slot: 2, address: 'G1', quantity: 1, phase: 1, note: '', marking: '', mount: 'din' })
+    project.circuits = [
+      { ...project.circuits[0]!, id: 'ok' },
+      { ...project.circuits[0]!, id: 'empty', protectionDeviceId: '' },
+      { ...project.circuits[0]!, id: 'nonexistent', protectionDeviceId: 'нет-такого-устройства' },
+      { ...project.circuits[0]!, id: 'ghost', protectionDeviceId: 'ghost-dev' },
+    ]
+    const issues = validateProject(project, definitions)
+    const context = buildAssistantContext(project, definitions, issues)
+
+    const reported = issues.filter((item) => item.ruleCode === 'circuit.protection.missing').length
+    expect(reported).toBe(3)
+    expect(context.load.circuitsWithoutProtection).toBe(reported)
   })
 })

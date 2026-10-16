@@ -4,10 +4,10 @@ import { CIRCUIT_KINDS } from './types'
 import { APP_VERSION } from '../version'
 
 /** The only project schema understood by this application. */
-export const PROJECT_SCHEMA_VERSION = 4
+export const PROJECT_SCHEMA_VERSION = 5
 export const APPLICATION_REVISION = APP_VERSION
 export const CATALOG_REVISION = DATA_CATALOG_REVISION
-export const VALIDATION_REVISION = 4
+export const VALIDATION_REVISION = 5
 
 /**
  * Orders two revision strings and returns a negative number when `left` is older. Both
@@ -62,7 +62,7 @@ export const PROJECT_LIMITS = {
 } as const
 
 /** Schema versions this build can still read, oldest first. */
-export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, PROJECT_SCHEMA_VERSION] as const
+export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, 4, PROJECT_SCHEMA_VERSION] as const
 
 /** True when the app can migrate a record of this schema version instead of refusing it. */
 export const isSupportedSchemaVersion = (value: unknown): value is (typeof SUPPORTED_SCHEMA_VERSIONS)[number] =>
@@ -183,6 +183,8 @@ const validateCircuit = (errors: string[], value: unknown, path: string) => {
   finiteNumber(errors, value.power, `${path}.power`, { min: 0, max: PROJECT_LIMITS.power })
   finiteNumber(errors, value.wireCrossSection, `${path}.wireCrossSection`, { min: 0, max: 1000 })
   if (value.phase !== 1 && value.phase !== 2 && value.phase !== 3) add(errors, `${path}.phase`, 'ожидается 1, 2 или 3')
+  if (value.phaseCount !== 1 && value.phaseCount !== 3) add(errors, `${path}.phaseCount`, 'ожидается 1 или 3')
+  if (value.phaseAmbiguous !== undefined && typeof value.phaseAmbiguous !== 'boolean') add(errors, `${path}.phaseAmbiguous`, 'ожидается логическое значение')
   enumValue(errors, value.kind, `${path}.kind`, CIRCUIT_KINDS, false)
   string(errors, value.roomId, `${path}.roomId`, { max: PROJECT_LIMITS.id })
   // A planned line starts with an unmeasured run: an absent cableLength is «not known yet»,
