@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { builtinCatalog } from '../src/data/catalog'
+import { workspaceCatalog } from '../src/data/catalog'
 import { getPanelGeometry, DEFAULT_DEVICE_HEIGHT_MM } from '../src/domain/spike/panelGeometry'
 import { routeBoard } from '../src/domain/spike/wireRouting'
 import type { WireFrame } from '../src/domain/spike/wireRouting'
@@ -7,7 +7,7 @@ import type { DeviceDefinition as ShimDeviceDefinition, PanelProject, PlacedDevi
 import { clampExists, routerConnections, terminalKey, toTerminalRef } from '../src/domain/spike/wiringLayers'
 import type { GraphConnection } from '../src/domain/spike/wiringLayers'
 
-const definitions = new Map<string, ShimDeviceDefinition>(builtinCatalog.map((item) => [item.id, item as unknown as ShimDeviceDefinition] as const))
+const definitions = new Map<string, ShimDeviceDefinition>(workspaceCatalog.map((item) => [item.id, item as unknown as ShimDeviceDefinition] as const))
 const mcb = definitions.get('ekf-mcb-1p-c6')! as ShimDeviceDefinition
 const terminal1p = definitions.get('ekf-terminal-1p-gray')!
 const rccb = definitions.get('ekf-rccb-2p-25')! as ShimDeviceDefinition
