@@ -39,6 +39,7 @@ export interface NewLineInput {
   roomId?: string
   kind?: Circuit['kind']
   phase?: 1 | 2 | 3
+  phaseCount?: 1 | 3
   protectionProductId: string
   current?: number
   power?: number
@@ -719,7 +720,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!protection) return rejectCommand('Для цепи нужен автомат, УЗО или дифавтомат.')
     const circuit: Circuit = {
       id: uid(), name: `Цепь ${currentProject.value.circuits.length + 1}`,
-      loadName: target.note || 'Новая нагрузка', current: 0, power: 0, phase: target.phase,
+      loadName: target.note || 'Новая нагрузка', current: 0, power: 0, phase: target.phase, phaseCount: 1,
       protectionDeviceId: protection.instanceId, color: '#c65c3b', wireCrossSection: 1.5, note: '',
     }
     const invalid = circuitError(circuit)
@@ -740,8 +741,12 @@ export const useProjectStore = defineStore('project', () => {
     const values = patch as Record<string, unknown>
     // Planner fields ride the same command: a row edit in the lines tab is a circuit edit, and
     // letting them through one door keeps the inspector and the worksheet from drifting apart.
-    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength'])
+    // The v5 phase fields ride along: a clarification choice and the inspector phase picker are
+    // circuit edits like any other, and phaseAmbiguous is cleared only through this same door.
+    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'phaseCount', 'phaseAmbiguous', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение цепи содержит недопустимые поля.')
+    if ('phaseCount' in values && values.phaseCount !== 1 && values.phaseCount !== 3) return rejectCommand('Количество фаз линии — 1 или 3.')
+    if ('phaseAmbiguous' in values && typeof values.phaseAmbiguous !== 'boolean') return rejectCommand('Флаг неоднозначности фазы должен быть логическим.')
     if ('roomId' in values && values.roomId && !currentProject.value.rooms?.some((item) => item.id === values.roomId)) return rejectCommand('Помещение цепи не найдено.')
     if ('kind' in values && !CIRCUIT_KINDS.includes(String(values.kind) as typeof CIRCUIT_KINDS[number])) return rejectCommand('Вид линии должен быть силовым, освещением, DC или управлением.')
     if ('cableLength' in values && !finiteInRange(values.cableLength, 0, PROJECT_LIMITS.cableLength)) return rejectCommand('Длина кабеля должна быть числом от 0 до 1000 м.')
@@ -882,7 +887,7 @@ export const useProjectStore = defineStore('project', () => {
     const circuit: Circuit = {
       id: uid(), name: input.name.trim(), loadName: input.name.trim(),
       current: input.current ?? 0, power: input.power ?? 0,
-      phase: input.phase ?? 1, protectionDeviceId: placed.instanceId,
+      phase: input.phase ?? 1, phaseCount: input.phaseCount ?? 1, protectionDeviceId: placed.instanceId,
       color: '#c65c3b', wireCrossSection: input.wireCrossSection ?? 1.5, note: '',
       roomId: input.roomId || undefined, kind: input.kind ?? 'power', cableLength: 0,
     }

@@ -1,7 +1,7 @@
 import type { PanelProject } from '../domain/types'
 
 export const demoProject: PanelProject = {
-  schemaVersion: 3,
+  schemaVersion: 5,
   id: 'demo-panel-36-project',
   name: 'Квартира · распределительный щит',
   preset: 'demo',
@@ -36,9 +36,9 @@ export const demoProject: PanelProject = {
   ],
   combs: [],
   circuits: [
-    { id: 'demo-circuit-living', name: 'Розетки гостиной', loadName: 'Розетки гостиной', current: 16, power: 1500, phase: 1, protectionDeviceId: 'demo-qfi01', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
-    { id: 'demo-circuit-kitchen', name: 'Кухня', loadName: 'Кухня', current: 16, power: 2200, phase: 1, protectionDeviceId: 'demo-qfi02', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
-    { id: 'demo-circuit-light', name: 'Освещение', loadName: 'Освещение', current: 6, power: 720, phase: 1, protectionDeviceId: 'demo-qf02', color: '#d65b43', wireCrossSection: 1.5, note: 'Демонстрационная цепь' },
+    { id: 'demo-circuit-living', name: 'Розетки гостиной', loadName: 'Розетки гостиной', current: 16, power: 1500, phase: 1, phaseCount: 1, protectionDeviceId: 'demo-qfi01', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
+    { id: 'demo-circuit-kitchen', name: 'Кухня', loadName: 'Кухня', current: 16, power: 2200, phase: 1, phaseCount: 1, protectionDeviceId: 'demo-qfi02', color: '#d65b43', wireCrossSection: 2.5, note: 'Демонстрационная цепь' },
+    { id: 'demo-circuit-light', name: 'Освещение', loadName: 'Освещение', current: 6, power: 720, phase: 1, phaseCount: 1, protectionDeviceId: 'demo-qf02', color: '#d65b43', wireCrossSection: 1.5, note: 'Демонстрационная цепь' },
   ],
   connections: [
     { id: 'demo-connection-living', circuitId: 'demo-circuit-living', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#d65b43', thickness: 2, label: 'L → QFI01' },

@@ -153,7 +153,7 @@ describe('отказы проверки схемы', () => {
 
     const missingDevice = structuredClone(project)
     missingDevice.devices = [device!]
-    missingDevice.circuits = [{ id: 'c1', name: 'Свет', loadName: 'Свет', current: 6, power: 100, phase: 1, protectionDeviceId: 'удалённый', color: '#fff', wireCrossSection: 1.5, note: '' }]
+    missingDevice.circuits = [{ id: 'c1', name: 'Свет', loadName: 'Свет', current: 6, power: 100, phase: 1, phaseCount: 1, protectionDeviceId: 'удалённый', color: '#fff', wireCrossSection: 1.5, note: '' }]
     expect(errors(missingDevice)).toContain('circuits[0].protectionDeviceId')
 
     const missingBus = structuredClone(project)

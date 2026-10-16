@@ -53,7 +53,10 @@ export interface Circuit {
   loadName: string
   current: number
   power: number
+  /** Assigned phase L1/L2/L3; meaningful only while `phaseCount` is 1. */
   phase: 1 | 2 | 3
+  /** How many phases the load itself needs; a three-phase line loads all three baskets. */
+  phaseCount: 1 | 3
   protectionDeviceId: string
   color: string
   wireCrossSection: number
@@ -63,6 +66,12 @@ export interface Circuit {
   kind?: CircuitKind
   /** Outgoing cable length in metres; 0 or absent means not planned yet. */
   cableLength?: number
+  /**
+   * Set by the v5 migration on pre-v5 records with `phase: 3`: in the old formats that number
+   * meant either «single-phase line on L3» or «a three-phase line», and the data cannot tell.
+   * Cleared only by an explicit choice in the clarification dialog or the inspector.
+   */
+  phaseAmbiguous?: boolean
 }
 
 /** A planning group for lines — a room on a floor, the way a estimate worksheet expects. */

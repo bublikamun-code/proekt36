@@ -13,6 +13,7 @@ const circuit = (patch: Partial<Circuit> = {}): Circuit => ({
   current: 10,
   power: 0,
   phase: 1,
+  phaseCount: 1,
   protectionDeviceId: '',
   color: '#c65c3b',
   wireCrossSection: 1.5,
