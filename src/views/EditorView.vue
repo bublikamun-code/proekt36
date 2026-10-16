@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import CatalogPanel from '../components/catalog/CatalogPanel.vue'
 import Editor2D from '../components/editor/Editor2D.vue'
+import ChecksPanel from '../components/editor/ChecksPanel.vue'
+import LinesPanel from '../components/editor/LinesPanel.vue'
 import DevicePositionPad from '../components/editor/DevicePositionPad.vue'
 import InspectorPanel from '../components/inspector/InspectorPanel.vue'
 import BomPanel from '../components/bom/BomPanel.vue'
@@ -13,11 +15,9 @@ import ProjectPrintReport from '../components/ui/ProjectPrintReport.vue'
 import ProjectWizard from '../components/projects/ProjectWizard.vue'
 import { useProjectStore } from '../stores/project'
 import { usePreferencesStore } from '../stores/preferences'
-import { downloadProject } from '../domain/projectFile'
+import { downloadProject, readProjectFile } from '../domain/projectFile'
+import { backupNeedsLocalCad, downloadWorkspaceBackup, readWorkspaceBackup, type RestoredWorkspaceBackup } from '../domain/projectBackup'
 import { useConfirm } from '../composables/useConfirm'
-import { useWorkspaceBackup } from '../composables/useWorkspaceBackup'
-import { modelWord } from '../domain/plural'
-import { modelsUsedBy, useProjectArchive } from '../composables/useProjectArchive'
 import type { Category, PanelProject } from '../domain/types'
 
 const route = useRoute()
@@ -25,7 +25,7 @@ const router = useRouter()
 const store = useProjectStore()
 const preferences = usePreferencesStore()
 const { confirm } = useConfirm()
-const { currentProject, projects, currentProjectId, selectedDevice, undoStack, redoStack, theme, definitions, importedModels, storageStatus, storageError, storageAlert, hasStorageBackup, hasStorageRecovery, lastSavedAt } = storeToRefs(store)
+const { currentProject, projects, currentProjectId, selectedDevice, undoStack, redoStack, theme, definitions, modelLibrary, storageStatus, storageError, storageAlert, hasStorageBackup, hasStorageRecovery, lastSavedAt } = storeToRefs(store)
 const { panelsOpen } = storeToRefs(preferences)
 /**
  * Whether the editor shows the board alone. It is kept rather than reset on every visit: a
@@ -37,11 +37,21 @@ const canvasFocus = computed({
   set: (value: boolean) => { preferences.setPanelsOpen(!value) },
 })
 const wizardOpen = ref(false)
+/** A one-time orientation card; the dismissal is remembered so the editor stays quiet. */
+const HINTS_KEY = 'panel36.hints.v1'
+const hintsDismissed = ref(false)
+try { hintsDismissed.value = localStorage.getItem(HINTS_KEY) === 'dismissed' } catch { /* a blocked storage only means the hint shows again */ }
+const dismissHints = () => {
+  hintsDismissed.value = true
+  try { localStorage.setItem(HINTS_KEY, 'dismissed') } catch { /* see above */ }
+  liveMessage.value = 'Подсказки скрыты.'
+}
 const catalogFocus = ref<Category | null>(null)
 const mobilePanel = ref<'catalog' | 'inspector' | null>(null)
 const projectOpen = ref(false)
 const jsonInput = ref<HTMLInputElement | null>(null)
 const backupInput = ref<HTMLInputElement | null>(null)
+const pendingBackup = ref<RestoredWorkspaceBackup | null>(null)
 const renameTarget = ref<PanelProject | null>(null)
 const renameValue = ref('')
 const deleteTarget = ref<PanelProject | null>(null)
@@ -52,26 +62,32 @@ const projectSwitcherWrap = ref<HTMLElement | null>(null)
 const projectMenu = ref<HTMLElement | null>(null)
 
 const autosaveLabel = computed(() => ({ saving: 'Сохранение…', saved: 'Сохранено', 'save-failed': 'Не сохранено', 'storage-unavailable': 'Хранилище недоступно' }[storageStatus.value]))
+const projectWord = (count: number) => {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
+  if (mod10 === 1) return 'проект'
+  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
+  return 'проектов'
+}
 const autosaveTime = computed(() => storageStatus.value === 'saved' && lastSavedAt.value ? new Date(lastSavedAt.value).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '')
 const replaceEditorRoute = (id: string) => router.replace({ name: 'editor', params: { projectId: id } })
 const openProject = (id: string) => {
   if (!projects.value.some((project) => project.id === id)) return
   store.switchProject(id); projectOpen.value = false; void replaceEditorRoute(id)
 }
-/**
- * The parameterless `/app/editor` link is canonicalised in the router guard, so by the time this
- * view exists the route already carries a project id. What is left to handle is an id that points
- * at a project which is no longer there.
- */
 const syncProjectFromRoute = async () => {
   const routeProjectId = route.params.projectId
   const projectId = Array.isArray(routeProjectId) ? routeProjectId[0] : routeProjectId
-  if (typeof projectId !== 'string') return
-  if (projects.value.some((project) => project.id === projectId)) {
-    if (currentProjectId.value !== projectId) store.switchProject(projectId)
-    return
+  if (typeof projectId === 'string') {
+    if (projects.value.some((project) => project.id === projectId)) {
+      if (currentProjectId.value !== projectId) store.switchProject(projectId)
+      return
+    }
+    store.notify('Проект не найден', 'error'); await router.replace({ name: 'projects' }); return
   }
-  store.notify('Проект не найден', 'error'); await router.replace({ name: 'projects' })
+  if (route.name !== 'current-editor') return
+  await replaceEditorRoute(currentProjectId.value)
 }
 watch(() => route.params.projectId, () => { void syncProjectFromRoute() }, { immediate: true })
 
@@ -79,41 +95,69 @@ const createFromMaster = ({ name, preset }: { name: string; preset: string }) =>
   store.newProject(name, preset); store.applyPreset(preset); wizardOpen.value = false; mobilePanel.value = null; void replaceEditorRoute(currentProjectId.value)
 }
 const exportProject = () => { downloadProject(currentProject.value); liveMessage.value = `Экспорт проекта «${currentProject.value.name}» начат.` }
-/** Local models this project actually reaches; the archive carries these and no more. */
-const projectCad = computed(() => modelsUsedBy([currentProject.value], importedModels.value).map((model) => model.name || model.fileName))
-const { importProjectFile, exportProjectArchive, busy: archiveBusy } = useProjectArchive()
-const exportProjectWithCad = async () => {
-  const result = await exportProjectArchive(currentProject.value)
-  // An archive is written in both cases, so the two branches must not promise a JSON file.
-  liveMessage.value = result.missing
-    ? `Архив проекта выгружен: ${result.archive} ${modelWord(result.archive)}, но ${result.missing} ${modelWord(result.missing)} в библиотеке не найдено и в архив не попало.`
-    : result.archive
-      ? `Архив проекта выгружен вместе с моделями: ${result.archive} ${modelWord(result.archive)}.`
-      : 'Архив проекта выгружен: локальных CAD-моделей у проекта нет, поэтому в нём только проект.'
-}
 /**
  * The archive never carries CAD binaries, so a project that uses a locally imported model
- * only comes back as a placeholder. The composable says so before the download, which beats
- * letting the user discover it after wiping the browser. The list view and the editor share it;
- * only the route fix-up after a restore is the editor's own.
+ * only comes back as a placeholder. Saying so before the download beats letting the user
+ * discover it after wiping the browser.
  */
-const {
-  pendingBackup,
-  exportBackup,
-  chooseBackupRestore,
-  prepareBackupRestore,
-  confirmBackupRestore,
-  backupDescription,
-  downloadRecoverySnapshot,
-  rollbackToSnapshot,
-} = useWorkspaceBackup({
-  projects,
-  importedModels,
-  currentProjectId,
-  backupInput,
-  confirm,
-  announce: (text) => { liveMessage.value = text },
-  onRestored: () => replaceEditorRoute(currentProjectId.value),
+const exportBackup = async () => {
+  const pending = backupNeedsLocalCad(projects.value)
+  if (pending.length) {
+    const sample = pending.slice(0, 3).join(', ') + (pending.length > 3 ? ` и ещё ${pending.length - 3}` : '')
+    const proceed = await confirm({
+      title: 'Копия не включает CAD-модели?',
+      description: `Эти проекты используют локально импортированные модели (${sample}). Их файлы в копию не попадают: после восстановления такие аппараты появятся как «нет в каталоге», пока модель не будет импортирована заново. Продолжить выгрузку копии?`,
+      confirmLabel: 'Выгрузить копию',
+      danger: true,
+    })
+    if (!proceed) return
+  }
+  downloadWorkspaceBackup(projects.value, modelLibrary.value, currentProjectId.value)
+  liveMessage.value = 'Экспорт резервной копии начат.'
+}
+const chooseBackupRestore = () => { backupInput.value?.click() }
+const prepareBackupRestore = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    pendingBackup.value = await readWorkspaceBackup(file)
+  } catch (error) {
+    store.notify(error instanceof Error ? error.message : 'Не удалось прочитать резервную копию', 'error')
+  } finally {
+    input.value = ''
+  }
+}
+const confirmBackupRestore = async () => {
+  if (!pendingBackup.value) return
+  const restored = pendingBackup.value
+  pendingBackup.value = null
+  await store.restoreWorkspaceBackup(restored)
+  void replaceEditorRoute(currentProjectId.value)
+  liveMessage.value = restored.pendingLocalCad.length
+    ? `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}. ${restored.pendingLocalCad.length} позиций ждут повторного импорта CAD-модели.`
+    : `Резервная копия восстановлена: ${restored.projects.length} ${projectWord(restored.projects.length)}.`
+}
+const downloadRecoverySnapshot = () => {
+  if (store.downloadStorageSnapshot()) liveMessage.value = 'Снимок повреждённых данных сохранён в файл.'
+}
+const rollbackToSnapshot = async () => {
+  const ok = await confirm({
+    title: 'Откатиться к предыдущему снимку?',
+    description: 'Текущие проекты будут заменены снимком, сохранённым перед последней удачной записью. Действие можно отменить через Ctrl+Z.',
+    confirmLabel: 'Откатиться',
+    danger: true,
+  })
+  if (!ok) return
+  if (await store.restoreStorageBackup()) liveMessage.value = 'Восстановлен предыдущий снимок локального хранилища.'
+}
+const backupDescription = computed(() => {
+  const backup = pendingBackup.value
+  if (!backup) return ''
+  const base = `Копия содержит ${backup.projects.length} ${projectWord(backup.projects.length)}. Текущий список проектов будет заменён; локальная библиотека CAD-моделей останется доступна.`
+  if (!backup.pendingLocalCad.length) return base
+  const sample = backup.pendingLocalCad.slice(0, 3).join(', ') + (backup.pendingLocalCad.length > 3 ? ` и ещё ${backup.pendingLocalCad.length - 3}` : '')
+  return `${base} В копии ${backup.pendingLocalCad.length} ${backup.pendingLocalCad.length === 1 ? 'позиция опирается' : 'позиций опираются'} на локально импортированные CAD-модели (${sample}), файлы которых в копию не входят: они появятся как «нет в каталоге», пока модели не будут импортированы заново.`
 })
 
 const removeSelected = async () => {
@@ -133,14 +177,7 @@ const saveNow = async () => {
 }
 const importProject = async (event: Event) => {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
-  try {
-    // A JSON envelope or an archive that also carries the CAD models; the reader tells them apart.
-    const result = await importProjectFile(file)
-    void replaceEditorRoute(currentProjectId.value)
-    liveMessage.value = result.models
-      ? `Проект «${result.project.name}» импортирован вместе с моделями: ${result.models}.`
-      : `Проект «${result.project.name}» импортирован.`
-  }
+  try { store.importProject(await readProjectFile(file)); void replaceEditorRoute(currentProjectId.value) }
   catch (error) { store.notify(error instanceof Error ? error.message : 'Не удалось импортировать проект', 'error') }
   input.value = ''
 }
@@ -177,6 +214,34 @@ const clearData = async () => {
   await store.clearLocalData(); clearConfirmOpen.value = false; liveMessage.value = 'Локальные данные удалены.'
 }
 const printProject = () => requestAnimationFrame(() => window.print())
+
+const EDITOR_TABS = [
+  { id: '2d', label: 'Схема 2D' },
+  { id: 'lines', label: 'Линии' },
+  { id: 'bom', label: 'Спецификация' },
+  { id: 'checks', label: 'Проверки' },
+  { id: 'report', label: 'Отчёт' },
+] as const
+type EditorTab = typeof EDITOR_TABS[number]['id']
+
+/** The tab lives in the URL, so a BOM link survives a reload and the back button works. */
+const normalizeTab = (value: unknown): EditorTab => {
+  const tab = Array.isArray(value) ? value[0] : value
+  return EDITOR_TABS.some((item) => item.id === tab) ? tab as EditorTab : '2d'
+}
+const activeTab = computed<EditorTab>(() => normalizeTab(route.query.tab))
+const setTab = (tab: EditorTab) => {
+  if (tab === activeTab.value) return
+  void router.replace({ query: { ...route.query, tab: tab === '2d' ? undefined : tab } })
+}
+const onTabKeydown = (event: KeyboardEvent, index: number) => {
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? EDITOR_TABS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + EDITOR_TABS.length) % EDITOR_TABS.length
+  setTab(EDITOR_TABS[next].id)
+  void nextTick(() => document.querySelector<HTMLButtonElement>(`[data-editor-tab="${EDITOR_TABS[next].id}"]`)?.focus())
+}
+// Focus mode is a statement about the board: arriving at it from another tab returns there.
+watch(canvasFocus, (focused) => { if (focused) setTab('2d') })
+
 const togglePanels = () => {
   if (window.matchMedia('(max-width: 760px)').matches) { mobilePanel.value = mobilePanel.value === 'catalog' ? null : 'catalog'; return }
   canvasFocus.value = !canvasFocus.value
@@ -270,11 +335,10 @@ onUnmounted(() => {
       </div>
       <div class="header-status" :class="{ 'status-error': storageStatus === 'save-failed', 'status-warning': storageStatus === 'storage-unavailable' }" role="status" aria-live="polite" :title="storageError || autosaveLabel"><i></i><span>{{ autosaveLabel }}</span><b v-if="autosaveTime" class="mono">{{ autosaveTime }}</b></div>
       <div class="header-actions">
-        <input ref="jsonInput" class="sr-only" tabindex="-1" aria-label="Файл проекта: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="importProject" />
-        <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии: JSON или архив" type="file" accept=".json,.zip,application/json,application/zip" @change="prepareBackupRestore" />
-        <button class="toolbar-button" @click="jsonInput?.click()">Импорт файла</button>
+        <input ref="jsonInput" class="sr-only" tabindex="-1" aria-label="Файл проекта JSON" type="file" accept=".json,application/json" @change="importProject" />
+        <input ref="backupInput" class="sr-only" tabindex="-1" aria-label="Файл резервной копии" type="file" accept=".json,application/json" @change="prepareBackupRestore" />
+        <button class="toolbar-button" @click="jsonInput?.click()">Импорт JSON</button>
         <button class="toolbar-button" @click="exportProject">Экспорт</button>
-        <button v-if="projectCad.length" class="toolbar-button" :disabled="archiveBusy" @click="exportProjectWithCad">Экспорт с моделями</button>
         <button class="toolbar-button" @click="exportBackup">Создать копию</button>
         <button class="toolbar-button" @click="chooseBackupRestore">Восстановить</button>
         <button class="toolbar-button" :disabled="storageStatus === 'saved'" @click="saveNow">Сохранить</button>
@@ -297,10 +361,32 @@ onUnmounted(() => {
     <main class="workspace" @click="onWorkspaceClick">
       <CatalogPanel :focus-category="catalogFocus" :class="{ 'mobile-active': mobilePanel === 'catalog' }" />
       <div class="center-workspace">
-        <Editor2D :focused="canvasFocus" @toggle-focus="togglePanels" />
-        <DevicePositionPad v-if="selectedDevice" />
-        <BomPanel />
-        <ProjectPrintReport :project="currentProject" :definitions="definitions" />
+        <div v-if="!hintsDismissed" class="editor-hints" data-editor-hints>
+          <b>Как устроен кабинет</b>
+          <ul>
+            <li>Разделы редактора — вкладки над схемой: спецификация, проверки и печатный отчёт всегда доступны, адрес сохраняет активную вкладку.</li>
+            <li>Позиции каталога различаются по происхождению: «Подтверждено» — сверено с источником, «Шаблон» — сгенерированная серия, «Импорт» — ваши CAD-модели.</li>
+            <li>CAD-модель импортируется кнопкой в панели каталога; привязать её к любому товару можно в инспекторе, а управлять библиотекой — в «Настройках».</li>
+          </ul>
+          <button type="button" data-dismiss-hints @click="dismissHints">Понятно, скрыть</button>
+        </div>
+        <nav class="editor-tabs" role="tablist" aria-label="Разделы редактора">
+          <button v-for="(tab, index) in EDITOR_TABS" :id="`editor-tab-${tab.id}`" :key="tab.id" :data-editor-tab="tab.id" :aria-controls="`editor-panel-${tab.id}`" :aria-selected="activeTab === tab.id" :class="{ active: activeTab === tab.id }" :tabindex="activeTab === tab.id ? 0 : -1" type="button" role="tab" @click="setTab(tab.id)" @keydown="onTabKeydown($event, index)">{{ tab.label }}</button>
+        </nav>
+        <div id="editor-panel-2d" class="tab-panel tab-panel-2d" role="tabpanel" aria-labelledby="editor-tab-2d" v-show="activeTab === '2d'">
+          <Editor2D :focused="canvasFocus" @toggle-focus="togglePanels" />
+          <DevicePositionPad v-if="selectedDevice" />
+        </div>
+        <div id="editor-panel-lines" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-lines" v-show="activeTab === 'lines'">
+          <LinesPanel @goto-board="setTab('2d')" />
+        </div>
+        <div id="editor-panel-bom" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-bom" v-show="activeTab === 'bom'">
+          <BomPanel />
+        </div>
+        <div id="editor-panel-checks" class="tab-panel" role="tabpanel" aria-labelledby="editor-tab-checks" v-show="activeTab === 'checks'">
+          <ChecksPanel @goto-board="setTab('2d')" />
+        </div>
+        <ProjectPrintReport id="editor-panel-report" :project="currentProject" :definitions="definitions" :class="{ 'screen-visible': activeTab === 'report' }" />
       </div>
       <InspectorPanel :class="{ 'mobile-active': mobilePanel === 'inspector' }" @focus-category="catalogFocus = $event" />
     </main>

@@ -84,7 +84,7 @@ const localAsset = (id: string, extra: Partial<ModelAsset> = {}): ModelAsset => 
   name: id,
   source: 'local',
   format: 'glb',
-  transform: { rotationY: 0, scale: 1, offsetX: 0, offsetY: 0, offsetZ: 0 },
+  transform: { rotationY: 0, scale: 1 },
   createdAt: '2026-01-01T00:00:00.000Z',
   ...extra,
 })

@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { expect, test, type Page } from '@playwright/test'
 import { CATALOG_REVISION } from '../../src/data/catalog'
 import { APPLICATION_REVISION } from '../../src/domain/projectSchema'
@@ -49,23 +50,23 @@ test('dashboard searches, filters, sorts and clears project metadata', async ({ 
   await expect(page.getByRole('heading', { name: 'Alpha щит' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Сбросить фильтры' }).first().click()
-  await pickOption(page, 'Пресет', 'Квартира')
+  await pickOption(page as unknown as Locator, 'Пресет', 'Квартира')
   await expect(page.getByRole('heading', { name: 'Alpha щит' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Beta мастерская' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Сбросить фильтры' }).first().click()
-  await pickOption(page, 'Корпус', 'U18C')
+  await pickOption(page as unknown as Locator, 'Корпус', 'U18C')
   await expect(page.getByRole('heading', { name: 'Beta мастерская' })).toBeVisible()
-  await pickOption(page, /^Рейка/, 'DIN-рейка 12 модулей')
+  await pickOption(page as unknown as Locator, /^Рейка/, 'DIN-рейка 12 модулей')
   await expect(page.getByRole('heading', { name: 'Проекты не найдены' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Сбросить фильтры' }).last().click()
-  await pickOption(page, 'Дата изменения', '30 дней')
+  await pickOption(page as unknown as Locator, 'Дата изменения', '30 дней')
   await expect(page.getByRole('heading', { name: 'Alpha щит' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Beta мастерская' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Сбросить фильтры' }).first().click()
-  await pickOptionByKeyboard(page, 'Сортировка', 'По названию')
+  await pickOptionByKeyboard(page as unknown as Locator, 'Сортировка', 'По названию')
   await expect(page.locator('.home-project-card h2')).toHaveText(['Alpha щит', 'Beta мастерская'])
   await expect(page.getByText('Показано 2 из 2')).toBeVisible()
 })

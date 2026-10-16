@@ -1,11 +1,7 @@
-import { faceSizeMm, genericTerminalPockets, hasSharedToggle, terminalColumns, terminalLabel } from '../../../domain/terminals'
-import type { DeviceDefinition } from '../../../domain/types'
+import type { DeviceDefinition } from './types'
 
 /** Frontal face drawings live in millimetres so a 1P and a 4P keep their real proportions. */
 export const FACE_MODULE_MM = 18
-/** The CHINT platform carries its own manufacturer heights and series table, both in the domain. */
-export { CHINT_FACE_HEIGHTS, CHINT_TERMINAL_SCREWS, chintFaceKind } from '../../../domain/terminals'
-export type { ChintKind } from '../../../domain/terminals'
 export const FACE_DEFAULT_HEIGHT_MM = 82
 export const FACE_MIN_HEIGHT_MM = 45
 export const FACE_MIN_WIDTH_MM = 14
@@ -18,6 +14,11 @@ const SIDEWALL_MM = 1.5
 const PANEL_INSET_X_MM = 1.4
 const PANEL_INSET_TOP_MM = 1.2
 const PANEL_INSET_BOTTOM_MM = 2.7
+const PANEL_MARGIN_MM = 0.9
+const POCKET_MIN_MM = 4.6
+const POCKET_MAX_MM = 9.6
+const POCKET_SIDE_MM = 1.6
+const POCKET_GAP_MM = 1.2
 const POCKET_BEVEL_MM = 0.55
 const TOGGLE_MIN_MM = 5
 const TOGGLE_MAX_MM = 8.6
@@ -96,20 +97,70 @@ export const faceDetailFor = (widthMm: number): FaceDetail => (widthMm < 24 ? 'm
 /** Neutral plastic shades keyed by device family, so the board does not look like one cloned sprite. */
 export const faceShellFamily = (product: DeviceDefinition): string => {
   const code = (product.series || product.sku || product.brand || '').trim().toUpperCase()
-  if (/CHINT/i.test(product.brand) && /^(NB1|NB2|NB3|NBH8|NL1)/.test(code)) return 'chint'
   if (/^(NB1|NB3|FI-10|AVO|VAO|BAO|A9F|5SL|5SY)/.test(code)) return 'light'
   if (/^(KM|RXM|RKM|CW|AF)/.test(code)) return 'warm'
   if (/^(NGU|NU6|NJVA|PR|SPD)/.test(code)) return 'graphite'
   if (/^(DRP|PRD|PHPS|HDR|NDR)/.test(code)) return 'psu'
   if (code === 'FORK' || product.category === 'busbar') return 'busbar'
+  if (code.startsWith('CITY9')) return 'city9'
   return 'generic'
 }
 
 /** Linked 1P+N devices carry one lever for both poles, exactly like the photographed RCCB. */
-export const faceSharedToggle = (product: DeviceDefinition): boolean => hasSharedToggle(product)
+export const faceSharedToggle = (product: DeviceDefinition): boolean => {
+  if (!['MCB', 'RCCB', 'RCBO'].includes(product.category)) return false
+  return Math.max(1, product.poles || 1) < Math.max(1, product.moduleWidth || 1)
+}
+
+/**
+ * The screws of a terminal block, in face millimetres.
+ *
+ * They used to be computed inside DeviceFace, which meant the drawing knew where its connection
+ * points were and the domain did not: a wire tool had no way to aim at a screw it could see. The
+ * geometry now lives here and the component reads it, so the picture and the wire cannot drift
+ * apart — the drawing is unchanged, but it is now the same fact both read.
+ */
+export interface FaceSocket { cx: number; cy: number; r: number }
+
+export const faceSocketGrid = (product: DeviceDefinition, metrics: DeviceFaceMetrics): FaceSocket[] => {
+  const isNgu = product.series === 'NGU'
+  if (isNgu) {
+    return [0.34, 0.66].flatMap((ratioY) => [0.32, 0.68].map((ratioX) => ({
+      cx: metrics.widthMm * ratioX,
+      cy: metrics.heightMm * ratioY,
+      r: Math.min(2, metrics.body.width * 0.08),
+    })))
+  }
+  const total = Math.max(2, Math.min(product.terminalCount || 6, 10))
+  const rows = Math.max(2, Math.min(Math.round(total / 2), 4))
+  const { body, heightMm } = metrics
+  return Array.from({ length: rows }, (_, row) => [0.28, 0.72].map((ratio) => ({
+    cx: body.x + body.width * ratio,
+    cy: heightMm * (0.24 + (row * 0.48) / Math.max(1, rows - 1)),
+    r: Math.min(1.9, body.width * 0.13),
+  }))).flat()
+}
 
 /** How many terminal columns the chassis shows on top and bottom. */
-export const faceTerminalColumns = (product: DeviceDefinition): number => terminalColumns(product)
+export const faceTerminalColumns = (product: DeviceDefinition): number => {
+  const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
+  const poles = Math.max(1, Math.round(product.poles || 1))
+  if (product.category === 'busbar' || product.category === 'terminals') return 0
+  if (product.category === 'relay') return Math.min(Math.max(poles, 1), 4)
+  if (product.category === 'PSU') return Math.min(moduleWidth, 4)
+  if (product.category === 'meter') return Math.min(moduleWidth, 6)
+  return faceSharedToggle(product) ? moduleWidth : Math.min(poles, moduleWidth)
+}
+
+const faceTerminalLabel = (product: DeviceDefinition, column: number, columns: number, bottom: boolean): string => {
+  if (product.category === 'PSU') return ['L', 'N', '+', '−'][column] ?? String(column + 1)
+  if ((product.category === 'RCCB' || product.category === 'RCBO') && columns === 2 && product.poles === 1) {
+    return bottom ? (column === 0 ? '3' : '4') : (column === 0 ? '1' : 'N')
+  }
+  if (columns <= 2) return String(column + 1 + (bottom ? columns : 0))
+  const top = column % 2 === 0 ? column + 1 : column + 2
+  return String(bottom ? top + 1 : top)
+}
 
 const xAt = (from: FacePoint, to: FacePoint, y: number): number => {
   const span = to.y - from.y
@@ -176,8 +227,8 @@ const buildToggle = (rect: FaceRect, column: number, shared: boolean): FaceToggl
 export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetrics => {
   const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
   const poles = Math.max(1, Math.round(product.poles || 1))
-  // The size comes from the domain so the router and this drawing can never disagree about it.
-  const { widthMm, heightMm } = faceSizeMm(product)
+  const widthMm = Math.max(FACE_MIN_WIDTH_MM, moduleWidth * FACE_MODULE_MM)
+  const heightMm = clamp(product.height || FACE_DEFAULT_HEIGHT_MM, FACE_MIN_HEIGHT_MM, 260)
   const columns = faceTerminalColumns(product)
   const sharedToggle = faceSharedToggle(product)
   const columnWidth = widthMm / Math.max(1, columns || moduleWidth)
@@ -204,25 +255,25 @@ export const getDeviceFaceMetrics = (product: DeviceDefinition): DeviceFaceMetri
     width: body.width - PANEL_INSET_X_MM * 2,
     height: body.height - PANEL_INSET_TOP_MM - PANEL_INSET_BOTTOM_MM,
   }
-  // The pocket band comes from the domain so the wire router anchors to the same screws.
-  const band = genericTerminalPockets(widthMm, heightMm, Math.max(1, columns))
-  const pocketHeight = band.top.height
-  const pocketWidth = band.top.width
+  const pocketHeight = clamp(heightMm * 0.095, 5.8, 8.6)
+  const pocketWidth = clamp(columnWidth - POCKET_GAP_MM * 2 - POCKET_SIDE_MM, POCKET_MIN_MM, POCKET_MAX_MM)
+  const topPocketY = panel.y + PANEL_MARGIN_MM
+  const bottomPocketY = panel.y + panel.height - PANEL_MARGIN_MM - pocketHeight
 
   const pockets: FacePocket[] = Array.from({ length: columns }, (_, column) => {
     const center = columnWidth * (column + 0.5)
     return buildPocket(
-      clamp(center - pocketWidth / 2, band.top.x, band.top.x + Math.max(0, panel.width - pocketWidth - 0.4)),
-      band.top.y,
+      clamp(center - pocketWidth / 2, panel.x + 0.4, panel.x + panel.width - pocketWidth - 0.4),
+      topPocketY,
       pocketWidth,
       pocketHeight,
       column,
-      terminalLabel(product, column, columns, false),
-      terminalLabel(product, column, columns, true),
+      faceTerminalLabel(product, column, columns, false),
+      faceTerminalLabel(product, column, columns, true),
     )
   })
 
-  const bottomPockets = pockets.map((pocket) => buildPocket(pocket.x, band.bottom.y, pocket.width, pocket.height, pocket.column, pocket.topLabel, pocket.bottomLabel))
+  const bottomPockets = pockets.map((pocket) => buildPocket(pocket.x, bottomPocketY, pocket.width, pocket.height, pocket.column, pocket.topLabel, pocket.bottomLabel))
 
   const toggles: FaceToggle[] = sharedToggle
     ? [buildToggle({

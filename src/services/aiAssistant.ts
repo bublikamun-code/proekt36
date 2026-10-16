@@ -8,13 +8,7 @@ import type { Category, RailDefinition } from '../domain/types'
  * browser and the local proxy, then reduces the answer back to something the app can act on.
  */
 
-/**
- * The proxy, the browser client and the production CSP all read VITE_AI_PROXY_PORT. It carries a
- * `VITE_` prefix on purpose: that is what the build exposes to the client, and using it here keeps
- * the three from drifting apart. It stays unset in almost every setup, in which case the default
- * below is what every part uses.
- */
-const PROXY_BASE = `http://127.0.0.1:${import.meta.env.VITE_AI_PROXY_PORT || 8787}`
+const PROXY_BASE = 'http://127.0.0.1:8787'
 const HEALTH_TIMEOUT_MS = 2500
 const CHAT_TIMEOUT_MS = 130_000
 
@@ -124,34 +118,28 @@ const buildAction = (raw: unknown, state: AssistantProjectState): AssistantActio
   return `неизвестный код действия: ${String(code).slice(0, 40)}`
 }
 
-const MAX_ACTIONS = 6
 const FENCE = /```panel36\s*([\s\S]*?)```/g
 
 export const parseAssistantAnswer = (raw: string, state: AssistantProjectState): AssistantAnswer => {
   const actions: AssistantAction[] = []
   const rejected: string[] = []
-  // Every block is read, not just the last one. A model that splits its plan into two fences used
-  // to have the first one dropped in silence: the user saw a suggestion they could not apply, and
-  // no message said anything was lost.
-  const blocks = [...raw.matchAll(FENCE)].map((match) => match[1] ?? '').filter((block) => block.trim())
+  let lastBlock: string | null = null
+
+  for (const match of raw.matchAll(FENCE)) lastBlock = match[1] ?? null
   const text = raw.replace(FENCE, '').trim()
 
-  for (const [index, block] of blocks.entries()) {
-    const position = blocks.length > 1 ? ` в блоке ${index + 1}` : ''
+  if (lastBlock) {
     try {
-      const parsed: unknown = JSON.parse(block)
+      const parsed: unknown = JSON.parse(lastBlock)
       const list = isRecord(parsed) && Array.isArray(parsed.actions) ? parsed.actions : []
-      if (!list.length) rejected.push(`в блоке действий${position} нет ни одного предложения`)
-      // The cap is on what the user is offered, counted across all blocks, so two fences cannot
-      // double it.
-      for (const item of list) {
-        if (actions.length >= MAX_ACTIONS) break
+      if (!list.length) rejected.push('в блоке действий нет ни одного предложения')
+      for (const item of list.slice(0, 6)) {
         const result = buildAction(item, state)
         if (typeof result === 'string') rejected.push(result)
         else actions.push(result)
       }
     } catch {
-      rejected.push(`блок действий${position} не разобран как JSON`)
+      rejected.push('блок действий не разобран как JSON')
     }
   }
 

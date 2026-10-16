@@ -9,8 +9,7 @@ const gltfJson = JSON.stringify({
   buffers: [{ uri: 'device.bin', byteLength: 4 }],
 })
 
-/** `new Uint8Array(bytes)` copies onto a plain ArrayBuffer, which is what a Blob part accepts. */
-const file = (name: string, bytes: Uint8Array) => new File([new Uint8Array(bytes)], name)
+const file = (name: string, bytes: Uint8Array) => new File([bytes as unknown as BlobPart], name)
 
 const makeGlb = () => {
   const json = new TextEncoder().encode(gltfJson)

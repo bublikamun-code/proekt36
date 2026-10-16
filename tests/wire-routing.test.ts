@@ -108,7 +108,7 @@ const firstPoint = (d: string) => {
 }
 
 /** The router works in millimetres and emits plate pixels, so expectations are scaled here. */
-const nearMm = (expected: { x: number; y: number }, actual: { x: number; y: number }, tolerance = 0.4) => ({
+const nearMm = (expected: { x: number; y: number }, _actual: { x: number; y: number }, tolerance = 0.4) => ({
   x: expect.closeTo(expected.x * MM, tolerance),
   y: expect.closeTo(expected.y * MM, tolerance),
 })
@@ -347,7 +347,6 @@ describe('подписи разводки', () => {
   it('переписывает подписи проводов при перенумерации и не трогает линии без клемм', () => {
     const map = new Map(CATALOG.map((item) => [item.id, item]))
     const devices = [placed('qf01', 'mcb-1p', 0), placed('qf02', 'mcb-1p', 1)]
-    const byId = new Map(devices.map((item) => [item.instanceId, item]))
     const jumper: Connection = {
       id: 'w', circuitId: '', fromBus: 'L', toDeviceId: 'qf02', color: '', thickness: 2, kind: 'jumper',
       fromTerminal: { deviceId: 'qf01', pole: 1, side: 'top' },

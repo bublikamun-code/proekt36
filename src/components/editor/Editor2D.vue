@@ -2,12 +2,16 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { getRowUsage, isDinDevice, placeProduct, resolveDeviceMove, resolveLayout } from '../../domain/layout'
-import { getPanelGeometry, PANEL_MM_TO_PX } from '../../domain/panelGeometry'
+import { getPanelGeometry } from '../../domain/panelGeometry'
+import { routeBoard, terminalTargets as terminalTargetsOf, wireFrameFromGeometry } from '../../domain/wireRouting'
+import type { WirePoint } from '../../domain/wireRouting'
+import { terminalKey } from '../../domain/terminals'
+import type { TerminalRef } from '../../domain/terminals'
+import type { TerminalTarget } from '../../domain/wireRouting'
 import { useProjectStore } from '../../stores/project'
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, usePreferencesStore } from '../../stores/preferences'
 import { beginBoardDrag, cancelBoardDrag, dragPointer, dragSource, isDragging, setBoardDropHandler } from '../../composables/useBoardDrag'
 import DeviceVisual from '../catalog/DeviceVisual.vue'
-import { faceTerminals, routeWire, terminalForBus, wireColor } from '../../domain/wiring'
 import type { PlacedDevice } from '../../domain/types'
 
 const props = defineProps<{ focused: boolean }>()
@@ -55,6 +59,20 @@ const updateViewport = () => {
   }
 }
 
+/**
+ * Publishes the viewport top of the board as a CSS variable. The floating panels and the
+ * scrim anchor to it instead of a hardcoded pixel count, so any chrome added above the
+ * editor (workspace nav, tabs) keeps the toolbar band clickable without touching this file.
+ */
+const syncPanelsTop = () => {
+  const element = canvasScroll.value
+  if (!element) return
+  document.documentElement.style.setProperty('--editor-panels-top', `${Math.round(element.getBoundingClientRect().top)}px`)
+}
+// The board's top moves when the focus mode toggles chrome above it (the hints card),
+// so the anchor measured at mount goes stale until re-measured after the layout settles.
+watch(() => props.focused, () => { void nextTick(syncPanelsTop) })
+
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateViewport)
   if (canvasScroll.value) {
@@ -64,20 +82,19 @@ onMounted(() => {
     canvasScroll.value.addEventListener('wheel', onCanvasWheel, { passive: false })
   }
   updateViewport()
+  requestAnimationFrame(syncPanelsTop)
+  window.addEventListener('resize', syncPanelsTop)
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   canvasScroll.value?.removeEventListener('wheel', onCanvasWheel)
+  window.removeEventListener('resize', syncPanelsTop)
   setBoardDropHandler(null)
   window.cancelAnimationFrame(frame)
 })
 
 const geometry = computed(() => getPanelGeometry(currentProject.value, definitions.value))
-
-/** Wire colours live in one place: the style sheet has the same three rules for the print report. */
-/** Routing is computed in millimetres, because that is the space the face geometry lives in. */
-const mmPathToPx = (path: string) => path.replace(/-?\d+(\.\d+)?/g, (value) => String(Math.round(Number(value) * PANEL_MM_TO_PX * 100) / 100))
 const capacity = computed(() => geometry.value.capacity)
 const slotIndexes = computed(() => Array.from({ length: capacity.value }, (_, index) => index))
 const moduleWidth = computed(() => geometry.value.moduleWidthPx)
@@ -104,7 +121,9 @@ const fitScale = computed(() => {
 const renderScale = computed(() => boardZoom.value ?? fitScale.value)
 const fitted = computed(() => boardZoom.value === null)
 
-const clampScale = (scale: number) => Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, Math.round(scale * 10) / 10))
+// Rounding lives only in setBoardZoom; a second rounding here fought the store's and the
+// recorded value could disagree with the zoom label.
+const clampScale = (scale: number) => Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, scale))
 /** Leaving auto-fit steps from whatever the board is showing now, so the first click does not jump. */
 const changeZoom = (delta: number) => preferences.setBoardZoom(clampScale((boardZoom.value ?? renderScale.value) + delta))
 const fitToView = () => preferences.setBoardZoom(null)
@@ -137,6 +156,10 @@ const onCanvasWheel = (event: WheelEvent) => {
 }
 
 const product = (id: string) => definitions.value.get(id)
+const productModel = (id: string) => {
+  const item = product(id)
+  return item ? store.resolveProductModel(item) : undefined
+}
 const productWidth = (productId: string) => Math.max(1, Math.round(geometry.value.deviceWidthMm(productId) / geometry.value.modulePitchMm))
 const rowUsage = (row: number) => getRowUsage(row, currentProject.value, definitions.value)
 const rowHeight = (row: number) => geometry.value.rowHeightsPx[row] ?? geometry.value.rowHeightsPx[0] ?? 56
@@ -260,12 +283,23 @@ const autoscroll = () => {
   if (!element) return
   const rect = element.getBoundingClientRect()
   const { x, y } = dragPointer.value
+  // The board renders full-bleed behind the floating panels, so a pointer over the
+  // catalogue or the inspector is geometrically inside the canvas edge band. That is
+  // not a request to scroll the board: it would shift the rails away from under a
+  // drop that is still being aimed.
+  const overOverlay = document.elementFromPoint(x, y)?.closest('.catalog-panel, .inspector-panel, .editor-tabs, .app-header, .mobile-nav')
+  if (overOverlay) return
   let dx = 0
   let dy = 0
   if (x < rect.left + EDGE_PX) dx = -SCROLL_STEP_PX
   else if (x > rect.right - EDGE_PX) dx = SCROLL_STEP_PX
-  if (y < rect.top + EDGE_PX) dy = -SCROLL_STEP_PX
-  else if (y > rect.bottom - EDGE_PX) dy = SCROLL_STEP_PX
+  // A pointer that already snaps to a rail is aiming a live drop; scrolling the board
+  // now would slide the rails away from under it. Vertical autoscroll only serves a
+  // pointer hunting for a rail that is still off screen.
+  if (rowAtPoint(y) < 0) {
+    if (y < rect.top + EDGE_PX) dy = -SCROLL_STEP_PX
+    else if (y > rect.bottom - EDGE_PX) dy = SCROLL_STEP_PX
+  }
   if (!dx && !dy) return
   element.scrollLeft += dx
   element.scrollTop += dy
@@ -297,7 +331,7 @@ const commitDrop = () => {
 setBoardDropHandler(commitDrop)
 
 const startDeviceDrag = (event: PointerEvent, device: PlacedDevice) => {
-  if (device.mount === 'busbar') return
+  if (device.mount === 'busbar' || wireMode.value) return
   beginBoardDrag({ kind: 'placed', id: device.instanceId, width: productWidth(device.productId), fromRow: device.row, fromSlot: device.slot }, event)
 }
 
@@ -349,87 +383,153 @@ const onDeviceKeydown = (event: KeyboardEvent, device: PlacedDevice) => {
 }
 
 const onBoardKeydown = (event: KeyboardEvent) => {
-  if (event.key !== 'Escape') return
-  cancelBoardDrag()
-  preview.value = null
+  const target = event.target as HTMLElement | null
+  const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+  if (event.key === 'Escape') {
+    // Escape unwinds one layer at a time: a half-drawn wire first, then the tool itself.
+    if (wireStart.value) { cancelWire(); return }
+    if (wireMode.value) { toggleWireMode(false); return }
+    cancelBoardDrag()
+    preview.value = null
+    return
+  }
+  if (typing) return
+  // W is the shortcut for the wire tool, the way every drawing program labels its line tool.
+  if (event.key.toLowerCase() === 'w' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    toggleWireMode()
+    return
+  }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && store.selectedConnectionId) {
+    event.preventDefault()
+    store.deleteConnection(store.selectedConnectionId)
+  }
 }
 
-const wirePaths = computed(() => {
-  const paths: Array<{ id: string; d: string; bus: 'L' | 'N' | 'PE'; color: string; thickness: number; label: string; source: 'busbar' | 'device' }> = []
-  const board = geometry.value
-  const busX: Record<'L' | 'N' | 'PE', number> = { L: 3, N: 7, PE: 11 }
-  const devicesById = new Map(currentProject.value.devices.map((device) => [device.instanceId, device]))
-  // Face metrics are pure per product, and a board mixes a few hundred products at most, so the
-  // terminals are resolved once per product instead of once per wire and once per recompute.
-  const terminalsByProduct = new Map<string, ReturnType<typeof faceTerminals>>()
+// The router works in plate-local millimetres, so a wire no longer drifts by the plate offset
+// the old hand-rolled paths carried: their Y came from the cabinet top while the overlay's
+// viewBox starts at the plate.
 
-  /**
-   * Where a device sits in board millimetres, and the terminals on it. The board draws the same
-   * metrics the wire lands in, so a connection cannot end up pointing at a place the face has no
-   * clamp for.
-   */
-  const terminalAt = (instanceId: string, bus: 'L' | 'N' | 'PE', side: 'top' | 'bottom') => {
-    const device = devicesById.get(instanceId)
-    if (!device || device.mount === 'busbar') return null
-    const product = definitions.value.get(device.productId)
-    if (!product) return null
-    let terminals = terminalsByProduct.get(device.productId)
-    if (!terminals) {
-      terminals = faceTerminals(product)
-      terminalsByProduct.set(device.productId, terminals)
-    }
-    const terminal = terminalForBus(terminals, bus, side)
-    if (!terminal) return null
-    const leftMm = board.railStartXMm + device.slot * board.modulePitchMm
-    const topMm = board.rowTopMm[device.row]
-    return {
-      x: leftMm + terminal.x,
-      y: topMm + terminal.y,
-      height: terminal.height,
-    }
-  }
+/** A jumper carries no phase, so it takes the neutral grey; everything else takes its bus. */
+const wireClass = (path: { kind: string; bus: string; phase?: number }): string => {
+  if (path.kind === 'jumper') return 'jumper'
+  if (path.bus === 'N') return 'n'
+  if (path.bus === 'PE') return 'pe'
+  return `l phase-${path.phase ?? 1}`
+}
 
-  for (const connection of currentProject.value.connections ?? []) {
-    const target = devicesById.get(connection.toDeviceId)
-    if (!target) continue
-    const targetPoint = terminalAt(connection.toDeviceId, connection.fromBus, 'top')
-    if (!targetPoint) continue
+/**
+ * Millimetres of conductor to pixels of stroke. The default 2 mm section lands on the widths the
+ * stylesheet already used (0.8 px core, 2.4 px casing), so a board nobody has edited draws exactly
+ * as it did before the inspector's colour and thickness could reach the drawing at all.
+ */
+const MM_TO_STROKE_PX = 0.4
+const conductorStyle = (path: { customColor: boolean; color: string; thickness: number }, role: 'core' | 'casing') => {
+  const style: Record<string, string> = {}
+  if (path.customColor) style.stroke = path.color
+  const px = path.thickness * MM_TO_STROKE_PX * (role === 'casing' ? 3 : 1)
+  style.strokeWidth = `${px}px`
+  return style
+}
+const coreStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'core')
+const casingStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'casing')
 
-    const bus = connection.fromBus
-    // A connection that names its source device is a cascade — the feed to one breaker coming out
-    // of another. Those wires were never drawn at all, and a board built as a cascade of breakers
-    // used to look like a board with no wiring between its devices.
-    const source = connection.fromDeviceId ? 'device' : 'busbar'
-    const sourcePoint = source === 'device' && connection.fromDeviceId
-      ? terminalAt(connection.fromDeviceId, bus, 'bottom')
-      : null
-    if (source === 'device' && !sourcePoint) continue
+// Markings crowd a dense board, so the drawing keeps a switch that turns them off.
+const showWireLabels = ref(true)
 
-    const origin = sourcePoint
-      ? { x: sourcePoint.x, y: sourcePoint.y }
-      : { x: busX[bus], y: board.rowTopMm[target.row] }
+/**
+ * The wire tool is two clicks: a start clamp, then an end clamp. The pending end is kept as a
+ * plain terminal ref rather than as a rendered connection, so Escape can drop it without
+ * touching undo history — nothing is in the project until the second click lands.
+ */
+/** Pole counts a stocked comb comes in; the row button offers all of them rather than guessing one. */
+const COMB_POLES = [1, 2, 3, 4] as const
 
-    paths.push({
-      id: connection.id,
-      d: mmPathToPx(routeWire({ from: origin, to: targetPoint, source, stubMm: 2.4 })),
-      bus,
-      color: connection.color || wireColor(bus),
-      thickness: connection.thickness || 2,
-      label: connection.label,
-      source,
-    })
-  }
-  return paths
+const boardRoot = ref<HTMLElement | null>(null)
+const wireMode = ref(false)
+const wireStart = ref<TerminalRef | null>(null)
+const wireCursor = ref<WirePoint | null>(null)
+
+const boardFrame = computed(() => wireFrameFromGeometry(geometry.value))
+const board = computed(() => routeBoard(currentProject.value, definitions.value, boardFrame.value))
+const wirePaths = computed(() => board.value.wires)
+const terminalTargets = computed(() => terminalTargetsOf(currentProject.value, definitions.value, boardFrame.value))
+
+/** The stretch drawn from the pending start to the pointer, in the same space as the wires. */
+const wirePreviewPath = computed(() => {
+  if (!wireStart.value || !wireCursor.value) return ''
+  const start = terminalTargets.value.find((target) => target.key === terminalKey(wireStart.value as TerminalRef))
+  if (!start) return ''
+  const end = wireCursor.value
+  // Orthogonal, like the real thing: a diagonal rubber band would promise a route the router
+  // never draws, and the user would be aiming at a path that does not exist.
+  const bendX = end.x
+  return `M ${start.x} ${start.y} L ${start.x} ${end.y} L ${bendX} ${end.y}`
 })
+
+const startWire = (target: TerminalTarget) => {
+  if (target.occupied) { store.notify(`Клемма ${target.label} уже занята`, 'error'); return }
+  wireStart.value = { deviceId: target.deviceId, pole: target.pole, side: target.side }
+  announcement.value = `Провод: начало ${target.label}. Выберите клемму назначения`
+}
+
+/** Second click: a bus bar feeds one clamp, a clamp feeds another. */
+const finishWire = (target: TerminalTarget | { busId: string; label: string; x: number; y: number }) => {
+  const from = wireStart.value
+  if (!from) return
+  const ok = 'busId' in target ? store.addBusWire(target.busId, { deviceId: from.deviceId, pole: from.pole, side: from.side })
+    : store.addWire(from, { deviceId: target.deviceId, pole: target.pole, side: target.side })
+  if (ok) announcement.value = 'Провод добавлен'
+  wireStart.value = null
+  wireCursor.value = null
+}
+
+const cancelWire = () => {
+  if (!wireMode.value && !wireStart.value) return
+  wireStart.value = null
+  wireCursor.value = null
+  announcement.value = ''
+}
+
+const toggleWireMode = (value = !wireMode.value) => {
+  wireMode.value = value
+  cancelWire()
+  // The shortcut only works if the board can take the keystroke, and the toolbar button keeps
+  // focus after a click, so focus moves here explicitly when the tool comes on.
+  if (value) { boardRoot.value?.focus(); announcement.value = 'Инструмент «Провод»: выберите клемму начала' }
+}
+
+/** Pointer position in plate pixels, so the rubber band shares the overlay's coordinate space. */
+const onWirePointerMove = (event: PointerEvent) => {
+  if (!wireStart.value) return
+  const plate = (event.currentTarget as Element).getBoundingClientRect()
+  wireCursor.value = {
+    x: (event.clientX - plate.left) / renderScale.value,
+    y: (event.clientY - plate.top) / renderScale.value,
+  }
+}
+
+const selectWire = (id: string) => {
+  if (wireMode.value) return
+  store.selectConnection(id)
+  const connection = currentProject.value.connections.find((item) => item.id === id)
+  if (connection) announcement.value = `Выбран провод: ${connection.label || connection.id}`
+}
+
 </script>
 
 <template>
-  <section class="editor-2d" :class="{ 'is-dragging': isDragging }" aria-label="Схема электрощита" @keydown="onBoardKeydown">
+  <section ref="boardRoot" class="editor-2d" tabindex="-1" :class="{ 'is-dragging': isDragging, 'wire-tool': wireMode }" aria-label="Схема электрощита" @keydown="onBoardKeydown">
     <p class="sr-only" aria-live="polite">{{ announcement }}</p>
     <div class="canvas-toolbar">
       <div class="view-caption"><span class="live-dot"></span><span>Схема щита</span><b>{{ geometry.cabinetWidthMm }} × {{ geometry.cabinetHeightMm }} × {{ geometry.cabinetDepthMm }} мм</b><b class="canvas-spec">{{ geometry.capacity }} мод./рейка · {{ pitchLabel }}</b></div>
       <div class="canvas-tools">
+        <div class="tool-segment" role="group" aria-label="Инструмент доски">
+          <button data-tool="select" :class="{ active: !wireMode }" :aria-pressed="!wireMode" @click="toggleWireMode(false)">Выбор</button>
+          <button data-tool="wire" :class="{ active: wireMode }" :aria-pressed="wireMode" @click="toggleWireMode(true)">Провод <kbd>W</kbd></button>
+        </div>
         <button class="panel-toggle" data-panel-toggle :aria-pressed="focused" :aria-label="focused ? 'Показать боковые панели' : 'Скрыть боковые панели'" @click="emit('toggle-focus')">{{ focused ? 'Панели' : 'Только щит' }}</button>
+        <button class="panel-toggle" data-wire-labels :aria-pressed="showWireLabels" :aria-label="showWireLabels ? 'Скрыть подписи проводов' : 'Показать подписи проводов'" @click="showWireLabels = !showWireLabels">{{ showWireLabels ? 'Подписи' : 'Без подписей' }}</button>
         <div class="zoom-controls" role="group" aria-label="Масштаб схемы">
           <button aria-label="Уменьшить масштаб" @click="changeZoom(-0.1)">−</button>
           <span class="mono">{{ Math.round(renderScale * 100) }}%</span>
@@ -446,15 +546,15 @@ const wirePaths = computed(() => {
           <div class="mounting-plate" :style="{ left: `${geometry.plateInsetPx}px`, top: `${geometry.plateTopPx}px`, width: `${geometry.plateWidthPx}px`, height: `${geometry.plateHeightPx}px` }">
             <span v-for="fastener in 4" :key="fastener" class="plate-fastener" aria-hidden="true"></span>
             <div class="bus-bars" aria-hidden="true"><span class="bus-zone-label">ШИНЫ</span><span class="bus-l"></span><span class="bus-n"></span><span class="bus-pe"></span><small>L</small><small>N</small><small>PE</small></div>
-            <div class="din-rows" :style="{ width: `${railWidth}px`, marginLeft: `${geometry.railStartXPx}px`, gap: `${geometry.rowGapPx}px` }">
+            <div class="din-rows" :style="{ width: `${railWidth}px`, marginLeft: `${geometry.railStartXPx}px`, marginTop: `${geometry.plateWireBandPx}px`, gap: `${geometry.rowGapPx}px` }">
               <div v-for="row in rows" :key="row" class="din-row" :class="{ 'drag-over': preview?.row === row, 'drop-blocked': preview?.row === row && Boolean(preview?.error) }" :style="rowStyle(row)">
-                <div class="row-label" :style="rowLabelStyle()"><b>{{ String(row + 1).padStart(2, '0') }}</b><small>{{ rowUsage(row).used }}/{{ capacity }}</small></div>
+                <div class="row-label" :style="rowLabelStyle()"><b>{{ String(row + 1).padStart(2, '0') }}</b><small>{{ rowUsage(row).used }}/{{ capacity }}</small><div class="row-comb-add"><span>Гребёнка</span><button v-for="poles in COMB_POLES" :key="poles" :data-add-comb="`${row}-${poles}`" :disabled="!rowUsage(row).used" :aria-label="`Добавить гребёнку ${poles}P в ряд ${row + 1}`" :title="`Гребёнка ${poles}P над рядом`" @click.stop="store.addComb(row, poles)">{{ poles }}P</button></div></div>
                 <div class="din-rail" :style="railStyle(row)">
                   <button v-for="slot in slotIndexes" :key="slot" class="slot-cell" :class="{ occupied: slotOccupied(row, slot), free: !slotOccupied(row, slot), shifted: slotTouched(row, slot) }" :data-slot="slot + 1" :data-slot-state="slotTouched(row, slot) ? 'shifted' : (slotOccupied(row, slot) ? 'occupied' : 'free')" :style="{ width: `${moduleWidth}px` }" :aria-label="`Ряд ${row + 1}, модуль ${slot + 1}. ${slotOccupied(row, slot) ? 'Занят. Вставить и сдвинуть соседние' : 'Свободен. Добавить устройство'}`" @click="placeAtEnd(row, slot)"></button>
                   <div v-if="preview?.row === row" class="drop-preview" :class="{ blocked: Boolean(preview.error) }" :style="previewStyle"><span>{{ previewLabel }}</span></div>
-                  <button v-for="device in devicesInRow(row)" :key="device.instanceId" class="placed-device" :class="[devicePhaseClass(device), deviceCategoryClass(device), { selected: selectedDeviceId === device.instanceId, dragging: device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : PREVIEW_ID), shifting: shiftingIds.has(device.instanceId), 'is-preview': device.instanceId === PREVIEW_ID, 'busbar-device': device.mount === 'busbar', 'missing-product': !product(device.productId) }]" :data-instance-id="device.instanceId" :data-phase="device.phase" :data-mount="device.mount || 'din'" :data-footprint-modules="productWidth(device.productId)" :data-width-mm="geometry.deviceWidthMm(device.productId)" :style="deviceStyle(device)" :aria-label="`${device.address}, ${product(device.productId)?.name ?? 'товар отсутствует в каталоге'}`" :aria-grabbed="isDragging && device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : '')" @click="store.selectedDeviceId = device.instanceId" @pointerdown="startDeviceDrag($event, device)" @keydown="onDeviceKeydown($event, device)">
+                  <button v-for="device in devicesInRow(row)" :key="device.instanceId" class="placed-device" :class="[devicePhaseClass(device), deviceCategoryClass(device), { selected: selectedDeviceId === device.instanceId, dragging: device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : PREVIEW_ID), shifting: shiftingIds.has(device.instanceId), 'is-preview': device.instanceId === PREVIEW_ID, 'busbar-device': device.mount === 'busbar', 'missing-product': !product(device.productId) }]" :data-instance-id="device.instanceId" :data-phase="device.phase" :data-mount="device.mount || 'din'" :data-footprint-modules="productWidth(device.productId)" :data-width-mm="geometry.deviceWidthMm(device.productId)" :style="deviceStyle(device)" :aria-label="`${device.address}, ${product(device.productId)?.name ?? 'товар отсутствует в каталоге'}`" :aria-grabbed="isDragging && device.instanceId === (dragSource?.kind === 'placed' ? dragSource.id : '')" @click="!wireMode && (store.selectedDeviceId = device.instanceId)" @pointerdown="startDeviceDrag($event, device)" @keydown="onDeviceKeydown($event, device)">
                     <template v-if="product(device.productId)">
-                      <DeviceVisual :product="product(device.productId)!" :width="Math.max(18, geometry.deviceWidthPx(device.productId))" />
+                      <DeviceVisual :product="product(device.productId)!" :model="productModel(device.productId)" :width="Math.max(18, geometry.deviceWidthPx(device.productId))" />
                       <b>{{ device.address }}</b><small>{{ product(device.productId)?.series || `${product(device.productId)?.ratedCurrent}A` }}</small>
                     </template>
                     <template v-else>
@@ -466,7 +566,43 @@ const wirePaths = computed(() => {
                 <div class="row-capacity" :class="{ 'is-full': rowUsage(row).percent >= 100 }" role="img" :aria-label="`Ряд ${row + 1}: занято ${rowUsage(row).used} из ${capacity} модулей${rowUsage(row).percent >= 100 ? ', ряд заполнен' : ''}`"><span :style="{ height: `${rowUsage(row).percent}%` }"></span></div>
               </div>
             </div>
-            <svg class="wires" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true"><path v-for="path in wirePaths" :key="path.id" :data-connection-id="path.id" :d="path.d" :class="`wire-${path.bus.toLowerCase()}`" :stroke="path.color" :style="{ strokeWidth: `${path.thickness}px` }"><title>{{ path.label }}</title></path></svg>
+            <svg class="wires" :class="{ 'labels-off': !showWireLabels }" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true">
+              <g class="wire-combs">
+                  <g v-for="comb in board.combs" :key="comb.id" class="comb" :class="{ starved: comb.starved }" :data-comb-id="comb.id" :data-comb-row="comb.row" :data-comb-poles="comb.poles">
+                  <rect class="comb-bar" :x="comb.x" :y="comb.y" :width="comb.width" :height="comb.height" rx="1" />
+                  <path v-for="(tooth, index) in comb.teeth" :key="index" class="comb-tooth" :d="`M ${tooth.x} ${comb.y} V ${tooth.y}`" />
+                </g>
+              </g>
+              <g class="wire-buses">
+                <g v-for="bus in board.buses" :key="bus.id" :data-bus-id="bus.id" :data-bus-kind="bus.kind">
+                  <rect :x="bus.x" :y="bus.y" :width="bus.width" :height="bus.height" rx="1.5" :class="`bus-bar bus-${bus.kind.toLowerCase()}`" />
+                  <text :x="bus.x + 3" :y="bus.y + bus.height * 0.78" font-size="4" font-weight="700" :class="`bus-tag bus-tag-${bus.kind.toLowerCase()}`">{{ bus.label }}</text>
+                </g>
+              </g>
+              <!-- Casing first, core on top: one pass per wire so every conductor keeps its own
+                   outline instead of merging with its neighbours where they run side by side. -->
+              <path v-for="path in wirePaths" :key="`${path.id}-casing`" :d="path.d" :class="`wire-casing wire-${wireClass(path)}`" :style="casingStyle(path)" />
+              <path v-for="path in wirePaths" :key="`${path.id}-core`" :data-connection-id="path.id" :d="path.d" :class="`wire-core wire-${wireClass(path)}${path.circuitId && path.circuitId === store.selectedLineId ? ' line-active' : ''}`" :style="coreStyle(path)"><title>{{ path.label }}</title></path>
+              <g class="wire-labels">
+                <text v-for="path in wirePaths" :key="`${path.id}-label`" :x="path.labelAt.x" :y="path.labelAt.y" class="wire-label">{{ path.label }}</text>
+              </g>
+              <path v-if="wirePreviewPath" class="wire-preview" :d="wirePreviewPath" />
+            </svg>
+            <!-- The hit layer sits over the drawing rather than inside it: the drawing itself is
+                 aria-hidden decoration, and a transparent stroke is the only way to make a 0.8px
+                 conductor clickable at all. Terminal targets come from the router, so a click and
+                 the wire it will create land on the same screw. -->
+            <svg class="wire-hits" :class="{ active: wireMode }" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true" @pointermove="onWirePointerMove" @pointerleave="wireCursor = null">
+              <path v-for="path in wirePaths" :key="`hit-${path.id}`" class="wire-hit" :class="{ selected: store.selectedConnectionId === path.id }" :d="path.d" :data-connection-id="path.id" @click="selectWire(path.id)" />
+              <template v-if="wireMode">
+                <g class="wire-port-hits">
+                  <circle v-for="target in terminalTargets" :key="target.key" class="wire-port" :class="{ taken: target.occupied, source: wireStart && wireStart.deviceId === target.deviceId && wireStart.pole === target.pole && wireStart.side === target.side }" :cx="target.x" :cy="target.y" r="2.6" :data-terminal="target.key" :data-terminal-state="target.occupied ? 'taken' : 'free'" :data-terminal-label="target.label" @click.stop="wireStart ? finishWire(target) : startWire(target)" />
+                </g>
+                <g class="wire-port-hits">
+                  <rect v-for="bus in board.buses" :key="`bus-${bus.id}`" class="wire-bus-port" :x="bus.x + 4" :y="bus.y" :width="Math.max(0, bus.width - 8)" :height="bus.height" :data-terminal-bus="bus.id" :data-terminal-bus-kind="bus.kind" :data-terminal-label="bus.label" @click.stop="wireStart && finishWire({ busId: bus.id, label: bus.label, x: bus.x, y: bus.y })" />
+                </g>
+              </template>
+            </svg>
           </div>
           <div class="cabinet-label"><span>{{ currentProject.name }}</span><small>{{ cabinetLabel }}</small></div>
         </div>

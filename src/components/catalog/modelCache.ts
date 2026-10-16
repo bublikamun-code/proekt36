@@ -90,9 +90,9 @@ export const loadPreviewModel = (source: { assetId?: string; url?: string }): Pr
   const cached = cache.get(key)
   if (cached) return cached
   const promise = (assetId
-    ? getModelAsset(assetId).then((data) => {
-      if (!data) throw new Error('Локальный CAD-файл не найден в IndexedDB')
-      return parseLocalModel(data)
+    ? getModelAsset(assetId).then((record) => {
+      if (!record) throw new Error('Локальный CAD-файл не найден в IndexedDB')
+      return parseLocalModel(record.data)
     })
     : new GLTFLoader().loadAsync(url!)).then((gltf) => gltf.scene)
   cache.set(key, promise)

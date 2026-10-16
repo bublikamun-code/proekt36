@@ -172,7 +172,7 @@ describe('шины N и PE', () => {
       connections: [connection({ id: 'w1', fromBus: 'N', busId: 'bus-n', toDeviceId: 'qf01' })],
     })
     const wire = wireOf(source, 'w1')!
-    const bar = busBarLayout(frameOf(source), source.busAssemblies).get('bus-n')!
+    const bar = busBarLayout(frameOf(source), source.busAssemblies ?? []).get('bus-n')!
 
     expect(firstPoint(wire).y).toBeCloseTo((bar.y + bar.height / 2) * 1.5, 6)
     // It climbs the incoming strip, so the run starts left of the first rail module.

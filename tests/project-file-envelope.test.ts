@@ -10,7 +10,6 @@ import { createProjectFileEnvelope, downloadProject, readProjectFile } from '../
 import { allCatalog } from '../src/data/catalog'
 import { installBrowserEnv } from './support/browser-env'
 import type { BrowserEnv } from './support/browser-env'
-import type { PanelProject } from '../src/domain/types'
 
 let env: BrowserEnv | null = null
 

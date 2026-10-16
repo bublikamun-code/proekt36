@@ -78,15 +78,9 @@ export const pageMetadata: Record<string, PageMetadata> = {
     robots: 'noindex,nofollow',
     public: false,
   },
-  board: {
-    title: 'Доска щита — Панель 36',
-    description: 'Доска распределительного щита с проводами, идущими в зажимы, в Панель 36.',
-    robots: 'noindex,nofollow',
-    public: false,
-  },
-  'project-board': {
-    title: 'Доска щита — Панель 36',
-    description: 'Доска распределительного щита с проводами, идущими в зажимы, в Панель 36.',
+  settings: {
+    title: 'Настройки кабинета — Панель 36',
+    description: 'Тема, локальное хранилище и библиотека CAD-моделей Панель 36.',
     robots: 'noindex,nofollow',
     public: false,
   },
@@ -114,29 +108,19 @@ export const applyPageMetadata = (metadata: PageMetadata) => {
   setMeta('meta[name="robots"]', 'name', 'robots', metadata.robots)
   setMeta('meta[property="og:title"]', 'property', 'og:title', metadata.title)
   setMeta('meta[property="og:description"]', 'property', 'og:description', metadata.description)
-  // Every page in this app is a website page; nothing here is an article or a video.
-  setMeta('meta[property="og:type"]', 'property', 'og:type', 'website')
+  setMeta('meta[property="og:type"]', 'property', 'og:type', metadata.public ? 'website' : 'website')
   setMeta('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary')
   setMeta('meta[name="twitter:title"]', 'name', 'twitter:title', metadata.title)
   setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', metadata.description)
 
   const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin
-  // A canonical link tells a crawler which URL is the real one for this page, including on
-  // pages that must not be indexed at all — which is the case for everything behind the
-  // workspace. Pointing those pages at themselves would advertise a private board to a search
-  // engine, so a page that is not public gets no canonical reference; its `noindex` tag and
-  // robots.txt are what keep it out.
   let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
-  if (metadata.public) {
-    if (!canonical) {
-      canonical = document.createElement('link')
-      canonical.rel = 'canonical'
-      document.head.append(canonical)
-    }
-    canonical.href = new URL(window.location.pathname, siteUrl).toString()
-  } else {
-    canonical?.remove()
+  if (!canonical) {
+    canonical = document.createElement('link')
+    canonical.rel = 'canonical'
+    document.head.append(canonical)
   }
+  canonical.href = new URL(window.location.pathname, siteUrl).toString()
 
   const script = document.head.querySelector<HTMLScriptElement>('script[data-panel36-schema]')
   if (metadata.public) {

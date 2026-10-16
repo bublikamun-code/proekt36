@@ -8,7 +8,7 @@ import type { DeviceDefinition } from '../src/domain/types'
 
 const definitions = new Map(workspaceCatalog.map((product) => [product.id, product]))
 const product = (id: string, width: number): DeviceDefinition => ({ ...definitions.get('ekf-mcb-1p-c6')!, id, moduleWidth: width })
-const legacyProject = () => migrateProject({ settings: { enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9 } })
+const legacyProject = () => migrateProject({ settings: { inputCurrent: 40, phase: 1, enclosureWidth: 540, enclosureHeight: 650, enclosureDepth: 110, rows: 9, reserveModules: 8 } })
 
 describe('slot layout', () => {
   const p1 = product('p1', 1)

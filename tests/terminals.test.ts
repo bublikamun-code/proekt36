@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviceTerminals, terminalColumns, terminalKey, terminalLabel, terminalType } from '../src/domain/terminals'
+import { deviceTerminals, terminalColumns, terminalKey, terminalLabel } from '../src/domain/terminals'
 import { builtinCatalog } from '../src/data/catalog'
 import type { DeviceDefinition } from '../src/domain/types'
 

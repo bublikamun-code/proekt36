@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { builtinCatalog, enmasSeriesCatalog } from '../data/catalog'
+import { workspaceCatalog, enmasSeriesCatalog } from '../data/catalog'
 import { embeddedModelById } from '../data/models'
 import {
   compactRow,
@@ -59,7 +59,7 @@ const seedProject = () => {
   // createProject derived from the apartment preset (NX8-24, rail-12) has to survive.
   // The old literal replacement silently degraded the seed to the 17.5 mm legacy layout.
   project.settings = { ...project.settings, inputCurrent: 40, phase: 1, reserveModules: 8 }
-  const definitions = new Map(builtinCatalog.map((item) => [item.id, item]))
+  const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
   const products = [
     definitions.get('ekf-spd-t1-3p-n-pe')!, definitions.get('ekf-mcb-4p-b32')!,
     definitions.get('ekf-rccb-4p-40')!, definitions.get('ekf-mcb-1p-c6')!,
@@ -173,7 +173,7 @@ export const useProjectStore = defineStore('project', () => {
     product.modelId ? modelAssetsById.value.get(product.modelId) : undefined
   const definitions = computed(() => {
     const map = new Map<string, DeviceDefinition>([
-      ...builtinCatalog.map((item) => [item.id, item] as const),
+      ...workspaceCatalog.map((item) => [item.id, item] as const),
       ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
       ...modelLibrary.value.products.map((item) => [item.id, item] as const),
     ])

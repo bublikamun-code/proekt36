@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { closeSidePanels, gotoEditor, openSidePanels } from './helpers'
+import { gotoEditor, openSidePanels } from './helpers'
 
 test.describe('shell UI', () => {
   test('editor exposes only the 2D board', async ({ page }) => {
