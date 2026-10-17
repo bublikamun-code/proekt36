@@ -49,8 +49,26 @@ const contentSecurityPolicy = (): Plugin => ({
   },
 })
 
+/**
+ * Static hosts without rewrite rules (GitHub Pages) answer a deep link with the 404 document.
+ * A copy of the entry as 404.html boots the whole app right on the requested URL, and the
+ * router — which reads the real location — lands the user where they asked to be.
+ */
+const spaFallback = (): Plugin => ({
+  name: 'panel36-spa-fallback',
+  apply: 'build',
+  generateBundle(_options, bundle) {
+    if (!process.env.VITE_PUBLIC_BASE) return
+    const index = bundle['index.html']
+    if (index && index.type === 'asset') this.emitFile({ type: 'asset', fileName: '404.html', source: index.source })
+  },
+})
+
 export default defineConfig({
-  plugins: [vue(), contentSecurityPolicy()],
+  // The container and the dev server serve the app from the root; GitHub Pages serves it
+  // from a repository subdirectory, and a pages build sets VITE_PUBLIC_BASE to that path.
+  base: process.env.VITE_PUBLIC_BASE || '/',
+  plugins: [vue(), contentSecurityPolicy(), spaFallback()],
   server: {
     // Explicit IPv4 + fixed port: Playwright's webServer polls 127.0.0.1:5173, and a
     // wildcard/::1-only listener used to make it time out on some machines.

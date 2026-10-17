@@ -11,7 +11,9 @@ declare module 'vue-router' {
 }
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // BASE_URL follows the build base («/» in the container, the repository path on Pages),
+  // so deep links resolve no matter where the static host mounts the app.
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
