@@ -8,7 +8,12 @@ import type { Category, RailDefinition } from '../domain/types'
  * browser and the local proxy, then reduces the answer back to something the app can act on.
  */
 
-const PROXY_BASE = 'http://127.0.0.1:8787'
+/**
+ * Same-origin path: in dev the vite server proxies /ai to the local proxy, in the container
+ * nginx forwards /ai to the optional ai-proxy service. The browser never names a host, so the
+ * policy never has to allow a visitor's loopback, and moving the proxy touches no client code.
+ */
+const PROXY_BASE = '/ai'
 const HEALTH_TIMEOUT_MS = 2500
 const CHAT_TIMEOUT_MS = 130_000
 
