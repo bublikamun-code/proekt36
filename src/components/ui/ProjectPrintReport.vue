@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDevice, resolveLayout } from '../../domain/layout'
 import { buildBom } from '../../domain/pricing'
+import SingleLineDiagram from './SingleLineDiagram.vue'
 import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
 import { formatDropPercent, voltageDrop } from '../../domain/voltageDrop'
@@ -74,9 +75,13 @@ const schedule = computed(() => props.project.circuits.map((circuit, index) => {
       <div><span>Модульный шаг</span><strong>{{ layout.modulePitchMm }} мм</strong></div>
     </section>
 
+    <section class="print-single-line" aria-label="Однолинейная схема">
+      <h2>Однолинейная схема</h2>
+      <SingleLineDiagram :project="project" :definitions="definitions" />
+    </section>
+
     <section class="print-rack-summary">
-      <h2>Сводка 2D-компоновки</h2>
-      <table>
+      <h2>Сводка 2D-компоновки</h2>      <table>
         <thead><tr><th>Ряд</th><th>Занято</th><th>Ёмкость</th><th>Свободно</th><th>Состав</th></tr></thead>
         <tbody>
           <tr v-for="row in rows" :key="row">
