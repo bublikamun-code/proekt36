@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Панель 36">
+  <!-- Maskable: the mark is kept inside the safe circle, which is the middle 80 % of the canvas,
+       so a launcher that crops the icon to a circle or a squircle does not cut into it. -->
+  <rect width="512" height="512" fill="#1B2A24"/>
+  <path d="M158 158h88v88h-88zm108 0h88v88h-88zm-108 108h88v88h-88z" fill="#FFFDF8"/>
+  <path d="M314 266h34v88h-34z" fill="#C65C3B"/>
+</svg>
