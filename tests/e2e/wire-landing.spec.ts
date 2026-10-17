@@ -77,9 +77,10 @@ const seededWiredProject = async (page: Page) => {
  * being replaced, and a red test on it would say nothing about whether the new one is fit — it
  * would only repeat the finding that motivated the work.
  */
+// Only the September editor remains: the October board is cut (ADR-A2) and returns with the
+// new board in B6/C1, together with its own half of this file's history.
 const ROUTES = [
   { name: 'старый редактор', path: '/app/editor', gate: false },
-  { name: 'новая доска', path: '/app/board', gate: true },
 ] as const
 
 for (const route of ROUTES) {
