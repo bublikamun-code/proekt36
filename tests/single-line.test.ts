@@ -140,10 +140,12 @@ describe('однолинейная схема', () => {
     ]
     const loads = buildSingleLine(project, definitions).groups[0]!.loads
     expect(loads[0]).toMatchObject({ current: 16, declaredCurrent: true })
-    expect(loads[1]).toMatchObject({ current: 20, declaredCurrent: false, phaseCount: 1 })
+    // Расчётный ток идёт через справочник вида линии (розетки: kс 0,8, cos φ 0,95):
+    // 4600·0,8/(230·0,95) ≈ 16,84 А.
+    expect(loads[1]).toMatchObject({ current: (4600 * 0.8) / (230 * 0.95), declaredCurrent: false, phaseCount: 1 })
     expect(loads[2]?.declaredCurrent).toBe(false)
     expect(loads[2]?.phaseCount).toBe(3)
-    expect(loads[2]?.current).toBeCloseTo(8600 / (Math.sqrt(3) * 400), 5)
+    expect(loads[2]?.current).toBeCloseTo((8600 * 0.8) / (Math.sqrt(3) * 400 * 0.95), 5)
   })
 
   it('трёхфазная линия помечается 3~, неуточнённая фаза не угадывается', () => {

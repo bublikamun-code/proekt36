@@ -5,6 +5,9 @@ import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity,
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { cabinetDefinitions, cabinetSpecLabel, railDefinitions } from '../../data/enclosures'
 import { phaseBalance, validateProject } from '../../domain/validation'
+import { circuitLoadMath } from '../../domain/electrical'
+import { CIRCUIT_KIND_LABELS, loadBookRow } from '../../domain/loadBook'
+import { suggestCable, suggestProtection } from '../../domain/sizing'
 import { deviceTerminals as deviceTerminalList, sameTerminal, terminalDisplayName, terminalMarkedName } from '../../domain/terminals'
 import type { TerminalRef } from '../../domain/terminals'
 import { useProjectStore } from '../../stores/project'
@@ -13,7 +16,7 @@ import { getDeviceFaceMetrics } from '../catalog/deviceFace/metrics'
 import AppSelect, { type AppSelectOption } from '../ui/AppSelect.vue'
 import AssistantPanel from '../assistant/AssistantPanel.vue'
 import { useConfirm } from '../../composables/useConfirm'
-import type { Category, RailDefinition, RowComb } from '../../domain/types'
+import { CIRCUIT_KINDS, type Category, type Circuit, type CircuitKind, type DeviceDefinition, type PlacedDevice, type RailDefinition, type RowComb } from '../../domain/types'
 
 const emit = defineEmits<{ focusCategory: [Category] }>()
 
@@ -211,6 +214,70 @@ const changeCircuitNumber = (id: string, key: 'current' | 'power' | 'wireCrossSe
     input.value = String(circuit?.[key] ?? 0)
   }
 }
+const changeCircuitFactor = (id: string, key: 'powerFactor' | 'demandFactor', event: Event) => {
+  const input = event.target as HTMLInputElement
+  const value = input.value.trim() === '' ? undefined : input.valueAsNumber
+  if (!store.updateCircuit(id, { [key]: value })) {
+    const circuit = currentProject.value.circuits.find((item) => item.id === id)
+    input.value = String(circuit?.[key] ?? '')
+  }
+}
+
+const KIND_OPTIONS: AppSelectOption[] = CIRCUIT_KINDS.map((kind) => ({ value: kind, label: CIRCUIT_KIND_LABELS[kind] }))
+
+/**
+ * Нагрузочная сводка цепи: расчётный ток с происхождением и оба подбора. Считается
+ * одним вычислением на цепь — и инспектор, и подсказки, и применение идут от одних чисел.
+ */
+const circuitSummaries = computed(() => new Map(currentProject.value.circuits.map((circuit) => {
+  const math = circuitLoadMath(circuit)
+  const protection = suggestProtection(math.amps, circuit.kind)
+  const protectionProduct = currentProject.value.devices.find((item) => item.instanceId === circuit.protectionDeviceId)
+  const protectionRating = protectionProduct ? definitions.value.get(protectionProduct.productId)?.ratedCurrent : undefined
+  const cable = suggestCable({ amps: math.amps, ratingA: protectionRating, lengthM: circuit.cableLength ?? 0, system: currentProject.value.settings.phase, kind: circuit.kind })
+  return [circuit.id, { math, protection, cable }]
+})))
+const summaryOf = (id: string) => circuitSummaries.value.get(id)!
+const formatAmps = (value: number): string => `${value >= 100 ? Math.round(value) : Number(value.toFixed(1))}`.replace('.', ',')
+const ampLabel = (id: string) => {
+  const { math } = summaryOf(id)
+  return math.basis === 'insufficient' ? '—' : `${math.basis === 'derived' ? '≈ ' : ''}${formatAmps(math.amps)} А`
+}
+/** Лучший из стоящих на доске аппаратов под рекомендацию: номинал не ниже, полюса по линии, кривая в приоритете. */
+const applyProtectionSuggestion = (circuit: Circuit) => {
+  const { protection } = summaryOf(circuit.id)
+  if (protection.status === 'insufficient' || !protection.ratingA) {
+    store.notify(protection.explanation, 'error')
+    return
+  }
+  const candidates = currentProject.value.devices
+    .map((device) => ({ device, product: definitions.value.get(device.productId) }))
+    .filter((item): item is { device: PlacedDevice; product: DeviceDefinition } => {
+      const product = item.product
+      return product !== undefined && ['MCB', 'RCCB', 'RCBO'].includes(product.category)
+    })
+    .filter((item) => item.product.ratedCurrent >= protection.ratingA! && (circuit.phaseCount !== 3 || item.product.poles >= 3))
+    .sort((a, b) =>
+      Number(b.product.tripCurve === protection.curve) - Number(a.product.tripCurve === protection.curve) ||
+      a.product.ratedCurrent - b.product.ratedCurrent)
+  if (!candidates.length) {
+    store.notify(`На доске нет аппарата на ${protection.ratingA} А (${protection.curve}) — добавьте его из каталога и повторите.`, 'error')
+    return
+  }
+  const best = candidates[0]!
+  if (!store.updateCircuit(circuit.id, { protectionDeviceId: best.device.instanceId })) return
+  store.notify(`Защита «${circuit.name}»: ${best.device.address || best.product.name} — ${protection.ratingA} А, ${protection.curve}. ${protection.status === 'preliminary' ? 'Подбор предварительный.' : ''}`)
+}
+const applyCableSuggestion = (circuit: Circuit) => {
+  const { cable } = summaryOf(circuit.id)
+  if (cable.status === 'insufficient' || !cable.sectionMm2) {
+    store.notify(cable.explanation, 'error')
+    return
+  }
+  if (!store.updateCircuit(circuit.id, { wireCrossSection: cable.sectionMm2 })) return
+  store.notify(`Кабель «${circuit.name}»: ${formatSection(cable.sectionMm2)} мм². ${cable.explanation}.`)
+}
+const formatSection = (value: number): string => String(value).replace('.', ',')
 const changeSettingNumber = (key: 'inputCurrent' | 'reserveModules', event: Event) => {
   const input = event.target as HTMLInputElement
   if (!store.updateSettings({ [key]: input.valueAsNumber })) input.value = String(currentProject.value.settings[key])
@@ -351,6 +418,25 @@ const migrationIssueLabel = (code: string) => ({
           <label>Нагрузка<input :value="circuit.loadName" @change="store.updateCircuit(circuit.id, { loadName: ($event.target as HTMLInputElement).value })" /></label>
           <label>Ток, А<input :value="circuit.current" type="number" min="0" step="0.1" @change="changeCircuitNumber(circuit.id, 'current', $event)" /></label>
           <label>Мощность, Вт<input :value="circuit.power" type="number" min="0" step="1" @change="changeCircuitNumber(circuit.id, 'power', $event)" /></label>
+          <label>Вид линии<AppSelect label="Вид линии" :model-value="circuit.kind ?? 'power'" :options="KIND_OPTIONS" @update:model-value="store.updateCircuit(circuit.id, { kind: $event as CircuitKind })" /></label>
+          <label>cos φ<input :value="circuit.powerFactor ?? ''" type="number" min="0" max="1" step="0.01" :placeholder="`справочник · ${loadBookRow(circuit.kind).powerFactor}`" @change="changeCircuitFactor(circuit.id, 'powerFactor', $event)" /></label>
+          <label>kс<input :value="circuit.demandFactor ?? ''" type="number" min="0" max="1" step="0.05" :placeholder="`справочник · ${loadBookRow(circuit.kind).demandFactor}`" @change="changeCircuitFactor(circuit.id, 'demandFactor', $event)" /></label>
+          <div class="wide load-math" :data-load-math="circuit.id">
+            <span>Расчётный ток</span>
+            <strong>{{ ampLabel(circuit.id) }}</strong>
+            <small v-if="summaryOf(circuit.id).math.basis !== 'insufficient'">· {{ summaryOf(circuit.id).math.explanation }}<template v-if="summaryOf(circuit.id).math.status === 'preliminary'"> · предварительно</template></small>
+            <small v-else>· задайте мощность или ток — числа не выдумываются</small>
+          </div>
+          <div class="wide load-hint" :data-load-hint="circuit.id">
+            <span class="load-hint-row">
+              Защита: <b>{{ summaryOf(circuit.id).protection.ratingA ? `${summaryOf(circuit.id).protection.curve}${summaryOf(circuit.id).protection.ratingA} · предварительно` : '—' }}</b>
+              <button type="button" class="text-button" @click="applyProtectionSuggestion(circuit)">Подобрать защиту</button>
+            </span>
+            <span class="load-hint-row">
+              Кабель: <b>{{ summaryOf(circuit.id).cable.sectionMm2 ? `${formatSection(summaryOf(circuit.id).cable.sectionMm2!)} мм²${summaryOf(circuit.id).cable.dropChecked ? '' : ' (падение не проверено)'}` : '—' }}</b>
+              <button type="button" class="text-button" @click="applyCableSuggestion(circuit)">Подобрать сечение</button>
+            </span>
+          </div>
           <label>Фазы линии<AppSelect label="Фазы линии" :model-value="circuit.phaseAmbiguous ? '' : String(circuit.phaseCount ?? 1)" :options="PHASE_COUNT_OPTIONS" placeholder="не уточнено" @update:model-value="store.updateCircuit(circuit.id, { phaseCount: Number($event) as 1 | 3, phaseAmbiguous: false })" /></label>
           <label v-if="circuit.phaseCount !== 3">Фаза<AppSelect label="Фаза" :model-value="circuit.phaseAmbiguous ? '' : String(circuit.phase)" :options="PHASE_OPTIONS" placeholder="не уточнено" @update:model-value="store.updateCircuit(circuit.id, { phase: Number($event) as 1 | 2 | 3, phaseAmbiguous: false })" /></label>
           <label>Защита<AppSelect label="Защита" :model-value="circuit.protectionDeviceId" :options="protectionOptions()" placeholder="Выберите аппарат" @update:model-value="store.updateCircuit(circuit.id, { protectionDeviceId: $event })" /></label>

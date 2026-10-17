@@ -1,5 +1,6 @@
 import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity, isDinDevice } from './layout'
 import { circuitCurrentA } from './electrical'
+import { capacityForSection } from './conductorSpec'
 import { CABLE_DROP_LIMIT_PERCENT, voltageDrop } from './voltageDrop'
 import { pricing } from './pricing'
 import { VALIDATION_REVISION } from './projectSchema'
@@ -100,6 +101,19 @@ export const validateProject = (project: PanelProject, definitions: Map<string, 
     const drawnA = circuitCurrentA(circuit)
     if (!protection || !protectionProduct) issues.push(issue(`circuit-protection-${circuit.id}`, 'error', 'Не выбрано защитное устройство', `Для цепи «${circuit.name}» не найден автомат, УЗО или дифавтомат. Выберите защитное устройство.`, 'circuit.protection.missing', { circuitId: circuit.id, protectionDeviceId: circuit.protectionDeviceId }))
     if (protectionProduct && drawnA > protectionProduct.ratedCurrent) issues.push(issue(`circuit-overload-${circuit.id}`, 'warning', 'Ток цепи выше номинала защиты', `${circuit.name}: ${drawnA > Math.floor(drawnA) ? drawnA.toFixed(1).replace('.', ',') : drawnA} А при номинале ${protectionProduct.ratedCurrent} А.`, 'circuit.current.over-protection', { current: Number(drawnA.toFixed(2)), ratedCurrent: protectionProduct.ratedCurrent }))
+    // A socket line without residual protection is the classic shock path: a plain breaker never
+    // sees the 30 mA a person leaks. The project-wide RCCB check above says nothing about this
+    // line, so a power line names its own situation — «no RCD anywhere» loudly, «RCD exists,
+    // this line may not sit behind it» quietly.
+    if (circuit.kind === 'power' && protectionProduct) {
+      const own = protectionProduct.category === 'RCCB' || protectionProduct.category === 'RCBO'
+      const residualAnywhere = project.devices.some((item) => ['RCCB', 'RCBO'].includes(definitions.get(item.productId)?.category ?? ''))
+      if (!own && !residualAnywhere) issues.push(issue(`circuit-rccd-power-${circuit.id}`, 'warning', 'Розеточная линия без защиты от утечки', `«${circuit.name}» — розеточная линия, а защита — обычный автомат: утечку 30 мА он не увидит. Предусмотрите УЗО или дифавтомат (проверка предварительная).`, 'protection.rccd.line.preliminary', { circuitId: circuit.id, protectionDeviceId: protectionProduct.id }))
+      else if (!own) issues.push(issue(`circuit-rccd-power-${circuit.id}`, 'info', 'Утечка зависит от подключения', `«${circuit.name}» защищена автоматом без утечки; в щите есть УЗО/дифавтомат — убедитесь, что линия запитана после него.`, 'protection.rccd.line.upstream.preliminary', { circuitId: circuit.id }))
+    }
+    // The breaker's job is to protect the cable, so the cable has to carry the rating the
+    // breaker trips at — not just the load current of a good day.
+    if (protectionProduct && circuit.wireCrossSection > 0 && capacityForSection(circuit.wireCrossSection) < protectionProduct.ratedCurrent) issues.push(issue(`cable-under-rating-${circuit.id}`, 'warning', 'Кабель тоньше защиты', `${circuit.name}: медь ${circuit.wireCrossSection} мм² длительно держит ${capacityForSection(circuit.wireCrossSection)} А — меньше номинала защиты ${protectionProduct.ratedCurrent} А. Увеличьте сечение кабеля.`, 'cable.section.under-rated', { circuitId: circuit.id, crossSectionMm2: circuit.wireCrossSection, capacityA: capacityForSection(circuit.wireCrossSection), ratedCurrent: protectionProduct.ratedCurrent }))
     if (project.settings.phase === 1 && circuit.phaseCount === 1 && circuit.phase !== 1) issues.push(issue(`circuit-phase-${circuit.id}`, 'error', 'Фаза цепи не совпадает с сетью', `${circuit.name} назначена на L${circuit.phase}, а проект однофазный. Укажите L1.`, 'circuit.phase.mismatch', { phase: circuit.phase, projectPhase: project.settings.phase }))
     if (project.settings.phase === 1 && circuit.phaseCount === 3) issues.push(issue(`circuit-threephase-${circuit.id}`, 'error', 'Трёхфазная цепь в однофазном щите', `${circuit.name} — трёхфазная нагрузка, а питание щита однофазное. Смените количество фаз линии или питание щита.`, 'circuit.phase-count.mismatch', { circuitId: circuit.id, projectPhase: project.settings.phase }))
     if (circuit.phaseAmbiguous) issues.push(issue(`circuit-phase-ambiguous-${circuit.id}`, 'warning', 'Фаза линии не уточнена', `${circuit.name}: в старом проекте «3» означало либо однофазную линию на L3, либо трёхфазную линию — по данным не различить. Уточните, пока не уточнено, баланс фаз условен.`, 'circuit.phase.ambiguous', { circuitId: circuit.id }))

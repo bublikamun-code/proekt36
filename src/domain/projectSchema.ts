@@ -190,6 +190,10 @@ const validateCircuit = (errors: string[], value: unknown, path: string) => {
   // A planned line starts with an unmeasured run: an absent cableLength is «not known yet»,
   // the same «not known» an empty roomId means, and not a malformed number.
   if (value.cableLength !== undefined) finiteNumber(errors, value.cableLength, `${path}.cableLength`, { min: 0, max: PROJECT_LIMITS.cableLength })
+  // Load-book overrides are optional ratios; absent means «the book row for the kind».
+  for (const key of ['powerFactor', 'demandFactor']) {
+    if (value[key] !== undefined) finiteNumber(errors, value[key], `${path}.${key}`, { min: 0, max: 1 })
+  }
 }
 
 const validateRoom = (errors: string[], value: unknown, path: string) => {
