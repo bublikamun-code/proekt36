@@ -113,14 +113,20 @@ export const applyPageMetadata = (metadata: PageMetadata) => {
   setMeta('meta[name="twitter:title"]', 'name', 'twitter:title', metadata.title)
   setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', metadata.description)
 
+  // A canonical link on a noindex page advertises that page as the real address of itself —
+  // the opposite of what noindex asks for. Only public pages declare one; private ones drop it.
   const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin
-  let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
-  if (!canonical) {
-    canonical = document.createElement('link')
-    canonical.rel = 'canonical'
-    document.head.append(canonical)
+  if (!metadata.public) {
+    document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.remove()
+  } else {
+    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+    if (!canonical) {
+      canonical = document.createElement('link')
+      canonical.rel = 'canonical'
+      document.head.append(canonical)
+    }
+    canonical.href = new URL(window.location.pathname, siteUrl).toString()
   }
-  canonical.href = new URL(window.location.pathname, siteUrl).toString()
 
   const script = document.head.querySelector<HTMLScriptElement>('script[data-panel36-schema]')
   if (metadata.public) {
