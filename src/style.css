@@ -1294,6 +1294,64 @@ kbd {
   .print-report .print-disclaimer {
     color: var(--text-faint);
   }
+  .single-line {
+    margin: 0;
+  }
+  .single-line figcaption {
+    margin-bottom: 6px;
+    color: var(--text-faint);
+    font: 12px/1.4 var(--mono);
+  }
+  .single-line svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .single-line-empty {
+    margin: 0;
+    padding: 14px;
+    color: var(--text-faint);
+    border: 1px dashed var(--line);
+    font: 13px/1.4 var(--mono);
+  }
+  .single-line-notes {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font: 12px/1.5 var(--mono);
+  }
+  .sl-bus,
+  .sl-branch {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 1.5;
+  }
+  .sl-source rect,
+  .sl-device rect {
+    fill: var(--surface);
+    stroke: var(--text);
+    stroke-width: 1.5;
+  }
+  .sl-unprotected rect {
+    stroke-dasharray: 4 3;
+  }
+  .sl-node-dot {
+    fill: var(--text);
+  }
+  .sl-node-label {
+    fill: var(--text);
+    font: 600 11px var(--mono);
+  }
+  .sl-node-sub,
+  .sl-caption {
+    fill: var(--text-muted);
+    font: 9px var(--mono);
+  }
+  .sl-load-label {
+    fill: var(--text);
+    font: 11px var(--mono);
+  }
 }
 .checks-panel {
   display: flex;
