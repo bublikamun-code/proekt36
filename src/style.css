@@ -384,6 +384,45 @@ h3 {
   min-width: 116px;
   min-height: 40px;
 }
+.update-prompt {
+  position: fixed;
+  z-index: 105;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+  font-size: var(--text-xs);
+}
+.update-prompt-text {
+  color: var(--text);
+}
+.update-prompt-actions {
+  display: flex;
+  gap: 7px;
+  white-space: nowrap;
+}
+.update-prompt-actions button {
+  min-height: 34px;
+}
+.update-prompt-later {
+  color: var(--text-muted);
+}
+.update-prompt-enter-active,
+.update-prompt-leave-active {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.update-prompt-enter-from,
+.update-prompt-leave-to {
+  transform: translateY(8px);
+  opacity: 0;
+}
 .phase-clarify-list {
   display: grid;
   gap: 12px;
