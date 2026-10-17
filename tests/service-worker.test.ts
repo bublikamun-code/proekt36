@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
-import { shouldRegisterServiceWorker } from '../src/services/serviceWorker'
+import { describe, expect, it, vi } from 'vitest'
+import { shouldRegisterServiceWorker, shouldOfferUpdatePrompt, wireUpdateFlow } from '../src/services/serviceWorker'
 import { APP_VERSION } from '../src/version'
 
 const worker = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
@@ -77,5 +77,80 @@ describe('оффлайн-оболочка', () => {
     const config = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
     const directives = [...config.matchAll(/"(worker-src[^"]*)"/g)].map((match) => match[1])
     expect(directives).toEqual(["worker-src 'self'"])
+  })
+})
+
+describe('обновление оболочки', () => {
+  // Fake worker/registration/container speaking just enough of the real API for wireUpdateFlow.
+  const makeHarness = () => {
+    const controllerListeners: (() => void)[] = []
+    const waiting = {
+      state: 'installed',
+      posted: [] as unknown[],
+      listeners: new Map<string, (() => void)[]>(),
+      addEventListener(type: string, listener: () => void) { this.listeners.set(type, [...this.listeners.get(type) ?? [], listener]) },
+      emit(type: string) { for (const listener of this.listeners.get(type) ?? []) listener() },
+      postMessage(data: unknown) { this.posted.push(data) },
+    }
+    const registration = { installing: null, waiting, addEventListener: () => {} }
+    const container = {
+      controller: {} as unknown,
+      getRegistration: async () => registration,
+      addEventListener: (_type: 'controllerchange', listener: () => void) => controllerListeners.push(listener),
+      controllerChange: () => { for (const listener of controllerListeners) listener() },
+    }
+    return { waiting, registration, container, controllerListeners }
+  }
+
+  it('воркер больше не активирует обновление сам — только по сообщению SKIP_WAITING', () => {
+    // Auto-skip would reload work out from under a user mid-edit; the prompt exists precisely
+    // to make that a choice, so the install handler must not contain the call at all.
+    expect(worker).not.toContain('await self.skipWaiting()')
+    expect(worker).toContain("event.data === 'SKIP_WAITING'")
+    expect(worker).toContain('self.skipWaiting()')
+  })
+
+  it('промпт предлагается только в production-браузере и без явного выключения', () => {
+    expect(shouldOfferUpdatePrompt({ production: true, webdriver: false, flag: undefined })).toBe(true)
+    expect(shouldOfferUpdatePrompt({ production: true, webdriver: true, flag: undefined })).toBe(false)
+    expect(shouldOfferUpdatePrompt({ production: false, webdriver: false, flag: undefined })).toBe(false)
+    expect(shouldOfferUpdatePrompt({ production: true, webdriver: false, flag: 'off' })).toBe(false)
+  })
+
+  it('сообщает о готовом обновлении и применяет его по согласию', async () => {
+    const { waiting, container } = makeHarness()
+    const onReady = vi.fn()
+    const onControllerChange = vi.fn()
+    const flow = wireUpdateFlow(container, { onReady, onControllerChange })
+    // getRegistration resolves in a microtask; let the wiring land before asserting.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReady).toHaveBeenCalledTimes(1)
+    expect(onControllerChange).not.toHaveBeenCalled()
+    flow.apply()
+    await Promise.resolve()
+    expect(waiting.posted).toEqual(['SKIP_WAITING'])
+  })
+
+  it('первая установка без контроллера не считается обновлением', () => {
+    const { container } = makeHarness()
+    container.controller = null
+    const onReady = vi.fn()
+    wireUpdateFlow(container, { onReady, onControllerChange: () => {} })
+    expect(onReady).not.toHaveBeenCalled()
+  })
+
+  it('controllerchange до apply не перезагружает страницу, после apply — перезагружает', () => {
+    const { container } = makeHarness()
+    const onControllerChange = vi.fn()
+    const flow = wireUpdateFlow(container, { onReady: () => {}, onControllerChange })
+
+    container.controllerChange()
+    expect(onControllerChange).not.toHaveBeenCalled()
+
+    flow.apply()
+    container.controllerChange()
+    expect(onControllerChange).toHaveBeenCalledTimes(1)
   })
 })

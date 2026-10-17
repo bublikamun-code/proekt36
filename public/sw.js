@@ -17,6 +17,10 @@
  * The cache name carries the application revision. A new build changes the name, the old caches
  * are deleted on `activate`, and a stale chunk can never be served against a new document.
  * `APP_VERSION` is the only thing that has to be bumped, and the app already bumps it for release.
+ *
+ * An update never activates itself: the new worker installs and waits, and takes over only when
+ * the page answers the application's prompt with `SKIP_WAITING`. Auto-skipping here would reload
+ * work out from under a user mid-edit — exactly what the prompt exists to prevent.
  */
 const VERSION = '0.3.0'
 const SHELL_CACHE = `panel36-shell-${VERSION}`
@@ -30,8 +34,11 @@ self.addEventListener('install', (event) => {
     // One missing file must not fail the whole install: the shell is a convenience, and an
     // offline app that refuses to activate because of a 404 is worse than a slightly slower one.
     await Promise.allSettled(SHELL.map((url) => cache.add(new Request(url, { cache: 'reload' }))))
-    await self.skipWaiting()
   })())
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {

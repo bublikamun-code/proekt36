@@ -51,6 +51,72 @@ export const registerServiceWorker = async (): Promise<ServiceWorkerResult> => {
 }
 
 /**
+ * Structural surface of the Service Worker API the update flow touches, so the flow can be
+ * exercised with plain objects instead of a live worker.
+ */
+export interface UpdateWorkerLike {
+  state: string
+  addEventListener: (type: 'statechange', listener: () => void) => void
+  postMessage: (data: unknown) => void
+}
+
+export interface UpdateRegistrationLike {
+  installing: UpdateWorkerLike | null
+  waiting: UpdateWorkerLike | null
+  addEventListener: (type: 'updatefound', listener: () => void) => void
+}
+
+export interface UpdateContainerLike {
+  controller: unknown
+  getRegistration: () => Promise<UpdateRegistrationLike | undefined>
+  addEventListener: (type: 'controllerchange', listener: () => void) => void
+}
+
+/**
+ * The update story in two events: «a new version is installed and waiting» (`onReady`, the
+ * moment the app may ask) and «the new version took control» (`onControllerChange`, the moment
+ * the page should reload — only after the user agreed, which is what `apply` marks). The worker
+ * never skips waiting on its own, so a hard reload mid-edit is always a choice, never a surprise.
+ */
+export const wireUpdateFlow = (
+  container: UpdateContainerLike,
+  hooks: { onReady: () => void; onControllerChange: () => void },
+): { apply: () => void } => {
+  let applied = false
+  container.addEventListener('controllerchange', () => {
+    if (applied) hooks.onControllerChange()
+  })
+  const announce = (worker: UpdateWorkerLike | null) => {
+    // `installed` while a controller exists is «an update is waiting»; the same state on the
+    // very first install is just «the app went offline-capable», nothing to ask about.
+    if (!worker || worker.state !== 'installed' || !container.controller) return
+    hooks.onReady()
+  }
+  void container.getRegistration().then((registration) => {
+    if (!registration) return
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing
+      worker?.addEventListener('statechange', () => announce(worker))
+    })
+    // The page can open after the waiting worker arrived — the updatefound above will not fire.
+    announce(registration.waiting)
+  })
+  return {
+    apply: () => {
+      applied = true
+      void container.getRegistration().then((registration) => {
+        const worker = registration?.waiting ?? registration?.installing
+        worker?.postMessage('SKIP_WAITING')
+      })
+    },
+  }
+}
+
+/** Whether this page may ask about updates at all: production browser, feature not switched off. */
+export const shouldOfferUpdatePrompt = (environment: { production: boolean; webdriver: boolean; flag: string | undefined }) =>
+  environment.production && !environment.webdriver && environment.flag !== 'off'
+
+/**
  * The worker's cache version lives in `public/sw.js`, a static file that cannot import a module,
  * and it is checked against `APP_VERSION` from the file itself by `tests/service-worker.test.ts`.
  * Duplicating the string here as well would have been a third copy with nothing enforcing it.
