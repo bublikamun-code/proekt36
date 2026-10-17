@@ -5,6 +5,8 @@ import AppDialog from '../ui/AppDialog.vue'
 import AppSelect from '../ui/AppSelect.vue'
 import { getFootprintModules } from '../../domain/layout'
 import { CIRCUIT_KINDS, type Circuit, type CircuitKind } from '../../domain/types'
+import { circuitCurrentA } from '../../domain/electrical'
+import { CIRCUIT_KIND_LABELS } from '../../domain/loadBook'
 import { phaseBalance } from '../../domain/validation'
 import { formatDropPercent, voltageDrop } from '../../domain/voltageDrop'
 import { useProjectStore } from '../../stores/project'
@@ -20,9 +22,7 @@ const emit = defineEmits<{ 'goto-board': [] }>()
 const store = useProjectStore()
 const { currentProject, definitions } = storeToRefs(store)
 
-const KIND_LABELS: Record<CircuitKind, string> = {
-  power: 'Розетки', light: 'Освещение', dc: 'DC', control: 'Управление',
-}
+const KIND_LABELS = CIRCUIT_KIND_LABELS
 
 interface RoomGroup {
   key: string
@@ -93,9 +93,12 @@ const view = ref<'plan' | 'schedule'>('plan')
 const CABLE_CORES: Record<CircuitKind, number> = { power: 3, light: 3, dc: 2, control: 2 }
 const scheduleRows = computed(() => currentProject.value.circuits.map((circuit, index) => {
   const room = (currentProject.value.rooms ?? []).find((item) => item.id === circuit.roomId)
+  // The schedule prints the same derived current the balance and the checks read: a line
+  // planned by power shows its calculated amperes, not whatever was typed by hand.
+  const currentA = circuitCurrentA(circuit)
   const drop = voltageDrop({
     lengthM: circuit.cableLength ?? 0,
-    currentA: circuit.current,
+    currentA,
     crossSectionMm2: circuit.wireCrossSection,
     system: currentProject.value.settings.phase === 3 ? 3 : 1,
   })
@@ -106,7 +109,7 @@ const scheduleRows = computed(() => currentProject.value.circuits.map((circuit, 
     room: room?.name ?? '—',
     cable: `${CABLE_CORES[circuit.kind ?? 'power']}×${String(circuit.wireCrossSection).replace('.', ',')}`,
     length: circuit.cableLength ?? 0,
-    current: circuit.current,
+    current: currentA,
     dropPercent: drop.dropPercent,
     dropText: formatDropPercent(drop.dropPercent),
     ok: drop.ok,

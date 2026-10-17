@@ -2844,6 +2844,38 @@ kbd {
   padding: 3px;
   min-height: 36px;
 }
+.load-math {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--line);
+  background: var(--surface);
+  font-size: var(--text-micro);
+}
+.load-math strong {
+  color: var(--heading);
+  font-size: var(--text-sm);
+}
+.load-math small,
+.load-hint {
+  color: var(--text-muted);
+}
+.load-hint {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 0;
+}
+.load-hint-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.load-hint b {
+  color: var(--text);
+}
 .connection-heading {
   display: flex;
   align-items: center;

@@ -743,13 +743,17 @@ export const useProjectStore = defineStore('project', () => {
     // letting them through one door keeps the inspector and the worksheet from drifting apart.
     // The v5 phase fields ride along: a clarification choice and the inspector phase picker are
     // circuit edits like any other, and phaseAmbiguous is cleared only through this same door.
-    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'phaseCount', 'phaseAmbiguous', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength'])
+    // The load-book overrides ride the same door: a manual cos φ/kс is a circuit edit too.
+    const allowed = new Set(['name', 'loadName', 'current', 'power', 'phase', 'phaseCount', 'phaseAmbiguous', 'protectionDeviceId', 'color', 'wireCrossSection', 'note', 'roomId', 'kind', 'cableLength', 'powerFactor', 'demandFactor'])
     if (!Object.keys(values).length || Object.keys(values).some((key) => !allowed.has(key))) return rejectCommand('Изменение цепи содержит недопустимые поля.')
     if ('phaseCount' in values && values.phaseCount !== 1 && values.phaseCount !== 3) return rejectCommand('Количество фаз линии — 1 или 3.')
     if ('phaseAmbiguous' in values && typeof values.phaseAmbiguous !== 'boolean') return rejectCommand('Флаг неоднозначности фазы должен быть логическим.')
     if ('roomId' in values && values.roomId && !currentProject.value.rooms?.some((item) => item.id === values.roomId)) return rejectCommand('Помещение цепи не найдено.')
     if ('kind' in values && !CIRCUIT_KINDS.includes(String(values.kind) as typeof CIRCUIT_KINDS[number])) return rejectCommand('Вид линии должен быть силовым, освещением, DC или управлением.')
     if ('cableLength' in values && !finiteInRange(values.cableLength, 0, PROJECT_LIMITS.cableLength)) return rejectCommand('Длина кабеля должна быть числом от 0 до 1000 м.')
+    for (const key of ['powerFactor', 'demandFactor']) {
+      if (key in values && values[key] !== undefined && !finiteInRange(values[key], 0, 1)) return rejectCommand('Коэффициент cos φ и kс должен быть числом от 0 до 1.')
+    }
     const candidate = { ...current, ...patch }
     const invalid = circuitError(candidate)
     if (invalid) return rejectCommand(invalid)

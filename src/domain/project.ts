@@ -28,6 +28,15 @@ const asNumber = (value: unknown, fallback: number, minimum: number, maximum: nu
   const number = Number(value)
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback
 }
+/**
+ * A load-book override is a ratio: unlike the clamped fields, a value outside (0; 1] is
+ * not squeezed into range — it is «no override», because a clamped 1,4 → 1 would quietly
+ * change what the file said.
+ */
+const asRatio = (value: unknown): number | undefined => {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 && number <= 1 ? number : undefined
+}
 const asInteger = (value: unknown, fallback: number, minimum: number, maximum: number) => Math.round(asNumber(value, fallback, minimum, maximum))
 const asPhase = (value: unknown): 1 | 2 | 3 => value === 2 || value === 3 ? value : 1
 
@@ -81,6 +90,9 @@ export const normalizeCircuit = (value: unknown, preV5 = false): Circuit => {
     kind: (CIRCUIT_KINDS as readonly string[]).includes(String(raw.kind)) ? raw.kind as Circuit['kind'] : 'power',
     cableLength: asNumber(raw.cableLength, 0, 0, 1000),
     phaseAmbiguous: preV5 && phase === 3 ? true : raw.phaseAmbiguous === true ? true : undefined,
+    // Load-book overrides: absent or malformed means «use the book row».
+    powerFactor: asRatio(raw.powerFactor),
+    demandFactor: asRatio(raw.demandFactor),
   }
 }
 

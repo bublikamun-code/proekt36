@@ -126,17 +126,23 @@ describe('circuits and connections', () => {
     expect(validateProject(project, definitions).some((item) => item.ruleCode === 'circuit.phase-count.mismatch')).toBe(true)
   })
 
-  it('derives the current from the power when no current is stated: 4600 W reads 20 A single-phase', () => {
+  it('derives the current from the power through the load book of the line kind', () => {
+    // The book row for «power» lines: kс 0,8, cos φ 0,95. The same 4600 W on any single phase:
+    // 4600·0,8/(230·0,95) ≈ 16,84 А — the assigned phase must not change the arithmetic.
     const project = createProject('Ток из мощности', 'house', { phase: 3 })
-    // The same 4600 W on any single phase: L1, L2 and L3 all see 20 A — the assigned phase
-    // must not change the arithmetic.
     for (const phase of [1, 2, 3] as const) {
       project.circuits = [circuit({ id: `w-${phase}`, current: 0, power: 4600, phase })]
-      expect(phaseBalance(project, definitions).totals).toEqual(phase === 1 ? [20, 0, 0] : phase === 2 ? [0, 20, 0] : [0, 0, 20])
+      const amps = 4600 * 0.8 / (230 * 0.95)
+      expect(phaseBalance(project, definitions).totals).toEqual(phase === 1 ? [amps, 0, 0] : phase === 2 ? [0, amps, 0] : [0, 0, amps])
     }
-    // A three-phase line: 4600 / (√3 · 400) ≈ 6.64 A drawn from every phase.
+    // A three-phase line: 4600·0,8/(√3·400·0,95) ≈ 5,59 А drawn from every phase.
     project.circuits = [circuit({ id: 'w-3ph', current: 0, power: 4600, phase: 3, phaseCount: 3 })]
-    expect(phaseBalance(project, definitions).totals.map((value) => Number(value.toFixed(2)))).toEqual([6.64, 6.64, 6.64])
+    const threePhaseAmps = Number((4600 * 0.8 / (Math.sqrt(3) * 400 * 0.95)).toFixed(2))
+    expect(phaseBalance(project, definitions).totals.map((value) => Number(value.toFixed(2)))).toEqual([threePhaseAmps, threePhaseAmps, threePhaseAmps])
+    // Manual coefficients override the book row line by line: cos φ 1 and kс 1 read the old
+    // schoolbook 20 A from the same 4600 W.
+    project.circuits = [circuit({ id: 'manual', current: 0, power: 4600, phase: 1, powerFactor: 1, demandFactor: 1 })]
+    expect(phaseBalance(project, definitions).totals).toEqual([20, 0, 0])
     // A stated current wins over the derived one, and a line with neither number draws nothing.
     project.circuits = [circuit({ id: 'stated', current: 10, power: 4600, phase: 1 })]
     expect(phaseBalance(project, definitions).totals).toEqual([10, 0, 0])

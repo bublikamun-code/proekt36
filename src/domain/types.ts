@@ -72,6 +72,10 @@ export interface Circuit {
    * Cleared only by an explicit choice in the clarification dialog or the inspector.
    */
   phaseAmbiguous?: boolean
+  /** Manual cos φ override; absent or ≤ 0 means «take the load book row for the line kind». */
+  powerFactor?: number
+  /** Manual demand factor (kс) override; absent or ≤ 0 means «take the load book row». */
+  demandFactor?: number
 }
 
 /** A planning group for lines — a room on a floor, the way a estimate worksheet expects. */
