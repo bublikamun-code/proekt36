@@ -17,3 +17,29 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+
+  # Optional assistant proxy: `docker compose --profile ai up -d` starts it alongside the app.
+  # Without the profile only the app runs, /ai answers 502 and the app reports the assistant
+  # as unavailable. No host port is published — visitors reach it only through /ai on 8080.
+  ai-proxy:
+    profiles: ['ai']
+    build:
+      context: .
+      dockerfile: Dockerfile.ai-proxy
+    image: panel36-ai-proxy:0.3.0
+    container_name: panel36-ai-proxy
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # The proxy binds loopback by default, which a container neighbour cannot reach.
+      AI_PROXY_HOST: 0.0.0.0
+    env_file:
+      - path: ./tools/ai-proxy.env
+        required: false
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8787/health']
+      interval: 30s
+      timeout: 3s
+      retries: 3

@@ -55,7 +55,8 @@ test.describe('production preview deep links', () => {
     expect(policy, 'CSP отсутствует в собранном index.html').toBeTruthy()
     expect(policy).toContain("script-src 'self'")
     expect(policy).toContain("object-src 'none'")
-    // The local AI proxy has to stay reachable, or the assistant silently stops working.
-    expect(policy).toContain('http://127.0.0.1:8787')
+    // The assistant rides the same origin (/ai), so the policy never names a host — a loopback
+    // in connect-src would be the shipped-build anti-state this line exists to prevent.
+    expect(policy).not.toMatch(/127\.0\.0\.1|localhost/)
   })
 })

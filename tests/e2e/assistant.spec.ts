@@ -49,7 +49,7 @@ const waitForProxyState = async (assistant: Locator, state: string | RegExp) => 
 
 test.describe('ИИ-помощник', () => {
   test('прокси не запущен — панель объясняет, что делать, и не шлёт вопрос', async ({ page }) => {
-    await page.route('http://127.0.0.1:8787/**', (route) => route.abort())
+    await page.route('/ai/**', (route) => route.abort())
     const assistant = await openEditor(page)
 
     await expect(assistant.locator('.state-line')).toHaveText('Локальный прокси не отвечает')
@@ -62,7 +62,7 @@ test.describe('ИИ-помощник', () => {
   })
 
   test('прокси без ключа — подсказка про env-файл', async ({ page }) => {
-    await page.route('http://127.0.0.1:8787/health', (route) => route.fulfill({ json: { ok: true, configured: false, provider: 'anthropic', model: 'claude-sonnet-5' } }))
+    await page.route('/ai/health', (route) => route.fulfill({ json: { ok: true, configured: false, provider: 'anthropic', model: 'claude-sonnet-5' } }))
     const assistant = await openEditor(page)
 
     await waitForProxyState(assistant, 'Прокси запущен, но ключ не задан')
@@ -71,8 +71,8 @@ test.describe('ИИ-помощник', () => {
 
   test('ответ принимается, в провод уходит только сводка, предложение применяется и отменяется', async ({ page }) => {
     const bodies: string[] = []
-    await page.route('http://127.0.0.1:8787/health', (route) => route.fulfill({ json: { ok: true, configured: true, provider: 'anthropic', model: 'claude-sonnet-5' } }))
-    await page.route('http://127.0.0.1:8787/chat', (route) => {
+    await page.route('/ai/health', (route) => route.fulfill({ json: { ok: true, configured: true, provider: 'anthropic', model: 'claude-sonnet-5' } }))
+    await page.route('/ai/chat', (route) => {
       bodies.push(route.request().postData() ?? '')
       return route.fulfill({
         json: {
@@ -115,9 +115,9 @@ test.describe('ИИ-помощник', () => {
   })
 
   test('долгий запрос можно отменить и не ждать таймаут', async ({ page }) => {
-    await page.route('http://127.0.0.1:8787/health', (route) => route.fulfill({ json: { ok: true, configured: true, provider: 'anthropic', model: 'claude-sonnet-5' } }))
+    await page.route('/ai/health', (route) => route.fulfill({ json: { ok: true, configured: true, provider: 'anthropic', model: 'claude-sonnet-5' } }))
     let release = (): void => {}
-    await page.route('http://127.0.0.1:8787/chat', async (route) => {
+    await page.route('/ai/chat', async (route) => {
       await new Promise<void>((resolve) => { release = resolve })
       await route.fulfill({ json: { text: 'Поздний ответ' } })
     })
@@ -135,7 +135,7 @@ test.describe('ИИ-помощник', () => {
   })
 
   test('показано, что именно уходит провайдеру', async ({ page }) => {
-    await page.route('http://127.0.0.1:8787/**', (route) => route.abort())
+    await page.route('/ai/**', (route) => route.abort())
     const assistant = await openEditor(page)
     await assistant.getByText('Что уходит провайдеру').click()
     await expect(assistant.locator('.disclosure li').first()).toBeVisible()

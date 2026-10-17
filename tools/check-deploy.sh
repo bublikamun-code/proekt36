@@ -48,6 +48,22 @@ echo "$sh" | grep -qi '^Cache-Control: *no-cache' && ok "sw.js без кэша" 
 # 6) CSP meta в HTML (контентная защита сборки)
 curl -s -m 5 "$BASE/" | grep -q 'http-equiv="Content-Security-Policy"' && ok "CSP meta в HTML" || bad "нет CSP meta в HTML"
 
+# 7) CSP не называет loopback посетителя: адрес прокси всегда за same-origin /ai,
+#    поэтому явный 127.0.0.1/localhost в политике — запрещённое состояние старой сборки.
+case "$h" in
+  *127.0.0.1*|*localhost*) bad "CSP упоминает loopback посетителя — пересоберите контейнер из актуального кода" ;;
+  *) ok "CSP без loopback посетителя" ;;
+esac
+
+# 8) Ассистент: 200 — профиль ai поднят; 502/504 — профиль не поднят, приложение честно
+#    сообщит «ИИ недоступен»; всё остальное — что-то ещё отвечает на пути ассистента.
+ai=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$BASE/ai/health")
+case "$ai" in
+  200) ok "ассистент: прокси отвечает (/ai/health)" ;;
+  502|504) ok "ассистент: профиль ai не поднят — приложение сообщит о недоступности" ;;
+  *) bad "ассистент: /ai/health → $ai (ожидались 200, 502 или 504)" ;;
+esac
+
 echo
 if [ "$fail" = 0 ]; then
   echo "ИТОГ: всё зелёное — деплой актуален."

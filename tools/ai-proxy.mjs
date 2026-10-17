@@ -3,7 +3,8 @@
  * Local proxy for the Panel36 assembly assistant.
  *
  * The browser app never talks to an AI provider directly. This process holds the API
- * key, listens on the loopback interface only, and forwards a plain {system, context,
+ * key, listens on the loopback interface only (AI_PROXY_HOST widens this for the compose
+ * `ai` profile), and forwards a plain {system, context,
  * question} envelope. It knows nothing about panels: every decision about what leaves
  * the browser lives in the app, in src/domain/assistantContext.ts.
  *
@@ -16,7 +17,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:http'
 
-const HOST = '127.0.0.1'
+// Loopback by default (the dev proxy holds the key on the developer machine); the compose
+// `ai` profile sets AI_PROXY_HOST=0.0.0.0 so nginx can reach it inside the compose network —
+// the container publishes no port, so the key still never leaves the host.
+const HOST = process.env.AI_PROXY_HOST || '127.0.0.1'
 // Sliding-window limit on /chat: the proxy holds a paid API key, so any local
 // runaway loop must hit a wall instead of burning the quota.
 const CHAT_RATE_LIMIT = Number(process.env.AI_PROXY_RATE_LIMIT) || 10
