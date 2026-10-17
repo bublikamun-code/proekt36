@@ -62,16 +62,26 @@ describe('применение метаданных страницы', () => {
 
   it('создаёт канонический адрес только один раз и обновляет его при переходе', () => {
     const browser = withBrowser({ origin: 'https://panel36.example', pathname: '/app/projects' })
+    // Private pages declare no canonical at all — on a noindex page it would advertise that
+    // page as the real address of itself, the opposite of what noindex asks for.
     applyPageMetadata(pageMetadata.projects)
+    expect(browser.document.head.querySelectorAll('link[rel="canonical"]')).toHaveLength(0)
+
+    browser.window.location.pathname = '/pricing'
+    applyPageMetadata(pageMetadata.pricing)
     const created = browser.document.head.querySelectorAll('link[rel="canonical"]')
     expect(created).toHaveLength(1)
-    expect(created[0]!.href).toBe('https://panel36.example/app/projects')
+    expect(created[0]!.href).toBe('https://panel36.example/pricing')
+
+    browser.window.location.pathname = '/features'
+    applyPageMetadata(pageMetadata.features)
+
+    expect(browser.document.head.querySelectorAll('link[rel="canonical"]')).toHaveLength(1)
+    expect(meta(browser, 'link[rel="canonical"]')!.href).toBe('https://panel36.example/features')
 
     browser.window.location.pathname = '/app/editor'
     applyPageMetadata(pageMetadata.editor)
-
-    expect(browser.document.head.querySelectorAll('link[rel="canonical"]')).toHaveLength(1)
-    expect(meta(browser, 'link[rel="canonical"]')!.href).toBe('https://panel36.example/app/editor')
+    expect(browser.document.head.querySelectorAll('link[rel="canonical"]')).toHaveLength(0)
   })
 
   it('добавляет разметку schema.org на публичную страницу', () => {
