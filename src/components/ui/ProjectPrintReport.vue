@@ -112,7 +112,7 @@ const schedule = computed(() => props.project.circuits.map((circuit, index) => {
       <ol>
         <li v-for="connection in project.connections" :key="connection.id">
           <strong>{{ connection.label || 'Без подписи' }}</strong>
-          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${project.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'устройство'}` }} · ПУГВ · {{ connection.color }} · {{ connection.thickness }} мм</span>
+          <span>{{ connection.kind === 'busbar' ? 'FORK-шина' : `${connection.fromBus} → ${project.devices.find((device) => device.instanceId === connection.toDeviceId)?.address || 'устройство'}` }} · ПУГВ · <i v-if="connection.color" class="print-wire-color" :style="{ background: connection.color }" aria-hidden="true"></i> {{ connection.thickness }} мм²</span>
         </li>
       </ol>
     </section>
@@ -173,3 +173,14 @@ const schedule = computed(() => props.project.circuits.map((circuit, index) => {
     </footer>
   </article>
 </template>
+
+<style scoped>
+/* A conductor's colour reads off a swatch; a hex code reads off nothing. */
+.print-wire-color {
+  display: inline-block;
+  width: 3.2mm;
+  height: 2.6mm;
+  border: 1px solid #555;
+  vertical-align: baseline;
+}
+</style>

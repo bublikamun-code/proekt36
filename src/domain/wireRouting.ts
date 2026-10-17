@@ -303,14 +303,19 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
   const buses = [...busBars.values()]
   const wires: RoutedWire[] = []
 
-  // Lanes are counted per source side so the incoming strip reads like a comb, not a bundle.
-  const incomingLane = new Map<string, number>()
-  const nextLane = (key: string) => {
-    const used = incomingLane.get(key) ?? 0
-    incomingLane.set(key, used + 1)
+  // One lane counter for the whole incoming strip. Counting per source kind handed the L, N
+  // and PE feeders of one line the same lane — three conductors drawn as one line, which is
+  // exactly the unreadability the strip exists to prevent. Jumper and busbar channels keep
+  // their own counters: they leave the strip to the feeders and only space themselves.
+  let incomingLane = 0
+  const nextStripLane = () => incomingLane++
+  const incomingXMm = (lane: number) => INCOMING_MARGIN_MM + lane * INCOMING_PITCH_MM
+  const channelLanes = new Map<string, number>()
+  const nextChannelLane = (key: string) => {
+    const used = channelLanes.get(key) ?? 0
+    channelLanes.set(key, used + 1)
     return used
   }
-  const incomingXMm = (key: string) => INCOMING_MARGIN_MM + nextLane(key) * INCOMING_PITCH_MM
 
   for (const connection of project.connections ?? []) {
     const target = connection.toTerminal
@@ -331,7 +336,7 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       if (!from) continue
       // A jumper between two clamps is drawn in the corridor of the row it leaves, then drops
       // into the second clamp. Both ends are on devices, so no incoming strip is involved.
-      const lane = (nextLane(`jumper:${from.device.row}:${from.side}`) - 0.5) * LANE_MM
+      const lane = (nextChannelLane(`jumper:${from.device.row}:${from.side}`) - 0.5) * LANE_MM
       const channelX = clamp(from.x + lane, frame.railStartXMm - INCOMING_PITCH_MM * 6, frame.railStartXMm + frame.railWidthMm)
       const exitY = corridorYMm(frame, from.device.row, from.side)
       const entryY = from.side === target.side ? exitY : corridorYMm(frame, target.device.row, target.side)
@@ -346,7 +351,7 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       if (!bar) continue
       const barX = frame.deviceLeftMm(bar) + frame.deviceWidthMm(bar)
       const barY = frame.deviceTopMm(bar) + frame.deviceHeightMm(bar) / 2
-      const lane = (nextLane(`bar:${connection.fromDeviceId}`) - 0.5) * LANE_MM
+      const lane = (nextChannelLane(`bar:${connection.fromDeviceId}`) - 0.5) * LANE_MM
       const barMidX = barX + frame.deviceWidthMm(bar) / 2
       points = [{ x: barX + lane, y: barY }]
       points = walk(points, barMidX, barY)
@@ -355,8 +360,7 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       points = walk(points, target.x, target.y)
     } else {
       const bar = connection.busId ? busBars.get(connection.busId) : undefined
-      const laneKey = `in:${bar?.kind ?? connection.fromBus}`
-      const laneX = Math.min(incomingXMm(laneKey), Math.max(INCOMING_MARGIN_MM, frame.railStartXMm - 2))
+      const laneX = Math.min(incomingXMm(nextStripLane()), Math.max(INCOMING_MARGIN_MM, frame.railStartXMm - 2))
       // A bar-fed wire climbs the incoming strip from the bar; an L wire has no bar behind it
       // and simply starts on the corridor, which is the incoming zone of the board.
       const sourceY = bar ? bar.y + bar.height / 2 : corridorY

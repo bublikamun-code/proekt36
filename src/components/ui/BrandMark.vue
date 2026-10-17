@@ -18,7 +18,10 @@ defineProps<{ compact?: boolean }>()
   display: flex;
   align-items: center;
   gap: 9px;
-  color: var(--service);
+  /* Inherits rather than names a colour: the mark sits on light chrome, on the dark service
+     footer and in both themes' headers, and only the surrounding context knows which ink
+     reads there. Picking --service here vanished on every --service-coloured surface. */
+  color: inherit;
   font-weight: 800;
   font-size: var(--text-base);
   white-space: nowrap;

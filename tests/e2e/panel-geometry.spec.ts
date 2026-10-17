@@ -200,7 +200,8 @@ test('the read-only demo uses the same physical pitch as the editor', async ({ p
   await page.goto('/demo/project')
   const board = page.locator('.demo-project-board-view')
   await expect(board).toBeVisible()
-  await expect(page.locator('.cabinet-footer b')).toHaveText('18 мм на модуль')
+  // The pitch caption lives under the cabinet now that the plate bottom carries the N/PE bars.
+  await expect(page.locator('.demo-project-cabinet .cabinet-label small')).toContainText('18 мм')
 
   const metrics = await page.evaluate(() => {
     const rect = (element: Element | null) => {
@@ -269,7 +270,7 @@ test('the demo cabinet is not stretched by a minimum width', async ({ page }) =>
   await expect(page.locator('.demo-project-cabinet')).toBeVisible()
   const cabinet = await page.evaluate(() => {
     const element = document.querySelector('.demo-project-cabinet')
-    const caption = document.querySelector('.demo-project-plate .cabinet-caption b')
+    const caption = document.querySelector('.demo-project-cabinet .cabinet-label small')
     if (!element || !caption) return null
     const box = element.getBoundingClientRect()
     const [widthMm, heightMm] = (caption.textContent ?? '').match(/(\d+) × (\d+)/)?.slice(1).map(Number) ?? []

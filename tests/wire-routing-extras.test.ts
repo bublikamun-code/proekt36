@@ -323,6 +323,26 @@ describe('оформление провода', () => {
     expect([...xs].sort((left, right) => left - right)).toEqual(xs)
     expect(Math.max(...xs)).toBeLessThan(frameOf(source).railStartXMm * 1.5)
   })
+
+  it('делит полосы входа между видами: L, N и PE не рисуются одной линией', () => {
+    // Per-kind lane counting handed the first L, the first N and the first PE feeder the same
+    // x, and a one-line board read as a single conductor per clamp.
+    const source = project({
+      busAssemblies: [
+        { id: 'bus-n', kind: 'N', placement: 'bottom', label: 'N' },
+        { id: 'bus-pe', kind: 'PE', placement: 'bottom', label: 'PE' },
+      ],
+      connections: [
+        connection({ id: 'l1', toDeviceId: 'qf01', toTerminal: { deviceId: 'qf01', pole: 1, side: 'top' } }),
+        connection({ id: 'n1', fromBus: 'N', busId: 'bus-n', toDeviceId: 'qf01', toTerminal: { deviceId: 'qf01', pole: 2, side: 'top' } }),
+        connection({ id: 'pe1', fromBus: 'PE', busId: 'bus-pe', toDeviceId: 'qf01', toTerminal: { deviceId: 'qf01', pole: 3, side: 'bottom' } }),
+      ],
+    })
+    const xs = boardOf(source).wires.map((wire) => firstPoint(wire).x)
+
+    expect(new Set(xs).size).toBe(3)
+    expect(Math.max(...xs)).toBeLessThan(frameOf(source).railStartXMm * 1.5)
+  })
 })
 
 describe('гребёнки', () => {

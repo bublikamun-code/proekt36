@@ -4262,7 +4262,9 @@ kbd {
   .canvas-legend,
   .toast,
   .panel-scrim,
-  .sheet-backdrop {
+  .sheet-backdrop,
+  .public-header,
+  .public-footer {
     display: none !important;
   }
   .workspace,

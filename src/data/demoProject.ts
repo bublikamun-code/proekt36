@@ -45,7 +45,7 @@ export const demoProject: PanelProject = {
     { id: 'demo-connection-kitchen', circuitId: 'demo-circuit-kitchen', fromBus: 'L', toDeviceId: 'demo-qfi02', color: '#d65b43', thickness: 2, label: 'L → QFI02' },
     { id: 'demo-connection-light', circuitId: 'demo-circuit-light', fromBus: 'L', toDeviceId: 'demo-qf02', color: '#d65b43', thickness: 2, label: 'L → QF02' },
     { id: 'demo-connection-living-n', circuitId: 'demo-circuit-living', fromBus: 'N', toDeviceId: 'demo-qfi01', color: '#1f6fb4', thickness: 2, label: 'N → QFI01', busId: 'bus-n-bottom', toTerminal: { deviceId: 'demo-qfi01', pole: 2, side: 'top' } },
-    { id: 'demo-connection-living-pe', circuitId: 'demo-circuit-living', fromBus: 'PE', toDeviceId: 'demo-qfi01', color: '#4f9d3a', thickness: 2, label: 'PE → QFI01', busId: 'bus-pe-bottom', toTerminal: { deviceId: 'demo-qfi01', pole: 4, side: 'top' } },
-    { id: 'demo-jumper-01', circuitId: '', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#5a6672', thickness: 2, label: 'QF01 → QFI01', kind: 'jumper', fromTerminal: { deviceId: 'demo-qf01', pole: 1, side: 'bottom' }, toTerminal: { deviceId: 'demo-qfi01', pole: 1, side: 'top' } },
+    { id: 'demo-connection-living-pe', circuitId: 'demo-circuit-living', fromBus: 'PE', toDeviceId: 'demo-qfi01', color: '#4f9d3a', thickness: 2, label: 'PE → QFI01', busId: 'bus-pe-bottom', toTerminal: { deviceId: 'demo-qfi01', pole: 4, side: 'bottom' } },
+    { id: 'demo-jumper-01', circuitId: '', fromBus: 'L', toDeviceId: 'demo-qfi01', color: '#5a6672', thickness: 2, label: 'QF01 → QFI01', kind: 'jumper', fromTerminal: { deviceId: 'demo-qf01', pole: 3, side: 'bottom' }, toTerminal: { deviceId: 'demo-qfi01', pole: 1, side: 'top' } },
   ],
 }

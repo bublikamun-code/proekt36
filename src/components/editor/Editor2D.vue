@@ -5,6 +5,7 @@ import { getRowUsage, isDinDevice, placeProduct, resolveDeviceMove, resolveLayou
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { routeBoard, terminalTargets as terminalTargetsOf, wireFrameFromGeometry } from '../../domain/wireRouting'
 import type { WirePoint } from '../../domain/wireRouting'
+import { conductorStyle, wireClass } from '../../domain/wireDrawing'
 import { terminalKey } from '../../domain/terminals'
 import type { TerminalRef } from '../../domain/terminals'
 import type { TerminalTarget } from '../../domain/wireRouting'
@@ -410,27 +411,7 @@ const onBoardKeydown = (event: KeyboardEvent) => {
 // the old hand-rolled paths carried: their Y came from the cabinet top while the overlay's
 // viewBox starts at the plate.
 
-/** A jumper carries no phase, so it takes the neutral grey; everything else takes its bus. */
-const wireClass = (path: { kind: string; bus: string; phase?: number }): string => {
-  if (path.kind === 'jumper') return 'jumper'
-  if (path.bus === 'N') return 'n'
-  if (path.bus === 'PE') return 'pe'
-  return `l phase-${path.phase ?? 1}`
-}
-
-/**
- * Millimetres of conductor to pixels of stroke. The default 2 mm section lands on the widths the
- * stylesheet already used (0.8 px core, 2.4 px casing), so a board nobody has edited draws exactly
- * as it did before the inspector's colour and thickness could reach the drawing at all.
- */
-const MM_TO_STROKE_PX = 0.4
-const conductorStyle = (path: { customColor: boolean; color: string; thickness: number }, role: 'core' | 'casing') => {
-  const style: Record<string, string> = {}
-  if (path.customColor) style.stroke = path.color
-  const px = path.thickness * MM_TO_STROKE_PX * (role === 'casing' ? 3 : 1)
-  style.strokeWidth = `${px}px`
-  return style
-}
+/** Core and casing stroke widths, and the override colour, come from the shared drawing module. */
 const coreStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'core')
 const casingStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'casing')
 

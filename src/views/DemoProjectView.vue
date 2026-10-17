@@ -8,6 +8,8 @@ import { getEnclosureMinimum, getFreeSlots, getRowUsage, getProductFootprintModu
 import { getPanelGeometry } from '../domain/panelGeometry'
 import { buildBom } from '../domain/pricing'
 import { phaseBalance, validateProject } from '../domain/validation'
+import { routeBoard, wireFrameFromGeometry } from '../domain/wireRouting'
+import { conductorStyle, wireClass } from '../domain/wireDrawing'
 import type { DeviceDefinition, PlacedDevice } from '../domain/types'
 
 const definitions = new Map<string, DeviceDefinition>(enmasSeriesCatalog.map((product) => [product.id, product]))
@@ -17,6 +19,13 @@ const zoom = ref(1)
 
 const layout = computed(() => resolveLayout(demoProject))
 const geometry = computed(() => getPanelGeometry(demoProject, definitions))
+// The demo board draws the same routed wires as the editor: the project carries real
+// connections (L/N/PE feeders and a QF01→QFI01 jumper), and a read-only view that hides
+// them shows a board an electrician could not wire from. Same router, same drawing classes,
+// no interaction layer — the demo is watch-only.
+const board = computed(() => routeBoard(demoProject, definitions, wireFrameFromGeometry(geometry.value)))
+const coreStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'core')
+const casingStyle = (path: { customColor: boolean; color: string; thickness: number }) => conductorStyle(path, 'casing')
 const capacity = computed(() => geometry.value.capacity)
 const freeSlots = computed(() => getFreeSlots(demoProject, definitions))
 const minimum = computed(() => getEnclosureMinimum(demoProject, definitions))
@@ -127,7 +136,6 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
           <div class="demo-project-cabinet" :style="{ width: `${geometry.cabinetWidthPx}px`, minHeight: `${geometry.cabinetHeightPx}px`, transform: `scale(${zoom})` }">
             <div class="demo-project-plate" :style="{ left: `${geometry.plateInsetPx}px`, top: `${geometry.plateTopPx}px`, width: `${geometry.plateWidthPx}px`, height: `${geometry.plateHeightPx}px` }">
               <span v-for="fastener in 4" :key="fastener" class="plate-fastener" aria-hidden="true"></span>
-              <div class="cabinet-caption"><span>МОНТАЖНАЯ ПЛАСТИНА</span><b>{{ geometry.cabinetWidthMm }} × {{ geometry.cabinetHeightMm }} × {{ geometry.cabinetDepthMm }} мм</b></div>
               <div v-for="row in rows" :key="row" class="demo-project-row" :style="demoRowStyle(row)">
                 <span class="row-number" :style="demoRowNumberStyle()">Р{{ row + 1 }}</span>
                 <div class="demo-project-rail" :style="demoRailStyle(row)">
@@ -161,8 +169,24 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
                 </div>
                 <span class="row-usage">{{ rowUsage[row]?.used || 0 }} / {{ capacity }} мод.</span>
               </div>
-              <div class="cabinet-footer"><span>L</span><span>N</span><span>PE</span><b>{{ pitchLabel }} на модуль</b></div>
+              <svg class="wires" :viewBox="`0 0 ${geometry.plateWidthPx} ${geometry.plateHeightPx}`" aria-hidden="true">
+                <g class="wire-combs">
+                  <g v-for="comb in board.combs" :key="comb.id" class="comb" :class="{ starved: comb.starved }">
+                    <rect class="comb-bar" :x="comb.x" :y="comb.y" :width="comb.width" :height="comb.height" rx="1" />
+                    <path v-for="(tooth, index) in comb.teeth" :key="index" class="comb-tooth" :d="`M ${tooth.x} ${comb.y} V ${tooth.y}`" />
+                  </g>
+                </g>
+                <g class="wire-buses">
+                  <g v-for="bus in board.buses" :key="bus.id">
+                    <rect :x="bus.x" :y="bus.y" :width="bus.width" :height="bus.height" rx="1.5" :class="`bus-bar bus-${bus.kind.toLowerCase()}`" />
+                    <text :x="bus.x + 3" :y="bus.y + bus.height * 0.78" font-size="4" font-weight="700" :class="`bus-tag bus-tag-${bus.kind.toLowerCase()}`">{{ bus.label }}</text>
+                  </g>
+                </g>
+                <path v-for="path in board.wires" :key="`${path.id}-casing`" :d="path.d" :class="`wire-casing wire-${wireClass(path)}`" :style="casingStyle(path)" />
+                <path v-for="path in board.wires" :key="`${path.id}-core`" :d="path.d" :class="`wire-core wire-${wireClass(path)}`" :style="coreStyle(path)"><title>{{ path.label }}</title></path>
+              </svg>
             </div>
+            <div class="cabinet-label"><span>{{ demoProject.name }}</span><small>{{ geometry.cabinetWidthMm }} × {{ geometry.cabinetHeightMm }} × {{ geometry.cabinetDepthMm }} мм · {{ pitchLabel }}</small></div>
           </div>
         </div>
         <p class="demo-readonly-note"><span>●</span> Схема доступна только для просмотра. Свободные слоты не принимают новые устройства.</p>
@@ -242,6 +266,15 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
 .demo-project-heading {
   min-width: 0;
   flex: 1;
+}
+/* The banner is a --service surface, so everything inside it needs on-service ink: the global
+   .eyebrow and h1 rules carry theme-foreground colours that in the light theme are the very
+   shade of the banner behind them, and the project title disappeared into it. */
+.demo-project-heading .eyebrow {
+  color: color-mix(in srgb, var(--on-service) 72%, transparent);
+}
+.demo-project-heading h1 {
+  color: var(--on-service);
 }
 .demo-project-heading h1 {
   margin-top: 10px;
@@ -453,22 +486,6 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
   border: 1px solid var(--board-plate-edge);
   box-shadow: inset 0 0 0 2px rgba(245,247,242,.32), inset 0 0 18px rgba(31,48,39,.14), 2px 2px 0 rgba(35,49,42,.12);
 }
-.cabinet-caption,
-.cabinet-footer {
-  position: relative;
-  z-index: 3;
-  display: flex;
-  justify-content: space-between;
-  color: var(--board-ink);
-  font:var(--text-micro) var(--mono);
-}
-.cabinet-caption {
-  height: 22px;
-  align-items: center;
-}
-.cabinet-caption span {
-  letter-spacing: .1em;
-}
 .demo-project-row {
   position: relative;
   z-index: 2;
@@ -578,17 +595,6 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
   color: var(--board-ink);
   font:var(--text-micro) var(--mono);
   white-space: nowrap;
-}
-.cabinet-footer {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  padding-top: 12px;
-  border-top: 1px solid rgba(101,112,105,.4);
-}
-.cabinet-footer b {
-  margin-left: auto;
 }
 .demo-readonly-note {
   display: flex;
@@ -945,12 +951,12 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
   .demo-project-shell > :not(.print-report) {
     display: none !important;
   }
+  /* The site chrome around the shell is not this component's subtree, so a scoped rule
+     cannot reach it — the global print block in style.css hides header and footer. */
   .demo-project-tabs,
   .demo-print,
   .zoom-controls,
-  .demo-project-footer,
-  .public-header,
-  .public-footer {
+  .demo-project-footer {
     display: none !important;
   }
   .demo-project-header {
