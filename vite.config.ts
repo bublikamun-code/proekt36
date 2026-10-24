@@ -1,4 +1,6 @@
 import vue from '@vitejs/plugin-vue'
+import { copyFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 
 /**
@@ -54,15 +56,22 @@ const contentSecurityPolicy = (): Plugin => ({
  * A copy of the entry as 404.html boots the whole app right on the requested URL, and the
  * router — which reads the real location — lands the user where they asked to be.
  */
-const spaFallback = (): Plugin => ({
-  name: 'panel36-spa-fallback',
-  apply: 'build',
-  generateBundle(_options, bundle) {
-    if (!process.env.VITE_PUBLIC_BASE) return
-    const index = bundle['index.html']
-    if (index && index.type === 'asset') this.emitFile({ type: 'asset', fileName: '404.html', source: index.source })
-  },
-})
+const spaFallback = (): Plugin => {
+  let outDir = 'dist'
+  return {
+    name: 'panel36-spa-fallback',
+    apply: 'build',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
+    // The entry document is generated after generateBundle, so the copy happens on close.
+    closeBundle() {
+      if (!process.env.VITE_PUBLIC_BASE) return
+      const root = resolve(process.cwd(), outDir)
+      copyFileSync(resolve(root, 'index.html'), resolve(root, '404.html'))
+    },
+  }
+}
 
 export default defineConfig({
   // The container and the dev server serve the app from the root; GitHub Pages serves it
