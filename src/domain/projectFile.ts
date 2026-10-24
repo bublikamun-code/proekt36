@@ -1,6 +1,6 @@
 import { allCatalog, CATALOG_REVISION } from '../data/catalog'
 import { migrateProject } from './project'
-import { APPLICATION_REVISION, CATALOG_REVISION as DOMAIN_CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision, validateProjectSchema } from './projectSchema'
+import { APPLICATION_REVISION, CALC_REVISION, CATALOG_REVISION as DOMAIN_CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION, assertValidProjectSchema, isFutureRevision, isKnownRevision, validateProjectSchema } from './projectSchema'
 import type { PanelProject } from './types'
 
 const MAX_PROJECT_FILE_SIZE = 5 * 1024 * 1024
@@ -26,6 +26,8 @@ export interface ProjectFileEnvelope {
   catalogRevision: string
   validationRevision: number
   validation: { revision: number }
+  /** Revision of the calculation core (load maths, sizing, voltage drop) the file was written against. */
+  calcRevision: string
   exportedAt: string
   /** The single copy of the catalogue snapshot; legacy files also carry flat fields. */
   catalog: { revision: string; snapshot: unknown[]; manifest: { revision: string; count: number; productIds: string[]; hash: string } }
@@ -47,6 +49,7 @@ export const createProjectFileEnvelope = (project: PanelProject, exportedAt = ne
     catalogRevision: DOMAIN_CATALOG_REVISION,
     validationRevision: VALIDATION_REVISION,
     validation: { revision: VALIDATION_REVISION },
+    calcRevision: CALC_REVISION,
     exportedAt,
     catalog: {
       revision: DOMAIN_CATALOG_REVISION,
@@ -96,6 +99,12 @@ const validateEnvelope = (value: unknown): string[] => {
   else if (isFutureRevision(value.catalogRevision, CATALOG_REVISION)) errors.push(`каталог в файле новее установленного (${text(value.catalogRevision)} > ${CATALOG_REVISION})`)
   if (!isKnownRevision(value.validationRevision)) errors.push('неверна revision проверок')
   else if (isFutureRevision(value.validationRevision, VALIDATION_REVISION)) errors.push(`validationRevision новее установленного (${String(value.validationRevision)} > ${VALIDATION_REVISION})`)
+  // Files written before the calculation core carried a revision stay readable: only a
+  // present-but-wrong value is reported, same policy as `applicationRevision` above.
+  if (value.calcRevision !== undefined) {
+    if (!isKnownRevision(value.calcRevision)) errors.push('неверна ревизия расчётов')
+    else if (isFutureRevision(value.calcRevision, CALC_REVISION)) errors.push(`ревизия расчётов новее установленной (${text(value.calcRevision)} > ${CALC_REVISION})`)
+  }
   if (!isRecord(value.validation)) errors.push('отсутствует вложенная ревизия валидации')
   else if (!isKnownRevision(value.validation.revision)) errors.push('неверна вложенная ревизия валидации')
   else if (isFutureRevision(value.validation.revision, VALIDATION_REVISION)) errors.push(`вложенная ревизия валидации новее установленной (${String(value.validation.revision)} > ${VALIDATION_REVISION})`)

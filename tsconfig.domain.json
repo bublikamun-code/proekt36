@@ -1,0 +1,19 @@
+{
+  /* The calculation core compiles as its own project, separate from the Vue application
+     (C1): the domain must typecheck with nothing but its own sources, the catalogue data
+     and the version constant. `npm run domain:check` runs this compile plus the boundary
+     check in tools/check-domain.mjs. */
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.domain.tsbuildinfo",
+    "types": [],
+    "noEmit": true,
+
+    /* Linting — same bar as the application project. */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/domain/**/*.ts", "src/data/catalog/**/*.ts", "src/version.ts"]
+}

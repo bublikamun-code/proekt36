@@ -11,11 +11,12 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:preview": "npm run build && playwright test --config=playwright.preview.config.ts",
-    "verify": "npm run typecheck && npm test && npm run catalog:check && npm run test:e2e && npm run test:preview",
+    "verify": "npm run typecheck && npm run domain:check && npm test && npm run catalog:check && npm run test:e2e && npm run test:preview",
     "preview": "vite preview",
     "ai": "node tools/ai-proxy.mjs",
     "catalog:generate": "node tools/generate-enmas.mjs",
-    "catalog:check": "node tools/generate-enmas.mjs --check"
+    "catalog:check": "node tools/generate-enmas.mjs --check",
+    "domain:check": "tsc -p tsconfig.domain.json && node tools/check-domain.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

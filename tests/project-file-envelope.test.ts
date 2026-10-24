@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject } from '../src/domain/project'
 import {
   APPLICATION_REVISION,
+  CALC_REVISION,
   CATALOG_REVISION,
   PROJECT_SCHEMA_VERSION,
   VALIDATION_REVISION,
@@ -49,6 +50,8 @@ describe('конверт проекта', () => {
     expect(built.catalogRevision).toBe(CATALOG_REVISION)
     expect(built.validationRevision).toBe(VALIDATION_REVISION)
     expect(built.validation.revision).toBe(VALIDATION_REVISION)
+    // The load maths revision travels with the file so a rerun on the same data is traceable.
+    expect(built.calcRevision).toBe(CALC_REVISION)
   })
 
   it('записывает в manifest только те товары, которых нет в каталоге', () => {
@@ -89,6 +92,8 @@ describe('отказ читать файл', () => {
       [{ validation: 'нет' }, 'вложенная ревизия валидации'],
       [{ validation: { revision: 9999 } }, 'вложенная ревизия валидации новее'],
       [{ validation: { revision: 'не-ревизия' } }, 'неверна вложенная ревизия валидации'],
+      [{ calcRevision: '9999-01-01' }, 'ревизия расчётов новее'],
+      [{ calcRevision: 'не-ревизия' }, 'неверна ревизия расчётов'],
       [{ exportedAt: 'вчера' }, 'корректная дата exportedAt'],
       [{ project: 'нет' }, 'отсутствует project'],
       [{ cadModelManifest: { revision: '9', count: 0, modelIds: [] } }, 'manifest CAD-моделей'],
@@ -105,13 +110,24 @@ describe('отказ читать файл', () => {
   it('принимает конверт без плоской applicationRevision — он опционален', async () => {
     const built = envelope()
     const { applicationRevision, ...rest } = built
-
     // The revision nested in `application` is the one that counts; the flat copy was added later,
     // so a file written before it existed must still read. An absent field is not a revision
     // that can be newer than anything.
     const project = await readProjectFile(file(rest))
 
     expect(project.name).toBe(built.project.name)
+  })
+
+  it('принимает конверт без ревизии расчётов — файлы до её появления читаются', async () => {
+    const built = envelope()
+    const { calcRevision, ...rest } = built
+    expect(calcRevision).toBe(CALC_REVISION)
+
+    // Same policy as the flat applicationRevision: an absent field is a file written by an
+    // older build, not a wrong revision, so the project opens.
+    const opened = await readProjectFile(file(rest))
+
+    expect(opened.name).toBe(built.project.name)
   })
 
   it('ловит расхождение между вложенным снимком каталога и плоским', async () => {

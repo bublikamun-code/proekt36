@@ -8,6 +8,13 @@ export const PROJECT_SCHEMA_VERSION = 5
 export const APPLICATION_REVISION = APP_VERSION
 export const CATALOG_REVISION = DATA_CATALOG_REVISION
 export const VALIDATION_REVISION = 5
+/**
+ * Ревизия расчётного ядра — формул и справочников, из которых получаются ток, баланс,
+ * подбор защиты/сечения и падение напряжения: `loadBook`, `electrical`, `sizing`,
+ * `voltageDrop`. Меняется при любом изменении коэффициентов, рядов или формул; файлы
+ * проекта фиксируют её, чтобы повторный расчёт на тех же данных был воспроизводим.
+ */
+export const CALC_REVISION = '2026-10-18'
 
 /**
  * Orders two revision strings and returns a negative number when `left` is older. Both

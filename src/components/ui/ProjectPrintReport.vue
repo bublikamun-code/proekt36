@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { getFootprintModules, getFreeSlots, getRowCapacity, getRowUsage, isDinDevice, resolveLayout } from '../../domain/layout'
 import { buildBom } from '../../domain/pricing'
 import SingleLineDiagram from './SingleLineDiagram.vue'
-import { CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
+import { CALC_REVISION, CATALOG_REVISION, PROJECT_SCHEMA_VERSION, VALIDATION_REVISION } from '../../domain/projectSchema'
 import { validateProject } from '../../domain/validation'
 import { formatDropPercent, voltageDrop } from '../../domain/voltageDrop'
 import type { CircuitKind } from '../../domain/types'
@@ -173,7 +173,7 @@ const schedule = computed(() => props.project.circuits.map((circuit, index) => {
     </section>
 
     <footer class="print-revisions">
-      <p><b>Редакции:</b> схема проекта {{ project.schemaVersion || PROJECT_SCHEMA_VERSION }} (поддерживается {{ PROJECT_SCHEMA_VERSION }}), каталог {{ CATALOG_REVISION }}, проверки {{ VALIDATION_REVISION }}.</p>
+      <p><b>Редакции:</b> схема проекта {{ project.schemaVersion || PROJECT_SCHEMA_VERSION }} (поддерживается {{ PROJECT_SCHEMA_VERSION }}), каталог {{ CATALOG_REVISION }}, проверки {{ VALIDATION_REVISION }}, расчёты {{ CALC_REVISION }}.</p>
       <p class="print-disclaimer">Расчёты компоновки, проверки и цены предварительные и не являются проектной документацией, сметой или публичной офертой. До применения проверьте схему, паспорта изделий, источники, нагрузки и действующие требования у квалифицированного специалиста.</p>
     </footer>
   </article>
