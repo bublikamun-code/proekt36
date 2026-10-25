@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatAmps } from '../../domain/electrical'
 import { storeToRefs } from 'pinia'
 import { phaseBalance, validateProject } from '../../domain/validation'
 import { useProjectStore } from '../../stores/project'
@@ -44,13 +45,15 @@ const focusIssueDevice = (deviceId?: string) => {
 
     <div class="checks-phase">
       <h4>Баланс фаз</h4>
-      <div class="phase-bar" role="img" :aria-label="`Нагрузка фаз: ${balance.totals.join(', ')} ампер`"><i v-for="(value, index) in balance.totals" :key="index" :class="`phase-${index}`" :style="{ flex: Math.max(1, value) }"></i></div>
+      <div class="phase-bar" role="img" :aria-label="`Нагрузка фаз: ${balance.totals.map(formatAmps).join(', ')} ампер`"><i v-for="(value, index) in balance.totals" :key="index" :class="`phase-${index}`" :style="{ flex: Math.max(1, value) }"></i></div>
       <dl>
         <div v-for="index in activePhases" :key="index">
           <dt>{{ currentProject.settings.phase === 1 ? 'Нагрузка' : `Фаза L${index + 1}` }}</dt>
-          <dd class="mono">{{ balance.totals[index] }} А</dd>
+          <dd class="mono">{{ formatAmps(balance.totals[index]) }} А</dd>
         </div>
-        <div>
+        <!-- Разброс имеет смысл только когда есть что сравнивать: в однофазном щите он
+             всегда 0 % и только спорит с собственными числами рядом. -->
+        <div v-if="currentProject.settings.phase === 3">
           <dt>Разброс</dt>
           <dd class="mono">{{ balance.spread }} %</dd>
         </div>

@@ -137,7 +137,9 @@ test('a CHINT-bound ENMAS breaker renders the bundled CAD preview in the 2D edit
   await expect(item.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveCount(1)
   await item.click()
 
-  const placed = page.locator('.placed-device').filter({ hasText: 'NB1-63H' })
+  // The seed board already carries NB1-63H breakers of its own, and the face drawing spells
+  // the series its own way, so the freshly placed device is addressed by its aria-label.
+  const placed = page.locator('.placed-device[aria-label*="NB1-63H 1P 16A C"]')
   await expect(placed).toHaveCount(1)
   await expect(placed.locator('[data-model-preview="/models/chint-nb1-63-1p.glb"]')).toHaveAttribute('data-model-preview', '/models/chint-nb1-63-1p.glb')
 })

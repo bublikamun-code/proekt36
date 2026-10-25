@@ -6,6 +6,7 @@ import { demoProject } from '../data/demoProject'
 import { enmasSeriesCatalog } from '../data/catalog'
 import { getEnclosureMinimum, getFreeSlots, getRowUsage, getProductFootprintModules, resolveLayout } from '../domain/layout'
 import { getPanelGeometry } from '../domain/panelGeometry'
+import { formatAmps } from '../domain/electrical'
 import { buildBom } from '../domain/pricing'
 import { phaseBalance, validateProject } from '../domain/validation'
 import { routeBoard, wireFrameFromGeometry } from '../domain/wireRouting'
@@ -219,7 +220,7 @@ const formatCategory = (category?: string) => category === 'terminals' ? 'Кле
 
       <section v-else id="demo-panel-circuits" class="demo-project-panel" role="tabpanel" aria-labelledby="demo-circuits-title">
         <div class="panel-intro"><div><span class="eyebrow">Демонстрационные связи</span><h2 id="demo-circuits-title">Цепи и фазовый баланс</h2></div><span class="preliminary-pill">Только просмотр</span></div>
-        <div class="phase-summary"><div class="phase-total"><b>{{ phase.totals[0] }} А</b><span>Фаза L1</span></div><div class="phase-total"><b>{{ phase.totals[1] }} А</b><span>Фаза L2</span></div><div class="phase-total"><b>{{ phase.totals[2] }} А</b><span>Фаза L3</span></div><div class="phase-total"><b>{{ phase.spread }}%</b><span>разброс</span></div></div>
+        <div class="phase-summary"><div class="phase-total"><b>{{ formatAmps(phase.totals[0]) }} А</b><span>Нагрузка (L1)</span></div></div>
         <div class="demo-circuit-list">
           <article v-for="circuit in demoProject.circuits" :key="circuit.id" class="demo-circuit"><span class="circuit-line" :style="{ background: circuit.color }"></span><div><strong>{{ circuit.name }}</strong><small>{{ circuit.loadName }} · {{ circuit.power }} Вт</small></div><span>{{ circuit.current }} A</span><span class="mono">{{ circuit.wireCrossSection }} мм²</span></article>
         </div>

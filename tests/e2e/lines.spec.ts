@@ -67,7 +67,7 @@ test('линия из плана встаёт на доску аппаратом
   await dialog.getByRole('button', { name: 'Добавить линию' }).click()
   await expect(page.locator('[data-line-row]')).toHaveCount(1)
   await expect(page.locator('[data-line-row] .lines-name')).toHaveValue('Розетки 1')
-  await expect(page.locator('.lines-summary')).toContainText('1 линий')
+  await expect(page.locator('.lines-summary')).toContainText('1 линия')
 
   // The board gained the apparatus the plan named, and its conductor is badged with the line.
   await page.getByRole('tab', { name: 'Схема 2D' }).click()

@@ -22,7 +22,13 @@ afterEach(() => {
 const openStore = () => {
   env = installBrowserEnv({ storage: new MemoryStorage() })
   setActivePinia(createPinia())
-  return useProjectStore()
+  const store = useProjectStore()
+  // The seed board ships with demo lines already wired; planner-command scenarios start
+  // from an empty plan, so the line a test adds really is the first.
+  store.currentProject.circuits = []
+  store.currentProject.connections = []
+  store.currentProject.rooms = []
+  return store
 }
 
 const blankProject = (): PanelProject => {

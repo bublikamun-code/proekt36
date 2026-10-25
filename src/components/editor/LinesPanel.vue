@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia'
 import AppDialog from '../ui/AppDialog.vue'
 import AppSelect from '../ui/AppSelect.vue'
 import { getFootprintModules } from '../../domain/layout'
+import { formatAmps } from '../../domain/electrical'
+import { connectionWord, lineWord } from '../../domain/plural'
 import { CIRCUIT_KINDS, type Circuit, type CircuitKind } from '../../domain/types'
 import { circuitCurrentA } from '../../domain/electrical'
 import { CIRCUIT_KIND_LABELS } from '../../domain/loadBook'
@@ -166,9 +168,9 @@ const submitRoom = () => {
     </div>
 
     <div class="lines-summary" role="status">
-      <strong>{{ currentProject.circuits.length }} линий · {{ wiredCount }} соединений</strong>
+      <strong>{{ currentProject.circuits.length }} {{ lineWord(currentProject.circuits.length) }} · {{ wiredCount }} {{ connectionWord(wiredCount) }}</strong>
       <span>Занято модулей: {{ usedModules }}</span>
-      <span>Баланс фаз: {{ balance.totals.join(' / ') }} А (разброс {{ balance.spread }} %)</span>
+      <span>Баланс фаз: {{ balance.totals.map(formatAmps).join(' / ') }} А<template v-if="currentProject.settings.phase === 3"> (разброс {{ balance.spread }} %)</template></span>
     </div>
 
     <div class="lines-actions">

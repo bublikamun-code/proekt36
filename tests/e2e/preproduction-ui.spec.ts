@@ -140,7 +140,9 @@ test('editor BOM exposes unknown pricing and the print report works from any tab
   })
 
   await openSidePanels(page)
-  await page.getByRole('button', { name: /NB1-63H 1P 6A C/ }).click()
+  // The seed board carries an NB1-63H 1P 6A C of its own now, so the catalogue card is
+  // addressed by its container, not by a name the placed device shares.
+  await page.locator('.catalog-item').filter({ hasText: 'NB1-63H 1P 6A C' }).first().click()
   // The bill lives behind the centre-column «Спецификация» tab.
   await page.getByRole('tab', { name: 'Спецификация' }).click()
   const bom = page.getByRole('region', { name: 'Сводная ведомость' })

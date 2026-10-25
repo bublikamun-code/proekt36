@@ -7,6 +7,14 @@ import type { Circuit } from './types'
  * every number derived here is explicitly preliminary until C2 makes voltages project input.
  */
 export const SINGLE_PHASE_VOLTAGE = 230
+
+/**
+ * The one way every screen prints an ampere figure: whole amperes from 100 up, one decimal
+ * below that, Russian decimal comma. A raw float here («8.05491990846682 А») is the number
+ * the product is trusted for, so no view formats it its own way.
+ */
+export const formatAmps = (value: number): string =>
+  `${value >= 100 ? Math.round(value) : Number(value.toFixed(1))}`.replace('.', ',')
 export const THREE_PHASE_VOLTAGE = 400
 
 /** Circuit fields the load maths reads; the coefficient fields are optional overrides. */

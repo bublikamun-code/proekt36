@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { unlockWorkspace } from './helpers'
+import { unlockWorkspace, seedProject } from './helpers'
 
 /**
  * The single-line diagram lives in the print report, so its two states are checked where they
@@ -31,7 +31,10 @@ test.describe('однолинейная схема в печатном отчё�
 
   test('в редакторе без цепей схема честно сообщает, что строить не из чего', async ({ page }) => {
     await unlockWorkspace(page)
-    await page.goto('/app/editor?tab=report')
+    // The default seed now ships with demo lines wired; the honest-empty scenario needs a
+    // board that genuinely has no circuits of its own.
+    await seedProject(page, [{ id: 'qf01', row: 0, slot: 0 }])
+    await page.goto('/app/projects/drag-lab/editor?tab=report')
     const figure = page.locator('[data-single-line]')
     await expect(figure.locator('.single-line-empty')).toBeVisible()
     await expect(figure.locator('.sl-device')).toHaveCount(0)

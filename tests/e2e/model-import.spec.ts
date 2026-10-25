@@ -122,7 +122,8 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
 
   await page.locator('.placed-device[aria-label*="Импорт GLB"]').dispatchEvent('click')
   await page.getByRole('button', { name: '＋ Цепь' }).click()
-  const circuitCard = page.locator('.circuit-card')
+  // The seed board ships demo lines of its own; the one just created is the last card.
+  const circuitCard = page.locator('.circuit-card').last()
   await circuitCard.getByLabel('Ток, А').fill('40')
   await circuitCard.getByLabel('Ток, А').press('Tab')
   // The checks tab renders the same rules in its own list, so the assertion stays scoped
@@ -163,7 +164,9 @@ test('GLB, standalone glTF and ZIP participate in the local device library', asy
   const secondId = await circuitCard.locator('.connection-card').nth(1).getAttribute('data-connection-id')
   await expect(page.locator(`.wires .wire-core[data-connection-id="${secondId}"]`)).toHaveCount(1)
 
-  await circuitCard.getByRole('button', { name: 'Удалить подключение 2 цепи Цепь 1' }).click()
+  // The circuit the test created is numbered after the seed's demo lines, so the button is
+  // matched by what it does, not by the number the seed happened to leave free.
+  await circuitCard.getByRole('button', { name: /Удалить подключение 2/ }).click()
   const connectionDialog = page.getByRole('dialog', { name: 'Удалить подключение?' })
   await expect(connectionDialog).toBeVisible()
   await connectionDialog.getByRole('button', { name: 'Удалить подключение' }).click()
@@ -198,7 +201,7 @@ test('print mode and local data cleanup are available in the 2D release', async 
   await expect(page.locator('.project-menu')).toBeHidden()
   await expect(page.locator('.model-row')).toHaveCount(0)
   await expect.poll(() => countIndexedDbAssets(page)).toBe(0)
-  await expect(page.locator('.placed-device')).toHaveCount(9)
+  await expect(page.locator('.placed-device')).toHaveCount(10)
 })
 
 test('reads the legacy localStorage project format', async ({ page }) => {

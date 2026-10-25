@@ -29,7 +29,11 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 export const terminalColumns = (product: DeviceDefinition): number => {
   const moduleWidth = Math.max(1, Math.round(product.moduleWidth || 1))
   const poles = Math.max(1, Math.round(product.poles || 1))
-  if (product.category === 'busbar' || product.category === 'terminals') return 0
+  // A busbar feeds through its pad, not a screw. A terminal block is the opposite case: every
+  // pole is a screw pair (feed in, load out), so a conductor can land on it the CAD way — into
+  // the clamp it names — and the face drawing gets a pocket with a screw per column.
+  if (product.category === 'busbar') return 0
+  if (product.category === 'terminals') return Math.min(moduleWidth, 4)
   if (product.category === 'relay') return Math.min(Math.max(poles, 1), 4)
   if (product.category === 'PSU') return Math.min(moduleWidth, 4)
   if (product.category === 'meter') return Math.min(moduleWidth, 6)

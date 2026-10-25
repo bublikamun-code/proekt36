@@ -22,9 +22,10 @@ describe('terminalColumns', () => {
     expect(terminalColumns(product({ category: 'MCB', moduleWidth: 3, poles: 3 }))).toBe(3)
   })
 
-  it('draws no clamps on a busbar or a terminal block', () => {
+  it('draws no clamps on a busbar; a terminal block carries one screw column per pole', () => {
     expect(terminalColumns(product({ category: 'busbar', moduleWidth: 12, poles: 1 }))).toBe(0)
-    expect(terminalColumns(product({ category: 'terminals', moduleWidth: 1, poles: 1 }))).toBe(0)
+    expect(terminalColumns(product({ category: 'terminals', moduleWidth: 1, poles: 1 }))).toBe(1)
+    expect(terminalColumns(product({ category: 'terminals', moduleWidth: 2, poles: 1 }))).toBe(2)
   })
 })
 

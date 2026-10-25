@@ -5,7 +5,7 @@ import { getEnclosureMinimum, getFootprintModules, getFreeSlots, getRowCapacity,
 import { getPanelGeometry } from '../../domain/panelGeometry'
 import { cabinetDefinitions, cabinetSpecLabel, railDefinitions } from '../../data/enclosures'
 import { phaseBalance, validateProject } from '../../domain/validation'
-import { circuitLoadMath } from '../../domain/electrical'
+import { circuitLoadMath, formatAmps } from '../../domain/electrical'
 import { CIRCUIT_KIND_LABELS, loadBookRow } from '../../domain/loadBook'
 import { suggestCable, suggestProtection } from '../../domain/sizing'
 import { deviceTerminals as deviceTerminalList, sameTerminal, terminalDisplayName, terminalMarkedName } from '../../domain/terminals'
@@ -238,7 +238,6 @@ const circuitSummaries = computed(() => new Map(currentProject.value.circuits.ma
   return [circuit.id, { math, protection, cable }]
 })))
 const summaryOf = (id: string) => circuitSummaries.value.get(id)!
-const formatAmps = (value: number): string => `${value >= 100 ? Math.round(value) : Number(value.toFixed(1))}`.replace('.', ',')
 const ampLabel = (id: string) => {
   const { math } = summaryOf(id)
   return math.basis === 'insufficient' ? '—' : `${math.basis === 'derived' ? '≈ ' : ''}${formatAmps(math.amps)} А`

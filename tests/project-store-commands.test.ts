@@ -382,19 +382,19 @@ describe('выделение и правка аппарата', () => {
 
   it('уплотняет ряд, оставляя дыру от удалённого аппарата', () => {
     const store = openStore()
-    // Row one of the demo rail is packed: a hole is cut in the middle by deleting the fourth device.
+    // Row two of the seed holds three terminal blocks; a hole is cut by deleting the middle one.
     const row = 1
-    const victim = store.currentProject.devices.find((item) => item.row === row && item.slot === 3)!
+    const victim = store.currentProject.devices.find((item) => item.row === row && item.slot === 1)!
     store.selectedDeviceId = victim.instanceId
     store.deleteSelected()
     const holed = store.currentProject.devices.filter((item) => item.row === row).map((item) => item.slot)
-    expect(holed).toEqual([0, 1, 2, 4, 5])
+    expect(holed).toEqual([0, 2])
 
     store.selectedDeviceId = store.currentProject.devices.find((item) => item.row === row)!.instanceId
     store.compactSelectedRow()
 
     const after = store.currentProject.devices.filter((item) => item.row === row).map((item) => item.slot)
-    expect(after).toEqual([0, 1, 2, 3, 4])
+    expect(after).toEqual([0, 1])
   })
 
   it('не уплотняет ничего, когда ряд не выбран', () => {

@@ -8,14 +8,20 @@
  *
  * They live in the domain rather than in a component because two different views print both words.
  */
-export const projectWord = (count: number) => {
+const pluralForm = (count: number, forms: [one: string, few: string, many: string]) => {
   const mod100 = count % 100
   const mod10 = count % 10
-  if (mod100 >= 11 && mod100 <= 14) return 'проектов'
-  if (mod10 === 1) return 'проект'
-  if (mod10 >= 2 && mod10 <= 4) return 'проекта'
-  return 'проектов'
+  if (mod100 >= 11 && mod100 <= 14) return forms[2]
+  if (mod10 === 1) return forms[0]
+  if (mod10 >= 2 && mod10 <= 4) return forms[1]
+  return forms[2]
 }
+
+export const projectWord = (count: number) => pluralForm(count, ['проект', 'проекта', 'проектов'])
+
+export const lineWord = (count: number) => pluralForm(count, ['линия', 'линии', 'линий'])
+
+export const connectionWord = (count: number) => pluralForm(count, ['соединение', 'соединения', 'соединений'])
 
 export const modelWord = (count: number) => {
   const mod100 = count % 100

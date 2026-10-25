@@ -49,7 +49,9 @@ test('an imported model appears in the settings library and a binding can be dro
   await expect(dialog).toBeHidden()
 
   await page.locator('.placed-device').first().dispatchEvent('click')
-  await pickOption(page.locator('.inspector-panel'), 'CAD-модель', 'Библиотечная модель')
+  // The seed devices now carry CHINT CAD previews whose aria-labels start the same way,
+  // so the AppSelect trigger is named exactly.
+  await pickOption(page.locator('.inspector-panel'), /^CAD-модель$/, 'Библиотечная модель')
   await expect(page.locator('.inspector-panel .model-preview')).toBeVisible()
 
   // Settings list the asset with its binding, and the binding can be removed from there.

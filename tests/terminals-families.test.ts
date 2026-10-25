@@ -14,6 +14,7 @@ import {
   hasSharedToggle,
   sameTerminal,
   terminalAnchorMm,
+  terminalColumns,
   terminalColumnCenterMm,
   terminalColumnForPole,
   terminalDisplayName,
@@ -156,9 +157,14 @@ describe('посадка нарисованного лица в корпус', (
     expect(new Set(xs).size).toBe(4)
   })
 
-  it('не рисует клемму на шине и на зажимном блоке — их подключают не к винту', () => {
+  it('не рисует клемму на шине — её подключают площадкой; клеммный блок держит винты', () => {
     expect(terminalAnchorMm(chint({ category: 'busbar', moduleWidth: 12 }), 1, 'top')).toBeNull()
-    expect(terminalAnchorMm(chint({ category: 'terminals', moduleWidth: 6 }), 1, 'top')).toBeNull()
+    // A terminal block is a row of screw pairs: a conductor lands on the clamp it names,
+    // the CAD way, and the face drawing carries a pocket with a screw per column.
+    const block = chint({ category: 'terminals', moduleWidth: 1 })
+    expect(terminalColumns(block)).toBe(1)
+    expect(terminalAnchorMm(block, 1, 'top')).not.toBeNull()
+    expect(terminalAnchorMm(block, 1, 'bottom')).not.toBeNull()
   })
 
   it('сажает винты в карманы, которые остаются внутри корпуса', () => {

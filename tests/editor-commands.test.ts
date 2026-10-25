@@ -173,6 +173,7 @@ describe('transactional editor validation', () => {
     const p1 = asDevice('protection', protection.id, 0, 0)
     const target = asDevice('target', terminal.id, 0, 2)
     store.currentProject.devices = [p1, target]
+    store.currentProject.circuits = []
     store.selectedDeviceId = target.instanceId
     store.addCircuit(target.instanceId)
     const circuit = store.currentProject.circuits[0]!
@@ -198,8 +199,9 @@ describe('connection exhaustion', () => {
     const p1 = asDevice('protection', protection.id, 0, 0)
     const target = asDevice('target', terminal.id, 0, 2)
     store.currentProject.devices = [p1, target]
-    // The demo board arrives with two wires of its own. The totals below are about this circuit,
-    // and those two would otherwise be counted as conductors the store had just invented.
+    // The seed board arrives with its own lines and conductors. The totals below are about this
+    // circuit, and those would otherwise be counted as conductors the store had just invented.
+    store.currentProject.circuits = []
     store.currentProject.connections = []
     store.selectedDeviceId = target.instanceId
     store.addCircuit(target.instanceId)

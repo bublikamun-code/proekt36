@@ -253,6 +253,36 @@ const walk = (points: WirePoint[], x: number, y: number): WirePoint[] => {
 }
 
 /**
+ * The free vertical channel between the two corridors of one row — the gap between neighbouring
+ * devices, or the strip beside the outermost one, closest to `preferXMm`. A jumper whose clamps
+ * sit on opposite sides of its own row must cross that row, and the only crossing a drawing
+ * reads as engineering is through a gap between bodies, never across a face. The lane offset
+ * keeps parallel conductors in the same gap from lying on top of each other.
+ */
+const freeVerticalChannelMm = (frame: WireFrame, devices: Map<string, PlacedDevice>, row: number, preferXMm: number, lane: number): number => {
+  const rects = [...devices.values()]
+    .filter((device) => device.row === row)
+    .map((device) => ({ left: frame.deviceLeftMm(device), right: frame.deviceLeftMm(device) + frame.deviceWidthMm(device) }))
+    .sort((left, right) => left.left - right.left)
+  const gaps: Array<[number, number]> = []
+  let cursor = 0
+  for (const rect of rects) {
+    if (rect.left - cursor >= LANE_MM * 2) gaps.push([cursor, rect.left])
+    cursor = Math.max(cursor, rect.right)
+  }
+  if (frame.plateWidthMm - cursor >= LANE_MM * 2) gaps.push([cursor, frame.plateWidthMm])
+  // A packed rail with no gap wide enough still needs a conductor; the row edge is the least
+  // busy place to draw it, better than silently dropping the wire.
+  if (!gaps.length) return clamp(preferXMm, 0, frame.plateWidthMm)
+  const margin = Math.min(0.8, LANE_MM / 3)
+  const best = gaps.reduce((chosen, gap) => {
+    const centre = (gap[0] + gap[1]) / 2
+    return Math.abs(centre - preferXMm) < Math.abs((chosen[0] + chosen[1]) / 2 - preferXMm) ? gap : chosen
+  }, gaps[0]!)
+  return clamp(preferXMm + lane * LANE_MM, best[0] + margin, best[1] - margin)
+}
+
+/**
  * What the badge on the conductor reads. A wire drawn by hand names two clamps, and that text is
  * the inspector's, not the board's: on a 12-module-wide rail a badge long enough to spell
  * «QF01:1 верх → QF03:1 верх» would cover the very devices it connects. The board shows what an
@@ -336,10 +366,16 @@ export const routeBoard = (project: PanelProject, definitions: Map<string, Devic
       if (!from) continue
       // A jumper between two clamps is drawn in the corridor of the row it leaves, then drops
       // into the second clamp. Both ends are on devices, so no incoming strip is involved.
-      const lane = (nextChannelLane(`jumper:${from.device.row}:${from.side}`) - 0.5) * LANE_MM
-      const channelX = clamp(from.x + lane, frame.railStartXMm - INCOMING_PITCH_MM * 6, frame.railStartXMm + frame.railWidthMm)
       const exitY = corridorYMm(frame, from.device.row, from.side)
       const entryY = from.side === target.side ? exitY : corridorYMm(frame, target.device.row, target.side)
+      // Clamps on opposite sides of one row make the inter-corridor run cross that row. The
+      // crossing goes through the nearest free gap between devices, so no conductor is drawn
+      // across a face — the same jumper on a real board runs in the space between bodies.
+      const crossesRow = from.side !== target.side && from.device.row === target.device.row
+      const lane = (nextChannelLane(crossesRow ? `row:${from.device.row}:cross` : `jumper:${from.device.row}:${from.side}`) - 0.5) * LANE_MM
+      const channelX = crossesRow
+        ? freeVerticalChannelMm(frame, devices, from.device.row, (from.x + target.x) / 2, lane)
+        : clamp(from.x + lane, frame.railStartXMm - INCOMING_PITCH_MM * 6, frame.railStartXMm + frame.railWidthMm)
       points = [{ x: from.x, y: from.y }]
       points = walk(points, from.x, exitY)
       points = walk(points, channelX, exitY)

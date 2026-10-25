@@ -375,3 +375,71 @@ describe('подписи разводки', () => {
     expect(wireBadge({ label: 'Розетки кухни', fromBus: 'L', phase: 1 })).toBe('Розетки кухни')
   })
 })
+
+describe('обход корпусов трассой', () => {
+  /** The row rectangles in plate pixels, to assert a run never crosses a device body. */
+  const rowRectsPx = (source: PanelProject, row: number) => {
+    const geometry = getPanelGeometry(source, definitions)
+    return source.devices
+      .filter((device) => device.row === row)
+      .map((device) => ({
+        left: geometry.railStartXMm * MM + device.slot * (geometry.railWidthMm / Math.max(1, geometry.capacity)) * MM,
+        right: (geometry.railStartXMm + (device.slot + Math.max(1, definitions.get(device.productId)!.moduleWidth ?? 1)) * (geometry.railWidthMm / Math.max(1, geometry.capacity))) * MM,
+        top: (geometry.deviceTopMm(row, device.productId) - geometry.plateTopMm) * MM,
+        bottom: (geometry.deviceTopMm(row, device.productId) - geometry.plateTopMm + geometry.deviceHeightMm(device.productId)) * MM,
+      }))
+  }
+
+  /**
+   * True when the wire has an inner vertical run inside the row's band at an x covered by a
+   * device. The first and last segments are the tails into and out of the clamps the wire
+   * names — a conductor is allowed to reach its own screw through the face pocket — so only
+   * the runs between the corridors are the routing decisions under test.
+   */
+  const crossesAFace = (points: Array<{ x: number; y: number }>, rects: Array<{ left: number; right: number; top: number; bottom: number }>) => {
+    for (let index = 1; index < points.length - 2; index += 1) {
+      const from = points[index]
+      const to = points[index + 1]
+      if (from.x !== to.x) continue
+      const yTop = Math.min(from.y, to.y)
+      const yBottom = Math.max(from.y, to.y)
+      for (const rect of rects) {
+        const overlap = Math.min(yBottom, rect.bottom) - Math.max(yTop, rect.top)
+        if (overlap > 0.5 * MM && from.x > rect.left + 0.3 * MM && from.x < rect.right - 0.3 * MM) return true
+      }
+    }
+    return false
+  }
+
+  it('ведёт перемычку через зазор между аппаратами, а не по лицевой панели', () => {
+    // QF01:2 bottom → QFI01:1 top: both clamps on row 0 with a device in between, so the
+    // inter-corridor run has to cross the row — through the gap, never across a face.
+    const source = project([
+      {
+        id: 'w', circuitId: '', fromBus: 'L', toDeviceId: 'qfi01', thickness: 2, color: '', kind: 'jumper',
+        fromTerminal: { deviceId: 'qf01', pole: 2, side: 'bottom' },
+        toTerminal: { deviceId: 'qfi01', pole: 1, side: 'top' },
+        label: '',
+      },
+    ])
+    const wire = board(source).wires[0]
+    expect(wire).toBeTruthy()
+    expect(crossesAFace(wire.points, rowRectsPx(source, 0))).toBe(false)
+  })
+
+  it('обходит и заполненный ряд: канал уходит на свободную полосу за крайним аппаратом', () => {
+    const packed = project(
+      [
+        {
+          id: 'w', circuitId: '', fromBus: 'L', toDeviceId: 'qfi01', thickness: 2, color: '', kind: 'jumper',
+          fromTerminal: { deviceId: 'qf01', pole: 2, side: 'bottom' },
+          toTerminal: { deviceId: 'qfi01', pole: 1, side: 'top' },
+          label: '',
+        },
+      ],
+      { devices: [placed('qf01', 'mcb-2p', 0), placed('qf02', 'mcb-1p', 2), placed('qf03', 'mcb-1p', 3), placed('qfi01', 'rccb-2p', 4)] },
+    )
+    const wire = board(packed).wires[0]
+    expect(crossesAFace(wire.points, rowRectsPx(packed, 0))).toBe(false)
+  })
+})

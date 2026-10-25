@@ -60,21 +60,39 @@ const seedProject = () => {
   // createProject derived from the apartment preset (NX8-24, rail-12) has to survive.
   // The old literal replacement silently degraded the seed to the 17.5 mm legacy layout.
   project.settings = { ...project.settings, inputCurrent: 40, phase: 1, reserveModules: 8 }
-  const definitions = new Map(workspaceCatalog.map((item) => [item.id, item]))
+  // The seed draws from the same pool the editor resolves products with: workspace legacy plus
+  // the generated ENMAS series. Catalogue-only lookup would hand placeProduct an undefined
+  // definition for every CHINT position and the store would not even construct.
+  const definitions = new Map<string, DeviceDefinition>([
+    ...workspaceCatalog.map((item) => [item.id, item] as const),
+    ...enmasSeriesCatalog.map((item) => [item.id, item] as const),
+  ])
+  // The seed speaks the same CHINT the demo board does: verified ENMAS positions with CAD
+  // models and passports, drawn to the manufacturer's drawings. The EKF/IEK legacy strip the
+  // seed used to carry has no drawings and no passports — exactly the material a first screen
+  // should not be made of.
   const products = [
-    definitions.get('ekf-spd-t1-3p-n-pe')!, definitions.get('ekf-mcb-4p-b32')!,
-    definitions.get('ekf-rccb-4p-40')!, definitions.get('ekf-mcb-1p-c6')!,
-    definitions.get('ekf-mcb-1p-c6')!, definitions.get('ekf-mcb-1p-b16')!,
-    definitions.get('ekf-mcb-1p-c6')!, definitions.get('ekf-terminal-1p-gray')!,
-    definitions.get('iek-terminal-1p-blue')!,
+    definitions.get('enmas-nb1-63h-2p-40a-c')!,
+    definitions.get('enmas-nb1l-2p-16a-c-30ma')!,
+    definitions.get('enmas-nb1l-2p-16a-c-30ma')!,
+    definitions.get('enmas-nb1l-2p-10a-b-30ma')!,
+    definitions.get('enmas-nb1-63h-1p-6a-c')!,
+    definitions.get('enmas-nb1-63h-1p-10a-c')!,
+    definitions.get('enmas-nu6-iig-2p-440v')!,
+    definitions.get('enmas-template-shk')!,
+    definitions.get('enmas-template-kbr')!,
+    definitions.get('enmas-template-ksv')!,
   ]
-  // Three 4-module apparatus fill a 12-slot rail exactly (slots 0/4/8); everything else
-  // starts row two. Preferred slots are the final ones — an insert into a packed middle
-  // would demand a row shift the full rail cannot grant.
+  // Row one: 2+2+2+2+1+1+2 modules — a full 12-slot rail; the terminal blocks start row two
+  // next to the N/PE bars they feed. Slots are explicit so the layout the tests describe and
+  // the one the user first sees stay the same board.
+  const layout: Array<[row: number, slot: number]> = [
+    [0, 0], [0, 2], [0, 4], [0, 6], [0, 8], [0, 9], [0, 10],
+    [1, 0], [1, 1], [1, 2],
+  ]
   let devices: PlacedDevice[] = []
   for (const [index, product] of products.entries()) {
-    const row = index < 3 ? 0 : 1
-    const slot = index < 3 ? index * 4 : index - 3
+    const [row, slot] = layout[index]!
     const result = placeProduct(devices, product, row, slot, getRowCapacity(project), uid, definitions)
     devices = result.devices
   }
@@ -85,30 +103,50 @@ const seedProject = () => {
 
 /**
  * A distribution board is not a row of devices. The phase reaches the breakers through a comb, the
- * earth through its own bar, and the main runs on to the RCCB as a drawn conductor. The demo is
+ * earth through its own bar, and the main runs on to the RCCB as a drawn conductor. The seed is
  * therefore shipped wired: an empty rail teaches nothing about what the board is for, and every
- * screenshot of the editor would show an unfinished panel.
+ * screenshot of the editor would show an unfinished panel. The wiring is also honest — every
+ * conductor belongs to a line, so the seed opens without a single validation error.
  */
 const wireDemo = (project: PanelProject, definitions: Map<string, DeviceDefinition>) => {
   const nth = (productId: string, index = 0) => project.devices.filter((item) => item.productId === productId)[index]
-  const main = nth('ekf-mcb-4p-b32')
-  const rccb = nth('ekf-rccb-4p-40')
-  const earth = nth('ekf-terminal-1p-gray')
-  project.combs = [{ id: 'demo-comb-3p', row: 1, poles: 3, fromSlot: 0, toSlot: 2, label: 'Гребёнка 3P' }]
+  const main = nth('enmas-nb1-63h-2p-40a-c')
+  const living = nth('enmas-nb1l-2p-16a-c-30ma')
+  const kitchen = nth('enmas-nb1l-2p-16a-c-30ma', 1)
+  const light = nth('enmas-nb1-63h-1p-6a-c')
+  const earth = nth('enmas-template-shk')
+  project.combs = []
+  const line = (id: string, name: string, power: number, current: number, protection?: PlacedDevice, section = 2.5) => ({
+    id, name, loadName: name, current, power, phase: 1 as const, phaseCount: 1 as const,
+    protectionDeviceId: protection?.instanceId ?? '', color: '#d65b43', wireCrossSection: section, note: '',
+  })
+  project.circuits = [
+    line('seed-circuit-living', 'Розетки гостиной', 1500, 16, living),
+    line('seed-circuit-kitchen', 'Кухня', 2200, 16, kitchen),
+    line('seed-circuit-light', 'Освещение', 720, 6, light, 1.5),
+  ]
   const wires: Connection[] = []
-  // A 4P device numbers its poles in staggered rows, so the first clamp underneath is pole 2.
-  if (main && rccb) wires.push({
-    id: 'demo-main-rccb', circuitId: '', fromBus: 'L', toDeviceId: rccb.instanceId, color: '', thickness: 2,
+  // A 2P device numbers its poles in staggered rows, so the first clamp underneath is pole 2.
+  if (main && living) wires.push({
+    id: 'seed-main-rccb', circuitId: '', fromBus: 'L', toDeviceId: living.instanceId, color: '', thickness: 2,
     kind: 'jumper', phase: 1,
     fromTerminal: { deviceId: main.instanceId, pole: 2, side: 'bottom' },
-    toTerminal: { deviceId: rccb.instanceId, pole: 1, side: 'top' },
+    toTerminal: { deviceId: living.instanceId, pole: 1, side: 'top' },
     label: '',
   })
+  const phaseFeed = (circuitId: string, device?: PlacedDevice) => {
+    if (device) wires.push({ id: `seed-l-${circuitId}`, circuitId, fromBus: 'L', toDeviceId: device.instanceId, color: '', thickness: 2, label: '' })
+  }
+  phaseFeed('seed-circuit-living', living)
+  phaseFeed('seed-circuit-kitchen', kitchen)
+  phaseFeed('seed-circuit-light', light)
+  if (living) wires.push({
+    id: 'seed-living-n', circuitId: 'seed-circuit-living', fromBus: 'N', toDeviceId: living.instanceId, color: '', thickness: 2,
+    busId: 'bus-n-bottom', toTerminal: { deviceId: living.instanceId, pole: 2, side: 'top' }, label: '',
+  })
   if (earth) wires.push({
-    id: 'demo-earth', circuitId: '', fromBus: 'PE', toDeviceId: earth.instanceId, color: '', thickness: 2,
-    kind: 'circuit', busId: 'bus-pe-bottom',
-    toTerminal: { deviceId: earth.instanceId, pole: 1, side: 'top' },
-    label: '',
+    id: 'seed-earth', circuitId: 'seed-circuit-living', fromBus: 'PE', toDeviceId: earth.instanceId, color: '', thickness: 2,
+    busId: 'bus-pe-bottom', toTerminal: { deviceId: earth.instanceId, pole: 1, side: 'top' }, label: '',
   })
   project.connections = autoNumberConnections(wires, project.devices, definitions)
 }
